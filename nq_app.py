@@ -384,12 +384,34 @@ with st.spinner("🔄 Loading multi-timeframe data..."):
         data_monthly = process_expiration(df_raw, exp_monthly, qqq_price, ratio, nq_now)
 
 # ─────────────────────────────────────────────
-# HEADER METRICS
+# HEADER METRICS ROW 1 - PRICES
 # ─────────────────────────────────────────────
 col1, col2, col3 = st.columns(3)
-col1.metric("NQ Price", f"{nq_now:.2f}", nq_source)
+col1.metric("NQ Price", f"{nq_now:.2f}", f"↑ {nq_source}")
 col2.metric("QQQ Price", f"${qqq_price:.2f}")
 col3.metric("Ratio", f"{ratio:.4f}")
+
+# ─────────────────────────────────────────────
+# HEADER METRICS ROW 2 - 0DTE METRICS
+# ─────────────────────────────────────────────
+if data_0dte:
+    st.markdown("### 0DTE Metrics")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("⚖️ Delta Neutral", f"{data_0dte['dn_nq']:.2f}")
+    col2.metric("⚡ Gamma Flip", f"{data_0dte['g_flip_nq']:.2f}")
+    delta_sentiment = "🟢 Bullish" if data_0dte['net_delta'] > 0 else "🔴 Bearish"
+    col3.metric("📊 Net Delta", f"{data_0dte['net_delta']:,.0f}", delta_sentiment)
+
+# ─────────────────────────────────────────────
+# HEADER METRICS ROW 3 - WEEKLY METRICS
+# ─────────────────────────────────────────────
+if data_weekly:
+    st.markdown("### Weekly Metrics")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("⚖️ Delta Neutral", f"{data_weekly['dn_nq']:.2f}")
+    col2.metric("⚡ Gamma Flip", f"{data_weekly['g_flip_nq']:.2f}")
+    delta_sentiment = "🟢 Bullish" if data_weekly['net_delta'] > 0 else "🔴 Bearish"
+    col3.metric("📊 Net Delta", f"{data_weekly['net_delta']:,.0f}", delta_sentiment)
 
 st.markdown("---")
 
