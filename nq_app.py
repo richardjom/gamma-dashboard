@@ -5,9 +5,7 @@ import pandas as pd
 import numpy as np
 from scipy.stats import norm
 from datetime import datetime, timedelta
-from tastytrade import Session
-from tastytrade.instruments import Option
-from tastytrade.streamer import DXLinkStreamer
+import requests
 
 st.set_page_config(page_title="NQ Precision Map", layout="wide")
 
@@ -19,96 +17,107 @@ TASTY_USERNAME = st.secrets.get("TASTY_USERNAME", "")
 TASTY_PASSWORD = st.secrets.get("TASTY_PASSWORD", "")
 FINNHUB_KEY = st.secrets.get("FINNHUB_KEY", "csie7q9r01qt46e7sjm0csie7q9r01qt46e7sjmg")
 
+# ─────────────────────────────────────────────
+# TASTYTRADE REST API FUNCTIONS
+# ─────────────────────────────────────────────
+
 @st.cache_resource(ttl=3600)
-def get_tasty_session(username, password):
-    """Create and cache Tastytrade session (refreshes every hour)"""
+def get_tasty_token(username, password):
+    """Login and get session token - cached for 1 hour"""
     try:
-        session = Session(username, password)
-        return session
+        url = "https://api.tastytrade.com/sessions"
+        payload = {
+            "login": username,
+            "password": password
+        }
+        headers = {"Content-Type": "application/json"}
+        response = requests.post(url, json=payload, headers=headers)
+        
+        if response.status_code == 201:
+            token = response.json()['data']['session-token']
+            st.sidebar.success("✅ Tastytrade Connected (Real-Time)")
+            return token
+        else:
+            st.sidebar.warning(f"⚠️ Tastytrade login failed: {response.status_code}")
+            return None
     except Exception as e:
-        st.error(f"❌ Tastytrade login failed: {e}")
+        st.sidebar.warning(f"⚠️ Tastytrade error: {e}")
         return None
 
 @st.cache_data(ttl=60)
-def get_realtime_options(_session, expiration_date):
-    """Fetch real-time options chain from Tastytrade"""
+def get_tasty_options(token, expiration_date):
+    """Fetch real-time options chain from Tastytrade REST API"""
     try:
-        # Get all QQQ options for the expiration
-        options = Option.get_options(
-            _session,
-            "QQQ",
-            expiration_date=expiration_date
-        )
+        # Step 1: Get option chain
+        url = "https://api.tastytrade.com/option-chains/QQQ/nested"
+        headers = {
+            "Authorization": token,
+            "Content-Type": "application/json"
+        }
+        response = requests.get(url, headers=headers)
         
-        if not options:
+        if response.status_code != 200:
+            st.warning(f"⚠️ Failed to fetch option chain: {response.status_code}")
             return None
         
-        # Get option symbols for streaming
-        option_symbols = [opt.streamer_symbol for opt in options]
+        data = response.json()['data']['items']
         
-        # Fetch quotes for all options
-        import asyncio
+        # Step 2: Find our expiration
+        target_exp = None
+        for exp in data:
+            if exp['expiration-date'] == expiration_date:
+                target_exp = exp
+                break
         
-        async def fetch_quotes():
-            quotes = {}
-            async with DXLinkStreamer(_session) as streamer:
-                await streamer.subscribe(EventType.QUOTE, option_symbols)
-                await streamer.subscribe(EventType.GREEKS, option_symbols)
-                
-                quote_data = {}
-                greek_data = {}
-                
-                # Collect data for all symbols
-                timeout = datetime.now() + timedelta(seconds=15)
-                while datetime.now() < timeout:
-                    try:
-                        event = await asyncio.wait_for(streamer.get_event(EventType.QUOTE), timeout=2.0)
-                        quote_data[event.event_symbol] = event
-                    except asyncio.TimeoutError:
-                        pass
-                    
-                    try:
-                        event = await asyncio.wait_for(streamer.get_event(EventType.GREEKS), timeout=2.0)
-                        greek_data[event.event_symbol] = event
-                    except asyncio.TimeoutError:
-                        break
-                
-                return quote_data, greek_data
+        if not target_exp:
+            st.warning(f"⚠️ Expiration {expiration_date} not found in Tastytrade")
+            return None
         
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        quote_data, greek_data = loop.run_until_complete(fetch_quotes())
-        loop.close()
-        
-        # Build DataFrame
+        # Step 3: Extract strikes
         rows = []
-        for opt in options:
-            sym = opt.streamer_symbol
-            quote = quote_data.get(sym)
-            greek = greek_data.get(sym)
+        for strike in target_exp['strikes']:
+            strike_price = float(strike['strike-price'])
             
-            if not quote:
-                continue
+            # Get call and put symbols
+            call_symbol = strike.get('call')
+            put_symbol = strike.get('put')
             
-            bid = quote.bid_price if quote.bid_price else 0
-            ask = quote.ask_price if quote.ask_price else 0
-            iv = greek.volatility if greek and greek.volatility else 0
-            gamma = greek.gamma if greek and greek.gamma else 0
-            
-            rows.append({
-                'strike': float(opt.strike_price),
-                'type': 'call' if opt.option_type.value == 'C' else 'put',
-                'bid': bid,
-                'ask': ask,
-                'lastPrice': (bid + ask) / 2 if bid and ask else 0,
-                'impliedVolatility': iv,
-                'gamma': gamma,
-                'openInterest': opt.shares_per_contract or 0,
-                'volume': 0  # Volume not available via streaming
-            })
+            for option_type, symbol in [('call', call_symbol), ('put', put_symbol)]:
+                if not symbol:
+                    continue
+                    
+                # Step 4: Get market data for each option
+                quote_url = f"https://api.tastytrade.com/market-data/options/{symbol}"
+                quote_response = requests.get(quote_url, headers=headers)
+                
+                if quote_response.status_code != 200:
+                    continue
+                    
+                quote_data = quote_response.json().get('data', {})
+                
+                bid = float(quote_data.get('bid', 0) or 0)
+                ask = float(quote_data.get('ask', 0) or 0)
+                iv = float(quote_data.get('implied-volatility', 0) or 0)
+                oi = int(quote_data.get('open-interest', 0) or 0)
+                volume = int(quote_data.get('volume', 0) or 0)
+                gamma = float(quote_data.get('gamma', 0) or 0)
+                
+                rows.append({
+                    'strike': strike_price,
+                    'type': option_type,
+                    'bid': bid,
+                    'ask': ask,
+                    'lastPrice': (bid + ask) / 2 if bid and ask else 0,
+                    'impliedVolatility': iv,
+                    'gamma': gamma,
+                    'openInterest': oi,
+                    'volume': volume
+                })
         
-        df = pd.DataFrame(rows)
-        return df
+        if not rows:
+            return None
+            
+        return pd.DataFrame(rows)
     
     except Exception as e:
         st.warning(f"⚠️ Tastytrade options fetch failed: {e}")
@@ -124,49 +133,57 @@ def get_qqq_options_fallback(expiration_date):
             opts.calls.assign(type='call'),
             opts.puts.assign(type='put')
         ], ignore_index=True)
-        return df, "yfinance (15min delay)"
+        return df
     except Exception as e:
-        return None, str(e)
+        st.error(f"yfinance fallback failed: {e}")
+        return None
 
 def get_expiration():
     """Get nearest expiration date"""
-    qqq = yf.Ticker("QQQ")
-    today = datetime.now().strftime('%Y-%m-%d')
-    available = qqq.options
-    
-    if today in available:
-        return today, "0DTE (Today)"
-    
-    today_dt = datetime.now()
-    future = [(exp, datetime.strptime(exp, '%Y-%m-%d')) 
-               for exp in available 
-               if datetime.strptime(exp, '%Y-%m-%d') >= today_dt]
-    
-    if future:
-        future.sort(key=lambda x: x[1])
-        exp = future[0][0]
-        days = (future[0][1] - today_dt).days
-        return exp, f"{days}DTE ({exp})"
-    
-    return None, None
+    try:
+        qqq = yf.Ticker("QQQ")
+        today = datetime.now().strftime('%Y-%m-%d')
+        available = qqq.options
+
+        if today in available:
+            return today, "0DTE (Today)"
+
+        today_dt = datetime.now()
+        future = [
+            (exp, datetime.strptime(exp, '%Y-%m-%d'))
+            for exp in available
+            if datetime.strptime(exp, '%Y-%m-%d') >= today_dt
+        ]
+
+        if future:
+            future.sort(key=lambda x: x[1])
+            exp = future[0][0]
+            days = (future[0][1] - today_dt).days
+            return exp, f"{days}DTE ({exp})"
+
+        return None, None
+    except Exception as e:
+        st.error(f"Failed to get expiration: {e}")
+        return None, None
+
+# ─────────────────────────────────────────────
+# MAIN APP
+# ─────────────────────────────────────────────
 
 with st.spinner("🔄 Loading data..."):
 
     # 1. Tastytrade Session
-    session = None
+    token = None
     data_source = "yfinance (15min delay)"
-    
-    if TASTY_USERNAME and TASTY_PASSWORD:
-        session = get_tasty_session(TASTY_USERNAME, TASTY_PASSWORD)
-        if session:
-            st.sidebar.success("✅ Tastytrade Connected")
-            data_source = "Tastytrade (Real-Time)"
-        else:
-            st.sidebar.warning("⚠️ Tastytrade failed, using yfinance")
-    else:
-        st.sidebar.warning("⚠️ No Tastytrade credentials, using yfinance")
 
-    # 2. Price Anchor (Finnhub)
+    if TASTY_USERNAME and TASTY_PASSWORD:
+        token = get_tasty_token(TASTY_USERNAME, TASTY_PASSWORD)
+        if token:
+            data_source = "Tastytrade (Real-Time)"
+    else:
+        st.sidebar.warning("⚠️ No Tastytrade credentials found in secrets")
+
+    # 2. QQQ Price (Finnhub)
     client = finnhub.Client(api_key=FINNHUB_KEY)
     try:
         quote = client.quote("QQQ")
@@ -182,10 +199,7 @@ with st.spinner("🔄 Loading data..."):
     try:
         nq_ticker = yf.Ticker("NQ=F")
         nq_data = nq_ticker.history(period="1d")
-        if not nq_data.empty:
-            nq_now = nq_data['Close'].iloc[-1]
-        else:
-            nq_now = 24780
+        nq_now = nq_data['Close'].iloc[-1] if not nq_data.empty else 24780
     except:
         nq_now = 24780
 
@@ -203,28 +217,31 @@ with st.spinner("🔄 Loading data..."):
     if not target_expiration:
         st.error("No valid expirations available")
         st.stop()
-    
+
     st.info(f"📅 Using Expiration: **{expiration_label}**")
 
     # 5. Fetch Options Data
     df = None
-    
-    if session:
-        df = get_realtime_options(session, target_expiration)
-        if df is not None:
-            st.sidebar.success("✅ Real-time options loaded")
-    
-    # Fallback to yfinance if needed
+
+    if token:
+        with st.spinner("Fetching real-time options from Tastytrade..."):
+            df = get_tasty_options(token, target_expiration)
+            if df is not None:
+                st.sidebar.success(f"✅ {len(df)} options loaded (real-time)")
+            else:
+                st.warning("⚠️ Tastytrade options failed, falling back to yfinance")
+
     if df is None:
-        st.warning("⚠️ Falling back to yfinance (15min delay)")
-        df, error = get_qqq_options_fallback(target_expiration)
-        if df is None:
-            st.error(f"Failed to fetch options: {error}")
-            st.stop()
+        with st.spinner("Fetching options from yfinance..."):
+            df = get_qqq_options_fallback(target_expiration)
+            data_source = "yfinance (15min delay)"
+            if df is None:
+                st.error("Failed to fetch options data from all sources")
+                st.stop()
 
     # 6. Data Cleaning
-    df = df[df['volume'].notna() | (df['openInterest'] > 0)].copy()
     df = df[df['impliedVolatility'].notna() & (df['impliedVolatility'] > 0)].copy()
+    df = df[df['openInterest'].notna() & (df['openInterest'] > 0)].copy()
     df = df[(df['strike'] > qqq_price * 0.98) & (df['strike'] < qqq_price * 1.02)].copy()
 
     if len(df) == 0:
@@ -261,9 +278,14 @@ with st.spinner("🔄 Loading data..."):
 
     # Use Tastytrade gamma if available, otherwise calculate
     if 'gamma' not in df.columns or df['gamma'].sum() == 0:
-        df['gamma'] = df.apply(lambda x: calc_gamma(qqq_price, x['strike'], x['impliedVolatility']), axis=1)
-    
-    df['GEX'] = df.apply(lambda x: x['openInterest'] * x['gamma'] * (qqq_price**2) * 0.01 * (1 if x['type'] == 'call' else -1), axis=1)
+        df['gamma'] = df.apply(
+            lambda x: calc_gamma(qqq_price, x['strike'], x['impliedVolatility']), axis=1
+        )
+
+    df['GEX'] = df.apply(
+        lambda x: x['openInterest'] * x['gamma'] * (qqq_price**2) * 0.01 * (1 if x['type'] == 'call' else -1),
+        axis=1
+    )
 
     # 9. Extract Levels
     calls = df[df['type'] == 'call'].sort_values('GEX', ascending=False)
@@ -325,17 +347,17 @@ with st.spinner("🔄 Loading data..."):
 
     # 10. Results
     results = [
-        ("Target Res",    (p_wall_strike * ratio) + 35, 3.0, "🎯"),
-        ("Primary Wall",   p_wall_strike * ratio,       5.0, "🔴"),
-        ("Primary Floor",  p_floor_strike * ratio,      5.0, "🟢"),
-        ("Target Supp",   (p_floor_strike * ratio) - 35, 3.0, "🎯"),
-        ("Secondary Wall", s_wall_strike * ratio,       3.0, "🟠"),
-        ("Secondary Flr",  s_floor_strike * ratio,      3.0, "🟡"),
-        ("Gamma Flip",     g_flip_strike * ratio,       10.0, "⚡"),
-        ("Upper 0.50 Dev", nq_now + nq_em_050,          5.0, "📊"),
-        ("Upper 0.25 Dev", nq_now + nq_em_025,          3.0, "📊"),
-        ("Lower 0.25 Dev", nq_now - nq_em_025,          3.0, "📊"),
-        ("Lower 0.50 Dev", nq_now - nq_em_050,          5.0, "📊")
+        ("Target Res",    (p_wall_strike * ratio) + 35,  3.0,  "🎯"),
+        ("Primary Wall",   p_wall_strike * ratio,         5.0,  "🔴"),
+        ("Primary Floor",  p_floor_strike * ratio,        5.0,  "🟢"),
+        ("Target Supp",   (p_floor_strike * ratio) - 35,  3.0,  "🎯"),
+        ("Secondary Wall", s_wall_strike * ratio,         3.0,  "🟠"),
+        ("Secondary Flr",  s_floor_strike * ratio,        3.0,  "🟡"),
+        ("Gamma Flip",     g_flip_strike * ratio,         10.0, "⚡"),
+        ("Upper 0.50 Dev", nq_now + nq_em_050,            5.0,  "📊"),
+        ("Upper 0.25 Dev", nq_now + nq_em_025,            3.0,  "📊"),
+        ("Lower 0.25 Dev", nq_now - nq_em_025,            3.0,  "📊"),
+        ("Lower 0.50 Dev", nq_now - nq_em_050,            5.0,  "📊")
     ]
 
     st.subheader("🎯 NQ Precision Levels")
@@ -357,7 +379,34 @@ with st.spinner("🔄 Loading data..."):
     col2.metric("NQ Expected Move", f"{nq_em_full:.2f} pts")
     col3.metric("Data Source", data_source)
 
+    # Last updated timestamp
+    st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
 # Refresh button
 if st.button("🔄 Refresh Data"):
     st.cache_data.clear()
     st.rerun()
+```
+
+## What Changed:
+
+### ✅ **No More tastytrade Library**
+Uses plain `requests` to call the Tastytrade REST API directly - no version compatibility issues!
+
+### ✅ **How It Works Now:**
+1. Logs into Tastytrade → gets session token
+2. Fetches option chain via REST API
+3. Gets real-time bid/ask, IV, OI, gamma per strike
+4. Falls back to yfinance if anything fails
+
+### ✅ **Update `requirements.txt`:**
+Remove `tastytrade` and make sure you have:
+```
+streamlit
+finnhub-python
+yfinance
+pandas
+numpy
+scipy
+requests
+python-dateutil
