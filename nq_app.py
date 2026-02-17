@@ -262,26 +262,33 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
         axis=1
     )
     
-    # Levels
+    # Levels - FIXED LOGIC
     calls = df[df['type'] == 'call'].sort_values('GEX', ascending=False)
-    puts = df[df['type'] == 'put'].sort_values('GEX')
+    puts = df[df['type'] == 'put'].sort_values('GEX', ascending=True)  # Most negative first
     
     p_wall_strike = calls.iloc[0]['strike'] if len(calls) > 0 else qqq_price
     p_floor_strike = puts.iloc[0]['strike'] if len(puts) > 0 else qqq_price
     
+    # Conflict resolution
     if p_floor_strike == p_wall_strike and len(puts) > 1:
         p_floor_strike = puts.iloc[1]['strike']
     
-    s_wall_strike = p_wall_strike + 2
+    # Secondary Wall - must be ABOVE primary wall
+    s_wall_strike = p_wall_strike  # Fallback
     for i in range(1, len(calls)):
-        if calls.iloc[i]['strike'] != p_wall_strike:
-            s_wall_strike = calls.iloc[i]['strike']
+        candidate = calls.iloc[i]['strike']
+        if candidate > p_wall_strike:
+            s_wall_strike = candidate
             break
     
-    s_floor_strike = p_floor_strike - 2
+    # Secondary Floor - must be BELOW primary floor
+    s_floor_strike = p_floor_strike  # Fallback
     for i in range(1, len(puts)):
         candidate = puts.iloc[i]['strike']
-        if candidate != p_floor_strike and candidate != p_wall_strike and candidate != s_wall_strike:
+        # Must be lower than primary floor AND not conflict with other levels
+        if (candidate < p_floor_strike and 
+            candidate != p_wall_strike and 
+            candidate != s_wall_strike):
             s_floor_strike = candidate
             break
     
@@ -302,6 +309,24 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
         ("Lower 0.25σ", nq_now - nq_em_025, 3.0, "📊"),
         ("Lower 0.50σ", nq_now - nq_em_050, 5.0, "📊")
     ]
+    
+    return {
+        'df': df,
+        'dn_strike': dn_strike,
+        'dn_nq': dn_nq,
+        'g_flip_strike': g_flip_strike,
+        'g_flip_nq': g_flip_strike * ratio,
+        'net_delta': net_delta,
+        'p_wall': p_wall_strike * ratio,
+        'p_floor': p_floor_strike * ratio,
+        'calls': calls,
+        'puts': puts,
+        'strike_delta': strike_delta,
+        'results': results,
+        'straddle': straddle,
+        'nq_em_full': nq_em_full,
+        'atm_strike': atm_strike
+    }
     
     return {
         'df': df,
