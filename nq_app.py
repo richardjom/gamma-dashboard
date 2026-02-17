@@ -13,6 +13,15 @@ st.markdown("Real-time GEX analysis for NQ futures using QQQ options via CBOE")
 
 FINNHUB_KEY = "csie7q9r01qt46e7sjm0csie7q9r01qt46e7sjmg"
 
+# ─────────────────────────────────────────────
+# SIDEBAR SETTINGS
+# ─────────────────────────────────────────────
+st.sidebar.header("⚙️ Settings")
+manual_override = st.sidebar.checkbox("✏️ Manual NQ Price Override")
+
+# ─────────────────────────────────────────────
+# DATA FUNCTIONS
+# ─────────────────────────────────────────────
 @st.cache_data(ttl=60)
 def get_cboe_options(ticker="QQQ"):
     try:
@@ -46,42 +55,55 @@ def get_cboe_options(ticker="QQQ"):
         return None, None
 
 @st.cache_data(ttl=10)
-def get_nq_price(finnhub_key):
-    """Try Finnhub first, fall back to yfinance"""
-    
-    # Method 1: Finnhub - try multiple NQ symbols
-    client = finnhub.Client(api_key=finnhub_key)
-    nq_symbols = ["NQ=F", "NQ1!", "/NQ", "NQH26"]
-    
-    for symbol in nq_symbols:
-        try:
-            quote = client.quote(symbol)
-            price = quote.get('c', 0)
-            if price and price > 10000:  # NQ should be > 10000
-                return price, f"Finnhub ({symbol})"
-        except:
-            continue
-    
-    # Method 2: yfinance fallback
+def get_nq_price_auto(finnhub_key):
+    """Try multiple sources for NQ price"""
+
+    # Source 1: Yahoo Finance direct API
     try:
-        nq = yf.Ticker("NQ=F")
-        data = nq.history(period="1d")
-        if not data.empty:
-            return float(data['Close'].iloc[-1]), "yfinance (delayed)"
+        url = "https://query1.finance.yahoo.com/v8/finance/chart/NQ=F"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(url, headers=headers, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            price = data['chart']['result'][0]['meta']['regularMarketPrice']
+            if price and price > 10000:
+                return float(price), "Yahoo Finance"
     except:
         pass
-    
+
+    # Source 2: yfinance 1min interval
+    try:
+        nq = yf.Ticker("NQ=F")
+        data = nq.history(period="1d", interval="1m")
+        if not data.empty:
+            return float(data['Close'].iloc[-1]), "yfinance (1min)"
+    except:
+        pass
+
+    # Source 3: Finnhub fallback
+    try:
+        client = finnhub.Client(api_key=finnhub_key)
+        for symbol in ["NQ=F", "NQ1!", "/NQ", "NQH26"]:
+            try:
+                quote = client.quote(symbol)
+                price = quote.get('c', 0)
+                if price and price > 10000:
+                    return float(price), f"Finnhub ({symbol})"
+            except:
+                continue
+    except:
+        pass
+
     return None, "unavailable"
 
 @st.cache_data(ttl=10)
 def get_qqq_price(finnhub_key):
-    """Get real-time QQQ price via Finnhub"""
     try:
         client = finnhub.Client(api_key=finnhub_key)
         quote = client.quote("QQQ")
         price = quote.get('c', 0)
         if price > 0:
-            return price
+            return float(price)
     except:
         pass
     return None
@@ -96,6 +118,9 @@ def get_nearest_expiration(df):
             return exp, label
     return None, None
 
+# ─────────────────────────────────────────────
+# MAIN APP
+# ─────────────────────────────────────────────
 with st.spinner("🔄 Loading data..."):
 
     # 1. QQQ Price (Finnhub - real-time)
@@ -104,11 +129,31 @@ with st.spinner("🔄 Loading data..."):
         st.error("Could not fetch QQQ price")
         st.stop()
 
-    # 2. NQ Futures Price
-    nq_now, nq_source = get_nq_price(FINNHUB_KEY)
-    if not nq_now:
-        st.warning("NQ price fetch failed, using fallback")
-        nq_now = 0
+    # 2. NQ Price - Auto or Manual
+    if manual_override:
+        nq_now = st.sidebar.number_input(
+            "Enter NQ Price",
+            min_value=10000.0,
+            max_value=50000.0,
+            value=24760.0,
+            step=0.25,
+            format="%.2f"
+        )
+        nq_source = "Manual Input ✏️"
+        st.sidebar.success(f"Using: {nq_now:.2f}")
+    else:
+        nq_now, nq_source = get_nq_price_auto(FINNHUB_KEY)
+        if not nq_now:
+            st.sidebar.warning("⚠️ Auto-fetch failed")
+            nq_now = st.sidebar.number_input(
+                "Auto-fetch failed. Enter NQ Price:",
+                min_value=10000.0,
+                max_value=50000.0,
+                value=24760.0,
+                step=0.25,
+                format="%.2f"
+            )
+            nq_source = "Manual Fallback ⚠️"
 
     ratio = nq_now / qqq_price if qqq_price > 0 else 0
 
@@ -118,7 +163,7 @@ with st.spinner("🔄 Loading data..."):
     col2.metric("QQQ Price", f"${qqq_price:.2f}")
     col3.metric("Ratio", f"{ratio:.4f}")
     col4.metric("NQ Source", nq_source)
-    col5.metric("Options Source", "CBOE")
+    col5.metric("Options", "CBOE")
 
     # 4. CBOE Options Data
     df_raw, cboe_price = get_cboe_options("QQQ")
@@ -149,7 +194,7 @@ with st.spinner("🔄 Loading data..."):
         st.error("No valid options data after filtering")
         st.stop()
 
-    st.sidebar.success(f"✅ {len(df)} options loaded from CBOE")
+    st.sidebar.success(f"✅ {len(df)} options loaded")
 
     # 8. Expected Move
     atm_strike = df.iloc[(df['strike'] - qqq_price).abs().argsort()[:1]]['strike'].values[0]
