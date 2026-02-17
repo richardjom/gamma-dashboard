@@ -396,15 +396,15 @@ col3.metric("Ratio", f"{ratio:.4f}")
 if data_0dte and data_weekly:
     col1, col2, col3, col4, col5, col6 = st.columns(6)
     # 0DTE
-    col1.metric("⚖️ DN (0DTE)", f"{data_0dte['dn_nq']:.2f}")
-    col2.metric("⚡ GF (0DTE)", f"{data_0dte['g_flip_nq']:.2f}")
-    delta_0 = "🟢 Bull" if data_0dte['net_delta'] > 0 else "🔴 Bear"
-    col3.metric("📊 Δ (0DTE)", f"{data_0dte['net_delta']:,.0f}", delta_0)
+    col1.metric("⚖️ Delta Neutral (0DTE)", f"{data_0dte['dn_nq']:.2f}")
+    col2.metric("⚡ Gamma Flip (0DTE)", f"{data_0dte['g_flip_nq']:.2f}")
+    delta_0 = "🟢 Bullish" if data_0dte['net_delta'] > 0 else "🔴 Bearish"
+    col3.metric("📊 Net Delta (0DTE)", f"{data_0dte['net_delta']:,.0f}", delta_0)
     # Weekly
-    col4.metric("⚖️ DN (Wkly)", f"{data_weekly['dn_nq']:.2f}")
-    col5.metric("⚡ GF (Wkly)", f"{data_weekly['g_flip_nq']:.2f}")
-    delta_w = "🟢 Bull" if data_weekly['net_delta'] > 0 else "🔴 Bear"
-    col6.metric("📊 Δ (Wkly)", f"{data_weekly['net_delta']:,.0f}", delta_w)
+    col4.metric("⚖️ Delta Neutral (Weekly)", f"{data_weekly['dn_nq']:.2f}")
+    col5.metric("⚡ Gamma Flip (Weekly)", f"{data_weekly['g_flip_nq']:.2f}")
+    delta_w = "🟢 Bullish" if data_weekly['net_delta'] > 0 else "🔴 Bearish"
+    col6.metric("📊 Net Delta (Weekly)", f"{data_weekly['net_delta']:,.0f}", delta_w)
 
 elif data_0dte:
     col1, col2, col3 = st.columns(3)
