@@ -187,13 +187,6 @@ def calculate_delta_neutral(df, qqq_price):
     
     return dn_strike, strike_delta, df_calc
 
-# Then update the function call:
-# Change line 261 from:
-dn_strike, strike_delta = calculate_delta_neutral(df, qqq_price)
-
-# To:
-dn_strike, strike_delta, df = calculate_delta_neutral(df, qqq_price)
-
 # ─────────────────────────────────────────────
 # MAIN APP
 # ─────────────────────────────────────────────
