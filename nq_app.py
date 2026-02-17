@@ -7,7 +7,6 @@ import re
 import finnhub
 import yfinance as yf
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
 # ─────────────────────────────────────────────
 # PAGE CONFIG & DARK THEME
@@ -66,7 +65,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("📊 NQ Precision Map")
-st.markdown("**Real-time GEX & Delta Analysis** • Powered by CBOE Data")
+st.markdown("**Multi-Timeframe GEX & Delta Analysis** • Powered by CBOE Data")
 
 FINNHUB_KEY = "csie7q9r01qt46e7sjm0csie7q9r01qt46e7sjmg"
 
@@ -145,41 +144,66 @@ def get_qqq_price(finnhub_key):
         pass
     return None
 
-def get_nearest_expiration(df):
+def get_expirations_by_type(df):
+    """Get nearest 0DTE, Weekly, and Monthly expirations"""
     today = datetime.now().date()
     expirations = sorted(df['expiration'].dropna().unique())
+    
+    dte_0 = None
+    weekly = None
+    monthly = None
+    
     for exp in expirations:
-        if exp.date() >= today:
-            days = (exp.date() - today).days
-            label = "0DTE" if days == 0 else f"{days}DTE"
-            return exp, label
-    return None, None
+        exp_date = exp.date() if isinstance(exp, datetime) else exp
+        if exp_date < today:
+            continue
+        
+        days = (exp_date - today).days
+        
+        # 0DTE
+        if days == 0 and dte_0 is None:
+            dte_0 = exp
+        
+        # Weekly (next Friday, typically 1-7 days out)
+        if 1 <= days <= 7 and weekly is None and exp_date.weekday() == 4:  # Friday
+            weekly = exp
+        
+        # Monthly (next monthly expiration, typically 14+ days)
+        if days >= 14 and monthly is None:
+            monthly = exp
+    
+    # Fallback: if no weekly, use next available after 0DTE
+    if weekly is None and len(expirations) > 1:
+        for exp in expirations:
+            exp_date = exp.date() if isinstance(exp, datetime) else exp
+            if exp_date > today and exp != dte_0:
+                weekly = exp
+                break
+    
+    # Fallback: if no monthly, use furthest available
+    if monthly is None and len(expirations) > 0:
+        monthly = expirations[-1]
+    
+    return dte_0, weekly, monthly
 
 def calculate_delta_neutral(df, qqq_price):
     """Calculate Delta Neutral Level"""
-    
-    # Create a copy to avoid modifying original df
     df_calc = df.copy()
     
-    # Call delta exposure (dealers short calls = long delta)
     calls = df_calc[df_calc['type'] == 'call'].copy()
     calls['delta_notional'] = calls['open_interest'] * calls['delta'] * 100 * qqq_price
     
-    # Put delta exposure (dealers long puts = short delta)
     puts = df_calc[df_calc['type'] == 'put'].copy()
     puts['delta_notional'] = puts['open_interest'] * puts['delta'] * 100 * qqq_price * -1
     
-    # Combine
     all_delta = pd.concat([calls, puts])
     strike_delta = all_delta.groupby('strike')['delta_notional'].sum().reset_index()
     strike_delta = strike_delta.sort_values('strike')
     strike_delta['cumulative_delta'] = strike_delta['delta_notional'].cumsum()
     
-    # Find minimum absolute cumulative delta
     min_idx = strike_delta['cumulative_delta'].abs().idxmin()
     dn_strike = strike_delta.loc[min_idx, 'strike']
     
-    # Also calculate total delta exposure for the original df
     df_calc['delta_exposure'] = df_calc.apply(
         lambda x: x['open_interest'] * x['delta'] * 100 * (1 if x['type'] == 'call' else -1),
         axis=1
@@ -187,10 +211,60 @@ def calculate_delta_neutral(df, qqq_price):
     
     return dn_strike, strike_delta, df_calc
 
+def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
+    """Process single expiration and return key metrics"""
+    df = df_raw[df_raw['expiration'] == target_exp].copy()
+    df = df[df['open_interest'] > 0].copy()
+    df = df[df['iv'] > 0].copy()
+    
+    if len(df) == 0:
+        return None
+    
+    # Calculate DN
+    dn_strike, strike_delta, df = calculate_delta_neutral(df, qqq_price)
+    dn_nq = dn_strike * ratio
+    
+    # Calculate GEX
+    df['GEX'] = df.apply(
+        lambda x: x['open_interest'] * x['gamma'] * (qqq_price ** 2) * 0.01 *
+        (1 if x['type'] == 'call' else -1),
+        axis=1
+    )
+    
+    # Gamma Flip
+    g_flip_strike = df.groupby('strike')['GEX'].sum().abs().idxmin()
+    g_flip_nq = g_flip_strike * ratio
+    
+    # Net Delta
+    total_call_delta = df[df['type'] == 'call']['delta_exposure'].sum()
+    total_put_delta = df[df['type'] == 'put']['delta_exposure'].sum()
+    net_delta = total_call_delta + total_put_delta
+    
+    # Primary levels
+    calls = df[df['type'] == 'call'].sort_values('GEX', ascending=False)
+    puts = df[df['type'] == 'put'].sort_values('GEX')
+    
+    p_wall = calls.iloc[0]['strike'] * ratio if len(calls) > 0 else nq_now
+    p_floor = puts.iloc[0]['strike'] * ratio if len(puts) > 0 else nq_now
+    
+    return {
+        'df': df,
+        'dn_strike': dn_strike,
+        'dn_nq': dn_nq,
+        'g_flip_strike': g_flip_strike,
+        'g_flip_nq': g_flip_nq,
+        'net_delta': net_delta,
+        'p_wall': p_wall,
+        'p_floor': p_floor,
+        'calls': calls,
+        'puts': puts,
+        'strike_delta': strike_delta
+    }
+
 # ─────────────────────────────────────────────
 # MAIN APP
 # ─────────────────────────────────────────────
-with st.spinner("🔄 Loading data..."):
+with st.spinner("🔄 Loading multi-timeframe data..."):
 
     # Get prices
     qqq_price = get_qqq_price(FINNHUB_KEY)
@@ -232,251 +306,179 @@ with st.spinner("🔄 Loading data..."):
     if qqq_price == 0:
         qqq_price = cboe_price
 
-    target_exp, exp_label = get_nearest_expiration(df_raw)
-    if target_exp is None:
-        st.error("No valid expirations")
-        st.stop()
-
-    df = df_raw[df_raw['expiration'] == target_exp].copy()
-    df = df[df['open_interest'] > 0].copy()
-    df = df[df['iv'] > 0].copy()
-    df = df[(df['strike'] > qqq_price * 0.98) & (df['strike'] < qqq_price * 1.02)].copy()
-
-    if len(df) == 0:
-        st.error("No valid options data")
-        st.stop()
-
-    # Calculate metrics
-    dn_strike, strike_delta, df = calculate_delta_neutral(df, qqq_price)
-    dn_nq = dn_strike * ratio
-
-    total_call_delta = df[df['type'] == 'call']['delta_exposure'].sum()
-    total_put_delta = df[df['type'] == 'put']['delta_exposure'].sum()
-    net_delta = total_call_delta + total_put_delta
-
-    atm_strike = df.iloc[(df['strike'] - qqq_price).abs().argsort()[:1]]['strike'].values[0]
-    atm_opts = df[df['strike'] == atm_strike]
-    atm_call = atm_opts[atm_opts['type'] == 'call']
-    atm_put = atm_opts[atm_opts['type'] == 'put']
-
-    if len(atm_call) > 0 and len(atm_put) > 0:
-        call_mid = (atm_call.iloc[0]['bid'] + atm_call.iloc[0]['ask']) / 2
-        put_mid = (atm_put.iloc[0]['bid'] + atm_put.iloc[0]['ask']) / 2
-        straddle = call_mid + put_mid
-    else:
-        straddle = qqq_price * 0.012
-
-    nq_em_full = (straddle * 1.25 if straddle > 0 else qqq_price * 0.012) * ratio
-    nq_em_050 = nq_em_full * 0.50
-    nq_em_025 = nq_em_full * 0.25
-
-    df['GEX'] = df.apply(
-        lambda x: x['open_interest'] * x['gamma'] * (qqq_price ** 2) * 0.01 *
-        (1 if x['type'] == 'call' else -1),
-        axis=1
-    )
-
-    calls = df[df['type'] == 'call'].sort_values('GEX', ascending=False)
-    puts = df[df['type'] == 'put'].sort_values('GEX')
-
-    if len(calls) == 0 or len(puts) == 0:
-        st.error("Insufficient data")
-        st.stop()
-
-    p_wall_strike = calls.iloc[0]['strike']
-    p_floor_strike = puts.iloc[0]['strike']
-
-    if p_floor_strike == p_wall_strike and len(puts) > 1:
-        p_floor_strike = puts.iloc[1]['strike']
-
-    s_wall_strike = p_wall_strike + 2
-    for i in range(1, len(calls)):
-        if calls.iloc[i]['strike'] != p_wall_strike:
-            s_wall_strike = calls.iloc[i]['strike']
-            break
-
-    s_floor_strike = p_floor_strike - 2
-    for i in range(1, len(puts)):
-        candidate = puts.iloc[i]['strike']
-        if candidate != p_floor_strike and candidate != p_wall_strike and candidate != s_wall_strike:
-            s_floor_strike = candidate
-            break
-
-    g_flip_strike = df.groupby('strike')['GEX'].sum().abs().idxmin()
+    # Get expirations
+    exp_0dte, exp_weekly, exp_monthly = get_expirations_by_type(df_raw)
+    
+    # Process each timeframe
+    data_0dte = None
+    data_weekly = None
+    data_monthly = None
+    
+    if exp_0dte:
+        data_0dte = process_expiration(df_raw, exp_0dte, qqq_price, ratio, nq_now)
+    
+    if exp_weekly and exp_weekly != exp_0dte:
+        data_weekly = process_expiration(df_raw, exp_weekly, qqq_price, ratio, nq_now)
+    
+    if exp_monthly and exp_monthly not in [exp_0dte, exp_weekly]:
+        data_monthly = process_expiration(df_raw, exp_monthly, qqq_price, ratio, nq_now)
 
 # ─────────────────────────────────────────────
-# DISPLAY - KEY METRICS
+# HEADER METRICS
 # ─────────────────────────────────────────────
-col1, col2, col3, col4, col5, col6 = st.columns(6)
-col1.metric("NQ", f"{nq_now:.2f}", nq_source)
-col2.metric("QQQ", f"${qqq_price:.2f}")
-col3.metric("Delta Neutral", f"{dn_nq:.2f}", "⚖️")
-col4.metric("Net Delta", f"{net_delta:,.0f}", "🟢 Bull" if net_delta > 0 else "🔴 Bear")
-col5.metric("Exp Move", f"±{nq_em_full:.0f}")
-col6.metric("Exp", exp_label)
+col1, col2, col3 = st.columns(3)
+col1.metric("NQ Price", f"{nq_now:.2f}", nq_source)
+col2.metric("QQQ Price", f"${qqq_price:.2f}")
+col3.metric("Ratio", f"{ratio:.4f}")
 
 st.markdown("---")
 
 # ─────────────────────────────────────────────
-# TABS
+# MULTI-TIMEFRAME OVERVIEW
 # ─────────────────────────────────────────────
-tab1, tab2, tab3 = st.tabs(["📊 Levels", "📈 GEX Chart", "⚖️ Delta Chart"])
+st.subheader("🎯 Multi-Timeframe Key Levels")
 
-with tab1:
-    # Levels table
-    results = [
-        ("Delta Neutral", dn_nq, 5.0, "⚖️"),
-        ("Target Res", (p_wall_strike * ratio) + 35, 3.0, "🎯"),
-        ("Primary Wall", p_wall_strike * ratio, 5.0, "🔴"),
-        ("Primary Floor", p_floor_strike * ratio, 5.0, "🟢"),
-        ("Target Supp", (p_floor_strike * ratio) - 35, 3.0, "🎯"),
-        ("Secondary Wall", s_wall_strike * ratio, 3.0, "🟠"),
-        ("Secondary Flr", s_floor_strike * ratio, 3.0, "🟡"),
-        ("Gamma Flip", g_flip_strike * ratio, 10.0, "⚡"),
-        ("Upper 0.50σ", nq_now + nq_em_050, 5.0, "📊"),
-        ("Upper 0.25σ", nq_now + nq_em_025, 3.0, "📊"),
-        ("Lower 0.25σ", nq_now - nq_em_025, 3.0, "📊"),
-        ("Lower 0.50σ", nq_now - nq_em_050, 5.0, "📊")
-    ]
-    
-    results_df = pd.DataFrame(results, columns=['Level', 'Price', 'Width', 'Icon'])
-    results_df['Price'] = results_df['Price'].round(2)
-    
+overview_data = []
+
+if data_0dte:
+    days = (exp_0dte.date() - datetime.now().date()).days
+    label = "0DTE"
+    overview_data.append({
+        'Timeframe': label,
+        'Expiration': exp_0dte.strftime('%Y-%m-%d'),
+        'Delta Neutral': data_0dte['dn_nq'],
+        'Gamma Flip': data_0dte['g_flip_nq'],
+        'Primary Wall': data_0dte['p_wall'],
+        'Primary Floor': data_0dte['p_floor'],
+        'Net Delta': data_0dte['net_delta']
+    })
+
+if data_weekly:
+    days = (exp_weekly.date() - datetime.now().date()).days
+    label = f"Weekly ({days}D)"
+    overview_data.append({
+        'Timeframe': label,
+        'Expiration': exp_weekly.strftime('%Y-%m-%d'),
+        'Delta Neutral': data_weekly['dn_nq'],
+        'Gamma Flip': data_weekly['g_flip_nq'],
+        'Primary Wall': data_weekly['p_wall'],
+        'Primary Floor': data_weekly['p_floor'],
+        'Net Delta': data_weekly['net_delta']
+    })
+
+if data_monthly:
+    days = (exp_monthly.date() - datetime.now().date()).days
+    label = f"Monthly ({days}D)"
+    overview_data.append({
+        'Timeframe': label,
+        'Expiration': exp_monthly.strftime('%Y-%m-%d'),
+        'Delta Neutral': data_monthly['dn_nq'],
+        'Gamma Flip': data_monthly['g_flip_nq'],
+        'Primary Wall': data_monthly['p_wall'],
+        'Primary Floor': data_monthly['p_floor'],
+        'Net Delta': data_monthly['net_delta']
+    })
+
+if overview_data:
+    overview_df = pd.DataFrame(overview_data)
     st.dataframe(
-        results_df[['Icon', 'Level', 'Price', 'Width']].style.format({
-            'Price': '{:.2f}',
-            'Width': '{:.1f}'
+        overview_df.style.format({
+            'Delta Neutral': '{:.2f}',
+            'Gamma Flip': '{:.2f}',
+            'Primary Wall': '{:.2f}',
+            'Primary Floor': '{:.2f}',
+            'Net Delta': '{:,.0f}'
         }),
-        use_container_width=True,
-        height=500,
+        width='stretch',
         hide_index=True
     )
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("**🔴 Top Calls**")
-        st.dataframe(
-            calls[['strike', 'GEX', 'delta', 'open_interest']].head(5),
-            use_container_width=True,
-            hide_index=True
-        )
-    with col2:
-        st.markdown("**🟢 Top Puts**")
-        st.dataframe(
-            puts[['strike', 'GEX', 'delta', 'open_interest']].head(5),
-            use_container_width=True,
-            hide_index=True
-        )
-
-with tab2:
-    # GEX Chart
-    st.subheader("GEX by Strike")
-    
-    gex_by_strike = df.groupby('strike')['GEX'].sum().reset_index()
-    gex_by_strike = gex_by_strike.sort_values('strike')
-    
-    fig = go.Figure()
-    
-    # Positive GEX (calls)
-    pos_gex = gex_by_strike[gex_by_strike['GEX'] > 0]
-    fig.add_trace(go.Bar(
-        x=pos_gex['strike'],
-        y=pos_gex['GEX'],
-        name='Call GEX',
-        marker_color='#FF4444',
-        hovertemplate='Strike: $%{x:.2f}<br>GEX: %{y:,.0f}<extra></extra>'
-    ))
-    
-    # Negative GEX (puts)
-    neg_gex = gex_by_strike[gex_by_strike['GEX'] < 0]
-    fig.add_trace(go.Bar(
-        x=neg_gex['strike'],
-        y=neg_gex['GEX'],
-        name='Put GEX',
-        marker_color='#44FF44',
-        hovertemplate='Strike: $%{x:.2f}<br>GEX: %{y:,.0f}<extra></extra>'
-    ))
-    
-    # Current price line
-    fig.add_vline(
-        x=qqq_price,
-        line_dash="dash",
-        line_color="#00D9FF",
-        annotation_text="Current Price",
-        annotation_position="top"
-    )
-    
-    fig.update_layout(
-        template="plotly_dark",
-        plot_bgcolor='#0E1117',
-        paper_bgcolor='#0E1117',
-        xaxis_title="Strike Price",
-        yaxis_title="GEX",
-        height=500,
-        showlegend=True,
-        hovermode='x unified'
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-
-with tab3:
-    # Delta Chart
-    st.subheader("Cumulative Delta by Strike")
-    
-    fig = go.Figure()
-    
-    fig.add_trace(go.Scatter(
-        x=strike_delta['strike'],
-        y=strike_delta['cumulative_delta'],
-        mode='lines',
-        name='Cumulative Delta',
-        line=dict(color='#00D9FF', width=3),
-        fill='tozeroy',
-        hovertemplate='Strike: $%{x:.2f}<br>Cumulative Δ: %{y:,.0f}<extra></extra>'
-    ))
-    
-    # Zero line
-    fig.add_hline(
-        y=0,
-        line_dash="dash",
-        line_color="white",
-        annotation_text="Zero Delta"
-    )
-    
-    # Delta Neutral line
-    fig.add_vline(
-        x=dn_strike,
-        line_dash="dot",
-        line_color="#FFD700",
-        annotation_text="Delta Neutral",
-        annotation_position="top"
-    )
-    
-    # Current price
-    fig.add_vline(
-        x=qqq_price,
-        line_dash="dash",
-        line_color="#FF4444",
-        annotation_text="Current",
-        annotation_position="bottom"
-    )
-    
-    fig.update_layout(
-        template="plotly_dark",
-        plot_bgcolor='#0E1117',
-        paper_bgcolor='#0E1117',
-        xaxis_title="Strike Price",
-        yaxis_title="Cumulative Delta Exposure",
-        height=500,
-        showlegend=False,
-        hovermode='x unified'
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
 
 st.markdown("---")
-st.caption(f"Updated: {datetime.now().strftime('%H:%M:%S')} | Data: CBOE • {nq_source}")
 
-if st.sidebar.button("🔄 Refresh", use_container_width=True):
+# ─────────────────────────────────────────────
+# DETAILED TABS
+# ─────────────────────────────────────────────
+tab_names = []
+if data_0dte: tab_names.append("0DTE")
+if data_weekly: tab_names.append("Weekly")
+if data_monthly: tab_names.append("Monthly")
+
+if tab_names:
+    tabs = st.tabs(tab_names)
+    
+    tab_idx = 0
+    
+    # 0DTE Tab
+    if data_0dte:
+        with tabs[tab_idx]:
+            st.subheader(f"0DTE Analysis - {exp_0dte.strftime('%Y-%m-%d')}")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Delta Neutral", f"{data_0dte['dn_nq']:.2f}")
+            col2.metric("Gamma Flip", f"{data_0dte['g_flip_nq']:.2f}")
+            col3.metric("Net Delta", f"{data_0dte['net_delta']:,.0f}")
+            col4.metric("Options", len(data_0dte['df']))
+            
+            # GEX Chart
+            gex_by_strike = data_0dte['df'].groupby('strike')['GEX'].sum().reset_index()
+            fig = go.Figure()
+            pos_gex = gex_by_strike[gex_by_strike['GEX'] > 0]
+            neg_gex = gex_by_strike[gex_by_strike['GEX'] < 0]
+            fig.add_trace(go.Bar(x=pos_gex['strike'], y=pos_gex['GEX'], name='Calls', marker_color='#FF4444'))
+            fig.add_trace(go.Bar(x=neg_gex['strike'], y=neg_gex['GEX'], name='Puts', marker_color='#44FF44'))
+            fig.add_vline(x=qqq_price, line_dash="dash", line_color="#00D9FF")
+            fig.update_layout(template="plotly_dark", plot_bgcolor='#0E1117', paper_bgcolor='#0E1117', height=400)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        tab_idx += 1
+    
+    # Weekly Tab
+    if data_weekly:
+        with tabs[tab_idx]:
+            st.subheader(f"Weekly Analysis - {exp_weekly.strftime('%Y-%m-%d')}")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Delta Neutral", f"{data_weekly['dn_nq']:.2f}")
+            col2.metric("Gamma Flip", f"{data_weekly['g_flip_nq']:.2f}")
+            col3.metric("Net Delta", f"{data_weekly['net_delta']:,.0f}")
+            col4.metric("Options", len(data_weekly['df']))
+            
+            gex_by_strike = data_weekly['df'].groupby('strike')['GEX'].sum().reset_index()
+            fig = go.Figure()
+            pos_gex = gex_by_strike[gex_by_strike['GEX'] > 0]
+            neg_gex = gex_by_strike[gex_by_strike['GEX'] < 0]
+            fig.add_trace(go.Bar(x=pos_gex['strike'], y=pos_gex['GEX'], name='Calls', marker_color='#FF4444'))
+            fig.add_trace(go.Bar(x=neg_gex['strike'], y=neg_gex['GEX'], name='Puts', marker_color='#44FF44'))
+            fig.add_vline(x=qqq_price, line_dash="dash", line_color="#00D9FF")
+            fig.update_layout(template="plotly_dark", plot_bgcolor='#0E1117', paper_bgcolor='#0E1117', height=400)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        tab_idx += 1
+    
+    # Monthly Tab
+    if data_monthly:
+        with tabs[tab_idx]:
+            st.subheader(f"Monthly Analysis - {exp_monthly.strftime('%Y-%m-%d')}")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Delta Neutral", f"{data_monthly['dn_nq']:.2f}")
+            col2.metric("Gamma Flip", f"{data_monthly['g_flip_nq']:.2f}")
+            col3.metric("Net Delta", f"{data_monthly['net_delta']:,.0f}")
+            col4.metric("Options", len(data_monthly['df']))
+            
+            gex_by_strike = data_monthly['df'].groupby('strike')['GEX'].sum().reset_index()
+            fig = go.Figure()
+            pos_gex = gex_by_strike[gex_by_strike['GEX'] > 0]
+            neg_gex = gex_by_strike[gex_by_strike['GEX'] < 0]
+            fig.add_trace(go.Bar(x=pos_gex['strike'], y=pos_gex['GEX'], name='Calls', marker_color='#FF4444'))
+            fig.add_trace(go.Bar(x=neg_gex['strike'], y=neg_gex['GEX'], name='Puts', marker_color='#44FF44'))
+            fig.add_vline(x=qqq_price, line_dash="dash", line_color="#00D9FF")
+            fig.update_layout(template="plotly_dark", plot_bgcolor='#0E1117', paper_bgcolor='#0E1117', height=400)
+            st.plotly_chart(fig, use_container_width=True)
+
+st.markdown("---")
+st.caption(f"Updated: {datetime.now().strftime('%H:%M:%S')} | CBOE • {nq_source}")
+
+if st.sidebar.button("🔄 Refresh", width='stretch'):
     st.cache_data.clear()
     st.rerun()
