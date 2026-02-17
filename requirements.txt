@@ -4,6 +4,6 @@ yfinance
 pandas
 numpy
 scipy
-python-dateutil
 requests
-tastytrade
+python-dateutil
+plotly
