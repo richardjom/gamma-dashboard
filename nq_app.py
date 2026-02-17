@@ -7,7 +7,7 @@ from scipy.stats import norm
 from datetime import datetime, timedelta
 from tastytrade import Session
 from tastytrade.instruments import Option
-from tastytrade.streamer import DXLinkStreamer, EventType
+from tastytrade.streamer import DXLinkStreamer
 
 st.set_page_config(page_title="NQ Precision Map", layout="wide")
 
