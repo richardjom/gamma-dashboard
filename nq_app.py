@@ -2,7 +2,6 @@ import streamlit as st
 import requests
 import pandas as pd
 import numpy as np
-from scipy.stats import norm
 from datetime import datetime
 import re
 import finnhub
@@ -27,6 +26,7 @@ def get_cboe_options(ticker="QQQ"):
         options_raw = data["data"]["options"]
         df = pd.DataFrame(options_raw)
         pattern = re.compile(r'^(.+)(\d{6})([PC])(\d+)$')
+
         def parse_option(row):
             match = pattern.search(row['option'])
             if match:
@@ -36,6 +36,7 @@ def get_cboe_options(ticker="QQQ"):
                 exp_date = datetime.strptime("20" + exp_str, "%Y%m%d")
                 return pd.Series({'strike': strike, 'type': option_type, 'expiration': exp_date})
             return pd.Series({'strike': 0, 'type': 'unknown', 'expiration': None})
+
         parsed = df.apply(parse_option, axis=1)
         df = pd.concat([df, parsed], axis=1)
         df = df[df['type'] != 'unknown'].copy()
@@ -44,16 +45,46 @@ def get_cboe_options(ticker="QQQ"):
         st.error(f"CBOE fetch failed: {e}")
         return None, None
 
-@st.cache_data(ttl=60)
-def get_nq_price():
+@st.cache_data(ttl=10)
+def get_nq_price(finnhub_key):
+    """Try Finnhub first, fall back to yfinance"""
+    
+    # Method 1: Finnhub - try multiple NQ symbols
+    client = finnhub.Client(api_key=finnhub_key)
+    nq_symbols = ["NQ=F", "NQ1!", "/NQ", "NQH26"]
+    
+    for symbol in nq_symbols:
+        try:
+            quote = client.quote(symbol)
+            price = quote.get('c', 0)
+            if price and price > 10000:  # NQ should be > 10000
+                return price, f"Finnhub ({symbol})"
+        except:
+            continue
+    
+    # Method 2: yfinance fallback
     try:
         nq = yf.Ticker("NQ=F")
         data = nq.history(period="1d")
         if not data.empty:
-            return float(data['Close'].iloc[-1])
-        return None
+            return float(data['Close'].iloc[-1]), "yfinance (delayed)"
     except:
-        return None
+        pass
+    
+    return None, "unavailable"
+
+@st.cache_data(ttl=10)
+def get_qqq_price(finnhub_key):
+    """Get real-time QQQ price via Finnhub"""
+    try:
+        client = finnhub.Client(api_key=finnhub_key)
+        quote = client.quote("QQQ")
+        price = quote.get('c', 0)
+        if price > 0:
+            return price
+    except:
+        pass
+    return None
 
 def get_nearest_expiration(df):
     today = datetime.now().date()
@@ -67,20 +98,14 @@ def get_nearest_expiration(df):
 
 with st.spinner("🔄 Loading data..."):
 
-    # 1. QQQ Price via Finnhub
-    try:
-        client = finnhub.Client(api_key=FINNHUB_KEY)
-        quote = client.quote("QQQ")
-        qqq_price = quote.get('c', 0)
-        if qqq_price == 0:
-            st.error("Could not fetch QQQ price")
-            st.stop()
-    except Exception as e:
-        st.error(f"Finnhub error: {e}")
+    # 1. QQQ Price (Finnhub - real-time)
+    qqq_price = get_qqq_price(FINNHUB_KEY)
+    if not qqq_price:
+        st.error("Could not fetch QQQ price")
         st.stop()
 
     # 2. NQ Futures Price
-    nq_now = get_nq_price()
+    nq_now, nq_source = get_nq_price(FINNHUB_KEY)
     if not nq_now:
         st.warning("NQ price fetch failed, using fallback")
         nq_now = 0
@@ -88,11 +113,12 @@ with st.spinner("🔄 Loading data..."):
     ratio = nq_now / qqq_price if qqq_price > 0 else 0
 
     # 3. Live Prices Display
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("NQ Price", f"{nq_now:.2f}")
     col2.metric("QQQ Price", f"${qqq_price:.2f}")
     col3.metric("Ratio", f"{ratio:.4f}")
-    col4.metric("Data Source", "CBOE")
+    col4.metric("NQ Source", nq_source)
+    col5.metric("Options Source", "CBOE")
 
     # 4. CBOE Options Data
     df_raw, cboe_price = get_cboe_options("QQQ")
@@ -249,7 +275,7 @@ with st.spinner("🔄 Loading data..."):
     col3.metric("ATM Strike", f"${atm_strike:.2f}")
     col4.metric("Options Loaded", f"{len(df)}")
 
-    st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Data: CBOE")
+    st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Options: CBOE | NQ: {nq_source}")
 
 if st.button("🔄 Refresh Data"):
     st.cache_data.clear()
