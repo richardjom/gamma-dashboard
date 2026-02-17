@@ -146,61 +146,29 @@ def get_qqq_price(finnhub_key):
 
 @st.cache_data(ttl=300)
 def get_market_overview(finnhub_key):
-    """Get VIX, futures, yields"""
+    """Get VIX, futures, yields - SAFE VERSION"""
     client = finnhub.Client(api_key=finnhub_key)
     data = {}
     
-    try:
-        # VIX
-        vix = client.quote("^VIX")
-        data['vix'] = {
-            'price': vix.get('c', 0),
-            'change': vix.get('d', 0),
-            'change_pct': vix.get('dp', 0)
-        }
-        
-        # ES Futures
-        es = client.quote("ES=F")
-        data['es'] = {
-            'price': es.get('c', 0),
-            'change': es.get('d', 0),
-            'change_pct': es.get('dp', 0)
-        }
-        
-        # YM Futures (Dow)
-        ym = client.quote("YM=F")
-        data['ym'] = {
-            'price': ym.get('c', 0),
-            'change': ym.get('d', 0),
-            'change_pct': ym.get('dp', 0)
-        }
-        
-        # RTY Futures (Russell)
-        rty = client.quote("RTY=F")
-        data['rty'] = {
-            'price': rty.get('c', 0),
-            'change': rty.get('d', 0),
-            'change_pct': rty.get('dp', 0)
-        }
-        
-        # 10Y Treasury
-        tnx = client.quote("^TNX")
-        data['10y'] = {
-            'price': tnx.get('c', 0),
-            'change': tnx.get('d', 0),
-            'change_pct': tnx.get('dp', 0)
-        }
-        
-        # DXY (Dollar Index)
-        dxy = client.quote("DX-Y.NYB")
-        data['dxy'] = {
-            'price': dxy.get('c', 0),
-            'change': dxy.get('d', 0),
-            'change_pct': dxy.get('dp', 0)
-        }
-        
-    except Exception as e:
-        st.error(f"Market overview error: {e}")
+    symbols = {
+        'vix': '^VIX',
+        'es': 'ES=F',
+        'ym': 'YM=F',
+        'rty': 'RTY=F',
+        '10y': '^TNX',
+        'dxy': 'DX-Y.NYB'
+    }
+    
+    for key, symbol in symbols.items():
+        try:
+            quote = client.quote(symbol)
+            data[key] = {
+                'price': quote.get('c', 0) or 0,
+                'change': quote.get('d', 0) or 0,
+                'change_pct': quote.get('dp', 0) or 0
+            }
+        except Exception as e:
+            data[key] = {'price': 0, 'change': 0, 'change_pct': 0}
     
     return data
 
@@ -213,13 +181,11 @@ def get_economic_calendar(finnhub_key):
     try:
         calendar = client.economic_calendar()
         
-        # Filter for today
         today_events = [
             event for event in calendar.get('economicCalendar', [])
             if event.get('time', '').startswith(str(today))
         ]
         
-        # Sort by time
         today_events.sort(key=lambda x: x.get('time', ''))
         
         return today_events[:10]
@@ -233,7 +199,6 @@ def get_market_news(finnhub_key):
     
     try:
         news = client.general_news('general', min_id=0)
-        # Filter for major sources
         major_sources = ['Bloomberg', 'CNBC', 'Reuters', 'WSJ', 'MarketWatch']
         filtered = [
             n for n in news[:50]
@@ -639,63 +604,84 @@ if tab_names:
                 st.markdown("### Futures & Indices")
                 col1, col2, col3, col4 = st.columns(4)
                 
-                if 'es' in market_data:
+                # ES - SAFE ACCESS
+                if 'es' in market_data and market_data['es']['price']:
                     es = market_data['es']
                     col1.metric(
                         "S&P 500 (ES)",
                         f"{es['price']:.2f}",
-                        f"{es['change']:+.2f} ({es['change_pct']:+.2f}%)"
+                        f"{es.get('change', 0):+.2f} ({es.get('change_pct', 0):+.2f}%)"
                     )
+                else:
+                    col1.metric("S&P 500 (ES)", "N/A")
                 
+                # NQ
                 col2.metric(
                     "Nasdaq (NQ)",
                     f"{nq_now:.2f}",
                     nq_source
                 )
                 
-                if 'ym' in market_data:
+                # YM - SAFE ACCESS
+                if 'ym' in market_data and market_data['ym']['price']:
                     ym = market_data['ym']
                     col3.metric(
                         "Dow (YM)",
                         f"{ym['price']:.2f}",
-                        f"{ym['change']:+.2f} ({ym['change_pct']:+.2f}%)"
+                        f"{ym.get('change', 0):+.2f} ({ym.get('change_pct', 0):+.2f}%)"
                     )
+                else:
+                    col3.metric("Dow (YM)", "N/A")
                 
-                if 'rty' in market_data:
+                # RTY - SAFE ACCESS
+                if 'rty' in market_data and market_data['rty']['price']:
                     rty = market_data['rty']
                     col4.metric(
                         "Russell (RTY)",
                         f"{rty['price']:.2f}",
-                        f"{rty['change']:+.2f} ({rty['change_pct']:+.2f}%)"
+                        f"{rty.get('change', 0):+.2f} ({rty.get('change_pct', 0):+.2f}%)"
                     )
+                else:
+                    col4.metric("Russell (RTY)", "N/A")
                 
                 st.markdown("---")
                 st.markdown("### Market Indicators")
                 col1, col2, col3 = st.columns(3)
                 
-                if 'vix' in market_data:
+                # VIX - SAFE ACCESS
+                if 'vix' in market_data and market_data['vix']['price']:
                     vix = market_data['vix']
                     col1.metric(
                         "VIX (Volatility)",
                         f"{vix['price']:.2f}",
-                        f"{vix['change']:+.2f} ({vix['change_pct']:+.2f}%)"
+                        f"{vix.get('change', 0):+.2f} ({vix.get('change_pct', 0):+.2f}%)"
                     )
+                else:
+                    col1.metric("VIX (Volatility)", "N/A")
                 
-                if '10y' in market_data:
+                # 10Y - SAFE ACCESS
+                if '10y' in market_data and market_data['10y']['price']:
                     tnx = market_data['10y']
                     col2.metric(
                         "10Y Treasury",
                         f"{tnx['price']:.2f}%",
-                        f"{tnx['change']:+.2f}"
+                        f"{tnx.get('change', 0):+.2f}"
                     )
+                else:
+                    col2.metric("10Y Treasury", "N/A")
                 
-                if 'dxy' in market_data:
+                # DXY - SAFE ACCESS
+                if 'dxy' in market_data and market_data['dxy']['price']:
                     dxy = market_data['dxy']
                     col3.metric(
                         "Dollar Index",
                         f"{dxy['price']:.2f}",
-                        f"{dxy['change']:+.2f} ({dxy['change_pct']:+.2f}%)"
+                        f"{dxy.get('change', 0):+.2f} ({dxy.get('change_pct', 0):+.2f}%)"
                     )
+                else:
+                    col3.metric("Dollar Index", "N/A")
+            else:
+                st.warning("Market data temporarily unavailable")
         
         st.markdown("---")
         
