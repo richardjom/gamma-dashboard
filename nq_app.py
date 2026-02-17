@@ -247,7 +247,7 @@ with st.spinner("🔄 Loading data..."):
         st.stop()
 
     # Calculate metrics
-    dn_strike, strike_delta = calculate_delta_neutral(df, qqq_price)
+    dn_strike, strike_delta, df = calculate_delta_neutral(df, qqq_price)
     dn_nq = dn_strike * ratio
 
     total_call_delta = df[df['type'] == 'call']['delta_exposure'].sum()
