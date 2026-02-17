@@ -5,9 +5,9 @@ import pandas as pd
 import numpy as np
 from scipy.stats import norm
 from datetime import datetime, timedelta
-from tastytrade import Session, DXLinkStreamer
-from tastytrade.instruments import Option, Equity
-from tastytrade.dxfeed import EventType
+from tastytrade import Session
+from tastytrade.instruments import Option
+from tastytrade.streamer import DXLinkStreamer, EventType
 
 st.set_page_config(page_title="NQ Precision Map", layout="wide")
 
