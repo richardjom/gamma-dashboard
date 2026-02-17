@@ -57,8 +57,6 @@ def get_cboe_options(ticker="QQQ"):
 @st.cache_data(ttl=10)
 def get_nq_price_auto(finnhub_key):
     """Try multiple sources for NQ price"""
-
-    # Source 1: Yahoo Finance direct API
     try:
         url = "https://query1.finance.yahoo.com/v8/finance/chart/NQ=F"
         headers = {"User-Agent": "Mozilla/5.0"}
@@ -71,7 +69,6 @@ def get_nq_price_auto(finnhub_key):
     except:
         pass
 
-    # Source 2: yfinance 1min interval
     try:
         nq = yf.Ticker("NQ=F")
         data = nq.history(period="1d", interval="1m")
@@ -80,10 +77,9 @@ def get_nq_price_auto(finnhub_key):
     except:
         pass
 
-    # Source 3: Finnhub fallback
     try:
         client = finnhub.Client(api_key=finnhub_key)
-        for symbol in ["NQ=F", "NQ1!", "/NQ", "NQH26"]:
+        for symbol in ["NQ=F", "NQ1!", "/NQ"]:
             try:
                 quote = client.quote(symbol)
                 price = quote.get('c', 0)
@@ -118,18 +114,44 @@ def get_nearest_expiration(df):
             return exp, label
     return None, None
 
+def calculate_delta_neutral(df, qqq_price):
+    """Calculate Delta Neutral Level"""
+    # Net delta for each strike
+    df['delta_exposure'] = df.apply(
+        lambda x: x['open_interest'] * x['delta'] * 100 * (1 if x['type'] == 'call' else -1),
+        axis=1
+    )
+    
+    # Group by strike and sum delta exposure
+    strike_delta = df.groupby('strike')['delta_exposure'].sum().reset_index()
+    strike_delta = strike_delta.sort_values('strike')
+    
+    # Find where cumulative delta crosses zero
+    strike_delta['cumulative_delta'] = strike_delta['delta_exposure'].cumsum()
+    
+    # Delta neutral is where cumulative crosses zero
+    zero_cross = strike_delta[strike_delta['cumulative_delta'].abs() == strike_delta['cumulative_delta'].abs().min()]
+    
+    if len(zero_cross) > 0:
+        dn_strike = zero_cross.iloc[0]['strike']
+    else:
+        # Fallback to strike closest to current price
+        dn_strike = qqq_price
+    
+    return dn_strike, strike_delta
+
 # ─────────────────────────────────────────────
 # MAIN APP
 # ─────────────────────────────────────────────
 with st.spinner("🔄 Loading data..."):
 
-    # 1. QQQ Price (Finnhub - real-time)
+    # 1. QQQ Price
     qqq_price = get_qqq_price(FINNHUB_KEY)
     if not qqq_price:
         st.error("Could not fetch QQQ price")
         st.stop()
 
-    # 2. NQ Price - Auto or Manual
+    # 2. NQ Price
     if manual_override:
         nq_now = st.sidebar.number_input(
             "Enter NQ Price",
@@ -157,15 +179,7 @@ with st.spinner("🔄 Loading data..."):
 
     ratio = nq_now / qqq_price if qqq_price > 0 else 0
 
-    # 3. Live Prices Display
-    col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("NQ Price", f"{nq_now:.2f}")
-    col2.metric("QQQ Price", f"${qqq_price:.2f}")
-    col3.metric("Ratio", f"{ratio:.4f}")
-    col4.metric("NQ Source", nq_source)
-    col5.metric("Options", "CBOE")
-
-    # 4. CBOE Options Data
+    # 3. CBOE Options Data
     df_raw, cboe_price = get_cboe_options("QQQ")
     if df_raw is None:
         st.error("Failed to fetch CBOE options data")
@@ -174,7 +188,7 @@ with st.spinner("🔄 Loading data..."):
     if qqq_price == 0:
         qqq_price = cboe_price
 
-    # 5. Get Nearest Expiration
+    # 4. Get Nearest Expiration
     target_exp, exp_label = get_nearest_expiration(df_raw)
     if target_exp is None:
         st.error("No valid expirations found")
@@ -182,10 +196,10 @@ with st.spinner("🔄 Loading data..."):
 
     st.info(f"📅 Using Expiration: **{exp_label}**")
 
-    # 6. Filter to Target Expiration
+    # 5. Filter to Target Expiration
     df = df_raw[df_raw['expiration'] == target_exp].copy()
 
-    # 7. Data Cleaning
+    # 6. Data Cleaning
     df = df[df['open_interest'] > 0].copy()
     df = df[df['iv'] > 0].copy()
     df = df[(df['strike'] > qqq_price * 0.98) & (df['strike'] < qqq_price * 1.02)].copy()
@@ -196,7 +210,48 @@ with st.spinner("🔄 Loading data..."):
 
     st.sidebar.success(f"✅ {len(df)} options loaded")
 
-    # 8. Expected Move
+    # 7. Calculate Delta Neutral Level
+    dn_strike, strike_delta = calculate_delta_neutral(df, qqq_price)
+    dn_nq = dn_strike * ratio
+
+    # 8. Calculate Net Delta Exposure
+    total_call_delta = df[df['type'] == 'call']['delta_exposure'].sum()
+    total_put_delta = df[df['type'] == 'put']['delta_exposure'].sum()
+    net_delta = total_call_delta + total_put_delta
+
+    # Display Delta Metrics
+    st.subheader("⚖️ Delta Analysis")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    col1.metric(
+        "Delta Neutral (QQQ)",
+        f"${dn_strike:.2f}",
+        f"{'Above' if qqq_price > dn_strike else 'Below'} current"
+    )
+    col2.metric(
+        "Delta Neutral (NQ)",
+        f"{dn_nq:.2f}",
+        f"{'Above' if nq_now > dn_nq else 'Below'} current"
+    )
+    col3.metric(
+        "Net Delta Exposure",
+        f"{net_delta:,.0f}",
+        "Bullish" if net_delta > 0 else "Bearish"
+    )
+    
+    delta_sentiment = "🟢 Bullish" if net_delta > 0 else "🔴 Bearish"
+    col4.metric("Positioning", delta_sentiment)
+
+    # 9. Live Prices Display
+    st.subheader("📊 Live Prices")
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("NQ Price", f"{nq_now:.2f}")
+    col2.metric("QQQ Price", f"${qqq_price:.2f}")
+    col3.metric("Ratio", f"{ratio:.4f}")
+    col4.metric("NQ Source", nq_source)
+    col5.metric("Options", "CBOE")
+
+    # 10. Expected Move
     atm_strike = df.iloc[(df['strike'] - qqq_price).abs().argsort()[:1]]['strike'].values[0]
     atm_opts = df[df['strike'] == atm_strike]
     atm_call = atm_opts[atm_opts['type'] == 'call']
@@ -213,14 +268,14 @@ with st.spinner("🔄 Loading data..."):
     nq_em_050 = nq_em_full * 0.50
     nq_em_025 = nq_em_full * 0.25
 
-    # 9. GEX using CBOE gamma directly
+    # 11. GEX Calculation
     df['GEX'] = df.apply(
         lambda x: x['open_interest'] * x['gamma'] * (qqq_price ** 2) * 0.01 *
         (1 if x['type'] == 'call' else -1),
         axis=1
     )
 
-    # 10. Extract Levels
+    # 12. Extract Levels
     calls = df[df['type'] == 'call'].sort_values('GEX', ascending=False)
     puts = df[df['type'] == 'put'].sort_values('GEX')
 
@@ -231,9 +286,10 @@ with st.spinner("🔄 Loading data..."):
     with col1:
         st.markdown("#### 🔴 Top Call Strikes (Resistance)")
         st.dataframe(
-            calls[['strike', 'GEX', 'open_interest', 'volume', 'gamma', 'iv']].head(5).style.format({
+            calls[['strike', 'GEX', 'delta', 'open_interest', 'volume', 'gamma', 'iv']].head(5).style.format({
                 'strike': '${:.2f}',
                 'GEX': '{:,.0f}',
+                'delta': '{:.4f}',
                 'open_interest': '{:,.0f}',
                 'volume': '{:,.0f}',
                 'gamma': '{:.4f}',
@@ -245,9 +301,10 @@ with st.spinner("🔄 Loading data..."):
     with col2:
         st.markdown("#### 🟢 Top Put Strikes (Support)")
         st.dataframe(
-            puts[['strike', 'GEX', 'open_interest', 'volume', 'gamma', 'iv']].head(5).style.format({
+            puts[['strike', 'GEX', 'delta', 'open_interest', 'volume', 'gamma', 'iv']].head(5).style.format({
                 'strike': '${:.2f}',
                 'GEX': '{:,.0f}',
+                'delta': '{:.4f}',
                 'open_interest': '{:,.0f}',
                 'volume': '{:,.0f}',
                 'gamma': '{:.4f}',
@@ -260,7 +317,7 @@ with st.spinner("🔄 Loading data..."):
         st.error("Insufficient call/put data")
         st.stop()
 
-    # 11. Strike Extraction with Conflict Resolution
+    # 13. Strike Extraction
     p_wall_strike = calls.iloc[0]['strike']
     p_floor_strike = puts.iloc[0]['strike']
 
@@ -282,8 +339,9 @@ with st.spinner("🔄 Loading data..."):
 
     g_flip_strike = df.groupby('strike')['GEX'].sum().abs().idxmin()
 
-    # 12. Results Assembly
+    # 14. Results Assembly
     results = [
+        ("Delta Neutral",  dn_nq,                         5.0,  "⚖️"),
         ("Target Res",    (p_wall_strike * ratio) + 35,  3.0,  "🎯"),
         ("Primary Wall",   p_wall_strike * ratio,         5.0,  "🔴"),
         ("Primary Floor",  p_floor_strike * ratio,        5.0,  "🟢"),
@@ -308,11 +366,11 @@ with st.spinner("🔄 Loading data..."):
             'Width': '{:.1f}'
         }),
         use_container_width=True,
-        height=450,
+        height=500,
         hide_index=True
     )
 
-    # 13. Summary
+    # 15. Summary
     st.subheader("📈 Summary")
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Straddle Premium", f"${straddle:.2f}")
