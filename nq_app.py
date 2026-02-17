@@ -384,29 +384,36 @@ with st.spinner("🔄 Loading multi-timeframe data..."):
         data_monthly = process_expiration(df_raw, exp_monthly, qqq_price, ratio, nq_now)
 
 # ─────────────────────────────────────────────
-# HEADER METRICS ROW 1 - PRICES
+# COMPACT HEADER METRICS
 # ─────────────────────────────────────────────
+# Row 1: Prices
 col1, col2, col3 = st.columns(3)
 col1.metric("NQ Price", f"{nq_now:.2f}", f"↑ {nq_source}")
 col2.metric("QQQ Price", f"${qqq_price:.2f}")
 col3.metric("Ratio", f"{ratio:.4f}")
 
-# ─────────────────────────────────────────────
-# HEADER METRICS ROW 2 - 0DTE METRICS
-# ─────────────────────────────────────────────
-if data_0dte:
-    st.markdown("### 0DTE Metrics")
+# Row 2: 0DTE + Weekly (6 columns total)
+if data_0dte and data_weekly:
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    # 0DTE
+    col1.metric("⚖️ DN (0DTE)", f"{data_0dte['dn_nq']:.2f}")
+    col2.metric("⚡ GF (0DTE)", f"{data_0dte['g_flip_nq']:.2f}")
+    delta_0 = "🟢 Bull" if data_0dte['net_delta'] > 0 else "🔴 Bear"
+    col3.metric("📊 Δ (0DTE)", f"{data_0dte['net_delta']:,.0f}", delta_0)
+    # Weekly
+    col4.metric("⚖️ DN (Wkly)", f"{data_weekly['dn_nq']:.2f}")
+    col5.metric("⚡ GF (Wkly)", f"{data_weekly['g_flip_nq']:.2f}")
+    delta_w = "🟢 Bull" if data_weekly['net_delta'] > 0 else "🔴 Bear"
+    col6.metric("📊 Δ (Wkly)", f"{data_weekly['net_delta']:,.0f}", delta_w)
+
+elif data_0dte:
     col1, col2, col3 = st.columns(3)
     col1.metric("⚖️ Delta Neutral", f"{data_0dte['dn_nq']:.2f}")
     col2.metric("⚡ Gamma Flip", f"{data_0dte['g_flip_nq']:.2f}")
     delta_sentiment = "🟢 Bullish" if data_0dte['net_delta'] > 0 else "🔴 Bearish"
     col3.metric("📊 Net Delta", f"{data_0dte['net_delta']:,.0f}", delta_sentiment)
 
-# ─────────────────────────────────────────────
-# HEADER METRICS ROW 3 - WEEKLY METRICS
-# ─────────────────────────────────────────────
-if data_weekly:
-    st.markdown("### Weekly Metrics")
+elif data_weekly:
     col1, col2, col3 = st.columns(3)
     col1.metric("⚖️ Delta Neutral", f"{data_weekly['dn_nq']:.2f}")
     col2.metric("⚡ Gamma Flip", f"{data_weekly['g_flip_nq']:.2f}")
