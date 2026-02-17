@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 import re
 import finnhub
 import yfinance as yf
@@ -144,6 +144,148 @@ def get_qqq_price(finnhub_key):
         pass
     return None
 
+@st.cache_data(ttl=300)
+def get_market_overview(finnhub_key):
+    """Get VIX, futures, yields"""
+    client = finnhub.Client(api_key=finnhub_key)
+    data = {}
+    
+    try:
+        # VIX
+        vix = client.quote("^VIX")
+        data['vix'] = {
+            'price': vix.get('c', 0),
+            'change': vix.get('d', 0),
+            'change_pct': vix.get('dp', 0)
+        }
+        
+        # ES Futures
+        es = client.quote("ES=F")
+        data['es'] = {
+            'price': es.get('c', 0),
+            'change': es.get('d', 0),
+            'change_pct': es.get('dp', 0)
+        }
+        
+        # YM Futures (Dow)
+        ym = client.quote("YM=F")
+        data['ym'] = {
+            'price': ym.get('c', 0),
+            'change': ym.get('d', 0),
+            'change_pct': ym.get('dp', 0)
+        }
+        
+        # RTY Futures (Russell)
+        rty = client.quote("RTY=F")
+        data['rty'] = {
+            'price': rty.get('c', 0),
+            'change': rty.get('d', 0),
+            'change_pct': rty.get('dp', 0)
+        }
+        
+        # 10Y Treasury
+        tnx = client.quote("^TNX")
+        data['10y'] = {
+            'price': tnx.get('c', 0),
+            'change': tnx.get('d', 0),
+            'change_pct': tnx.get('dp', 0)
+        }
+        
+        # DXY (Dollar Index)
+        dxy = client.quote("DX-Y.NYB")
+        data['dxy'] = {
+            'price': dxy.get('c', 0),
+            'change': dxy.get('d', 0),
+            'change_pct': dxy.get('dp', 0)
+        }
+        
+    except Exception as e:
+        st.error(f"Market overview error: {e}")
+    
+    return data
+
+@st.cache_data(ttl=3600)
+def get_economic_calendar(finnhub_key):
+    """Get today's economic events"""
+    client = finnhub.Client(api_key=finnhub_key)
+    today = datetime.now().date()
+    
+    try:
+        calendar = client.economic_calendar()
+        
+        # Filter for today
+        today_events = [
+            event for event in calendar.get('economicCalendar', [])
+            if event.get('time', '').startswith(str(today))
+        ]
+        
+        # Sort by time
+        today_events.sort(key=lambda x: x.get('time', ''))
+        
+        return today_events[:10]
+    except:
+        return []
+
+@st.cache_data(ttl=600)
+def get_market_news(finnhub_key):
+    """Get latest market news"""
+    client = finnhub.Client(api_key=finnhub_key)
+    
+    try:
+        news = client.general_news('general', min_id=0)
+        # Filter for major sources
+        major_sources = ['Bloomberg', 'CNBC', 'Reuters', 'WSJ', 'MarketWatch']
+        filtered = [
+            n for n in news[:50]
+            if any(source.lower() in n.get('source', '').lower() for source in major_sources)
+        ]
+        return filtered[:10]
+    except:
+        return []
+
+@st.cache_data(ttl=300)
+def get_fear_greed_index():
+    """Get Fear & Greed Index"""
+    try:
+        url = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            score = data.get('fear_and_greed', {}).get('score', 50)
+            rating = data.get('fear_and_greed', {}).get('rating', 'Neutral')
+            return {'score': score, 'rating': rating}
+    except:
+        pass
+    return {'score': 50, 'rating': 'Neutral'}
+
+@st.cache_data(ttl=300)
+def get_top_movers(finnhub_key):
+    """Get top gainers and losers"""
+    client = finnhub.Client(api_key=finnhub_key)
+    
+    tickers = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META', 'AMD', 
+               'NFLX', 'DIS', 'BABA', 'JPM', 'BAC', 'XOM', 'CVX']
+    
+    movers = []
+    try:
+        for ticker in tickers:
+            quote = client.quote(ticker)
+            movers.append({
+                'symbol': ticker,
+                'price': quote.get('c', 0),
+                'change': quote.get('d', 0),
+                'change_pct': quote.get('dp', 0)
+            })
+        
+        movers.sort(key=lambda x: abs(x['change_pct']), reverse=True)
+        
+        gainers = [m for m in movers if m['change_pct'] > 0][:5]
+        losers = [m for m in movers if m['change_pct'] < 0][:5]
+        
+        return {'gainers': gainers, 'losers': losers}
+    except:
+        return {'gainers': [], 'losers': []}
+
 def get_expirations_by_type(df):
     """Get nearest 0DTE, Weekly, and Monthly expirations"""
     today = datetime.now().date()
@@ -160,19 +302,15 @@ def get_expirations_by_type(df):
         
         days = (exp_date - today).days
         
-        # 0DTE
         if days == 0 and dte_0 is None:
             dte_0 = exp
         
-        # Weekly (next Friday, typically 1-7 days out)
         if 1 <= days <= 7 and weekly is None and exp_date.weekday() == 4:
             weekly = exp
         
-        # Monthly (next monthly expiration, typically 14+ days)
         if days >= 14 and monthly is None:
             monthly = exp
     
-    # Fallback: if no 0DTE, use nearest
     if dte_0 is None and len(expirations) > 0:
         for exp in expirations:
             exp_date = exp.date() if isinstance(exp, datetime) else exp
@@ -180,7 +318,6 @@ def get_expirations_by_type(df):
                 dte_0 = exp
                 break
     
-    # Fallback: if no weekly, use next available after 0DTE
     if weekly is None and len(expirations) > 1:
         for exp in expirations:
             exp_date = exp.date() if isinstance(exp, datetime) else exp
@@ -188,7 +325,6 @@ def get_expirations_by_type(df):
                 weekly = exp
                 break
     
-    # Fallback: if no monthly, use furthest available
     if monthly is None and len(expirations) > 0:
         monthly = expirations[-1]
     
@@ -264,17 +400,16 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
     
     # Levels - FIXED LOGIC
     calls = df[df['type'] == 'call'].sort_values('GEX', ascending=False)
-    puts = df[df['type'] == 'put'].sort_values('GEX', ascending=True)  # Most negative first
+    puts = df[df['type'] == 'put'].sort_values('GEX', ascending=True)
     
     p_wall_strike = calls.iloc[0]['strike'] if len(calls) > 0 else qqq_price
     p_floor_strike = puts.iloc[0]['strike'] if len(puts) > 0 else qqq_price
     
-    # Conflict resolution
     if p_floor_strike == p_wall_strike and len(puts) > 1:
         p_floor_strike = puts.iloc[1]['strike']
     
     # Secondary Wall - must be ABOVE primary wall
-    s_wall_strike = p_wall_strike  # Fallback
+    s_wall_strike = p_wall_strike
     for i in range(1, len(calls)):
         candidate = calls.iloc[i]['strike']
         if candidate > p_wall_strike:
@@ -282,10 +417,9 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
             break
     
     # Secondary Floor - must be BELOW primary floor
-    s_floor_strike = p_floor_strike  # Fallback
+    s_floor_strike = p_floor_strike
     for i in range(1, len(puts)):
         candidate = puts.iloc[i]['strike']
-        # Must be lower than primary floor AND not conflict with other levels
         if (candidate < p_floor_strike and 
             candidate != p_wall_strike and 
             candidate != s_wall_strike):
@@ -294,7 +428,6 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
     
     g_flip_strike = df.groupby('strike')['GEX'].sum().abs().idxmin()
     
-    # Build results table
     results = [
         ("Delta Neutral", dn_nq, 5.0, "⚖️"),
         ("Target Res", (p_wall_strike * ratio) + 35, 3.0, "🎯"),
@@ -327,31 +460,12 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
         'nq_em_full': nq_em_full,
         'atm_strike': atm_strike
     }
-    
-    return {
-        'df': df,
-        'dn_strike': dn_strike,
-        'dn_nq': dn_nq,
-        'g_flip_strike': g_flip_strike,
-        'g_flip_nq': g_flip_strike * ratio,
-        'net_delta': net_delta,
-        'p_wall': p_wall_strike * ratio,
-        'p_floor': p_floor_strike * ratio,
-        'calls': calls,
-        'puts': puts,
-        'strike_delta': strike_delta,
-        'results': results,
-        'straddle': straddle,
-        'nq_em_full': nq_em_full,
-        'atm_strike': atm_strike
-    }
 
 # ─────────────────────────────────────────────
 # MAIN APP
 # ─────────────────────────────────────────────
 with st.spinner("🔄 Loading multi-timeframe data..."):
 
-    # Get prices
     qqq_price = get_qqq_price(FINNHUB_KEY)
     if not qqq_price:
         st.error("Could not fetch QQQ price")
@@ -382,7 +496,6 @@ with st.spinner("🔄 Loading multi-timeframe data..."):
 
     ratio = nq_now / qqq_price if qqq_price > 0 else 0
 
-    # Get options data
     df_raw, cboe_price = get_cboe_options("QQQ")
     if df_raw is None:
         st.error("Failed to fetch options")
@@ -391,10 +504,8 @@ with st.spinner("🔄 Loading multi-timeframe data..."):
     if qqq_price == 0:
         qqq_price = cboe_price
 
-    # Get expirations
     exp_0dte, exp_weekly, exp_monthly = get_expirations_by_type(df_raw)
     
-    # Process each timeframe
     data_0dte = None
     data_weekly = None
     data_monthly = None
@@ -411,34 +522,27 @@ with st.spinner("🔄 Loading multi-timeframe data..."):
 # ─────────────────────────────────────────────
 # COMPACT HEADER METRICS
 # ─────────────────────────────────────────────
-# Row 1: Prices
 col1, col2, col3 = st.columns(3)
 col1.metric("NQ Price", f"{nq_now:.2f}", f"↑ {nq_source}")
 col2.metric("QQQ Price", f"${qqq_price:.2f}")
 col3.metric("Ratio", f"{ratio:.4f}")
 
-# Row 2: 0DTE + Weekly (6 columns total) - GROUPED BY METRIC TYPE
 if data_0dte and data_weekly:
     col1, col2, col3, col4, col5, col6 = st.columns(6)
-    # Delta Neutrals side by side
     col1.metric("⚖️ Delta Neutral (0DTE)", f"{data_0dte['dn_nq']:.2f}")
     col2.metric("⚖️ Delta Neutral (Weekly)", f"{data_weekly['dn_nq']:.2f}")
-    # Gamma Flips side by side
     col3.metric("⚡ Gamma Flip (0DTE)", f"{data_0dte['g_flip_nq']:.2f}")
     col4.metric("⚡ Gamma Flip (Weekly)", f"{data_weekly['g_flip_nq']:.2f}")
-    # Net Deltas side by side
     delta_0 = "🟢 Bullish" if data_0dte['net_delta'] > 0 else "🔴 Bearish"
     delta_w = "🟢 Bullish" if data_weekly['net_delta'] > 0 else "🔴 Bearish"
     col5.metric("📊 Net Delta (0DTE)", f"{data_0dte['net_delta']:,.0f}", delta_0)
     col6.metric("📊 Net Delta (Weekly)", f"{data_weekly['net_delta']:,.0f}", delta_w)
-
 elif data_0dte:
     col1, col2, col3 = st.columns(3)
     col1.metric("⚖️ Delta Neutral", f"{data_0dte['dn_nq']:.2f}")
     col2.metric("⚡ Gamma Flip", f"{data_0dte['g_flip_nq']:.2f}")
     delta_sentiment = "🟢 Bullish" if data_0dte['net_delta'] > 0 else "🔴 Bearish"
     col3.metric("📊 Net Delta", f"{data_0dte['net_delta']:,.0f}", delta_sentiment)
-
 elif data_weekly:
     col1, col2, col3 = st.columns(3)
     col1.metric("⚖️ Delta Neutral", f"{data_weekly['dn_nq']:.2f}")
@@ -513,7 +617,7 @@ st.markdown("---")
 # ─────────────────────────────────────────────
 # DETAILED TABS
 # ─────────────────────────────────────────────
-tab_names = []
+tab_names = ["📈 Market Overview"]
 if data_0dte: tab_names.append("📊 0DTE Levels")
 if data_weekly: tab_names.append("📊 Weekly Levels")
 if data_monthly: tab_names.append("📊 Monthly Levels")
@@ -523,6 +627,170 @@ if tab_names:
     tabs = st.tabs(tab_names)
     
     tab_idx = 0
+    
+    # Market Overview Tab
+    with tabs[tab_idx]:
+        st.subheader("📈 Market Overview")
+        
+        with st.spinner("Loading market data..."):
+            market_data = get_market_overview(FINNHUB_KEY)
+            
+            if market_data:
+                st.markdown("### Futures & Indices")
+                col1, col2, col3, col4 = st.columns(4)
+                
+                if 'es' in market_data:
+                    es = market_data['es']
+                    col1.metric(
+                        "S&P 500 (ES)",
+                        f"{es['price']:.2f}",
+                        f"{es['change']:+.2f} ({es['change_pct']:+.2f}%)"
+                    )
+                
+                col2.metric(
+                    "Nasdaq (NQ)",
+                    f"{nq_now:.2f}",
+                    nq_source
+                )
+                
+                if 'ym' in market_data:
+                    ym = market_data['ym']
+                    col3.metric(
+                        "Dow (YM)",
+                        f"{ym['price']:.2f}",
+                        f"{ym['change']:+.2f} ({ym['change_pct']:+.2f}%)"
+                    )
+                
+                if 'rty' in market_data:
+                    rty = market_data['rty']
+                    col4.metric(
+                        "Russell (RTY)",
+                        f"{rty['price']:.2f}",
+                        f"{rty['change']:+.2f} ({rty['change_pct']:+.2f}%)"
+                    )
+                
+                st.markdown("---")
+                st.markdown("### Market Indicators")
+                col1, col2, col3 = st.columns(3)
+                
+                if 'vix' in market_data:
+                    vix = market_data['vix']
+                    col1.metric(
+                        "VIX (Volatility)",
+                        f"{vix['price']:.2f}",
+                        f"{vix['change']:+.2f} ({vix['change_pct']:+.2f}%)"
+                    )
+                
+                if '10y' in market_data:
+                    tnx = market_data['10y']
+                    col2.metric(
+                        "10Y Treasury",
+                        f"{tnx['price']:.2f}%",
+                        f"{tnx['change']:+.2f}"
+                    )
+                
+                if 'dxy' in market_data:
+                    dxy = market_data['dxy']
+                    col3.metric(
+                        "Dollar Index",
+                        f"{dxy['price']:.2f}",
+                        f"{dxy['change']:+.2f} ({dxy['change_pct']:+.2f}%)"
+                    )
+        
+        st.markdown("---")
+        
+        st.markdown("### Market Sentiment")
+        fg = get_fear_greed_index()
+        
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            st.metric("Fear & Greed Index", f"{fg['score']:.0f}", fg['rating'])
+        
+        with col2:
+            if fg['score'] < 25:
+                st.error(f"**{fg['rating']}** - Extreme fear typically signals buying opportunity")
+            elif fg['score'] < 45:
+                st.warning(f"**{fg['rating']}** - Cautious sentiment")
+            elif fg['score'] < 55:
+                st.info(f"**{fg['rating']}** - Balanced market")
+            elif fg['score'] < 75:
+                st.warning(f"**{fg['rating']}** - Greedy sentiment")
+            else:
+                st.error(f"**{fg['rating']}** - Extreme greed signals potential top")
+        
+        st.markdown("---")
+        
+        st.markdown("### Top Movers")
+        movers = get_top_movers(FINNHUB_KEY)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**🟢 Top Gainers**")
+            if movers['gainers']:
+                gainers_df = pd.DataFrame(movers['gainers'])
+                st.dataframe(
+                    gainers_df[['symbol', 'price', 'change_pct']].style.format({
+                        'price': '${:.2f}',
+                        'change_pct': '{:+.2f}%'
+                    }),
+                    width='stretch',
+                    hide_index=True
+                )
+            else:
+                st.info("No data available")
+        
+        with col2:
+            st.markdown("**🔴 Top Losers**")
+            if movers['losers']:
+                losers_df = pd.DataFrame(movers['losers'])
+                st.dataframe(
+                    losers_df[['symbol', 'price', 'change_pct']].style.format({
+                        'price': '${:.2f}',
+                        'change_pct': '{:+.2f}%'
+                    }),
+                    width='stretch',
+                    hide_index=True
+                )
+            else:
+                st.info("No data available")
+        
+        st.markdown("---")
+        
+        st.markdown("### 📅 Today's Economic Events")
+        events = get_economic_calendar(FINNHUB_KEY)
+        
+        if events:
+            events_data = []
+            for event in events:
+                time_str = event.get('time', '')[:10] if event.get('time') else 'N/A'
+                events_data.append({
+                    'Time': time_str,
+                    'Event': event.get('event', 'Unknown'),
+                    'Impact': event.get('impact', 'N/A'),
+                    'Country': event.get('country', 'US')
+                })
+            
+            events_df = pd.DataFrame(events_data)
+            st.dataframe(events_df, width='stretch', hide_index=True)
+        else:
+            st.info("No major economic events today")
+        
+        st.markdown("---")
+        
+        st.markdown("### 📰 Latest Market News")
+        news = get_market_news(FINNHUB_KEY)
+        
+        if news:
+            for article in news[:5]:
+                with st.expander(f"**{article.get('headline', 'No title')}** - {article.get('source', 'Unknown')}"):
+                    st.markdown(f"*{article.get('summary', 'No summary available')}*")
+                    st.markdown(f"[Read more]({article.get('url', '#')})")
+                    st.caption(f"Published: {datetime.fromtimestamp(article.get('datetime', 0)).strftime('%Y-%m-%d %H:%M')}")
+        else:
+            st.info("No news available")
+    
+    tab_idx += 1
     
     # 0DTE Levels Tab
     if data_0dte:
@@ -535,7 +803,6 @@ if tab_names:
             col3.metric("Net Delta", f"{data_0dte['net_delta']:,.0f}", "🟢 Bull" if data_0dte['net_delta'] > 0 else "🔴 Bear")
             col4.metric("Expected Move", f"±{data_0dte['nq_em_full']:.0f}")
             
-            # Levels table
             results_df = pd.DataFrame(data_0dte['results'], columns=['Level', 'Price', 'Width', 'Icon'])
             results_df['Price'] = results_df['Price'].round(2)
             st.dataframe(
@@ -548,7 +815,6 @@ if tab_names:
                 hide_index=True
             )
             
-            # Top strikes
             col1, col2 = st.columns(2)
             with col1:
                 st.markdown("**🔴 Top Call Strikes**")
