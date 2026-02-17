@@ -156,20 +156,48 @@ def get_nearest_expiration(df):
     return None, None
 
 def calculate_delta_neutral(df, qqq_price):
-    df['delta_exposure'] = df.apply(
-        lambda x: x['open_interest'] * x['delta'] * 100 * (1 if x['type'] == 'call' else -1),
-        axis=1
-    )
-    strike_delta = df.groupby('strike')['delta_exposure'].sum().reset_index()
+    """
+    Delta Neutral = Strike where dealers have zero delta exposure
+    
+    Assumptions:
+    - Dealers are SHORT calls (so they're LONG delta on calls)
+    - Dealers are LONG puts (so they're SHORT delta on puts)
+    """
+    
+    # Call delta exposure (dealers short calls = long delta)
+    calls = df[df['type'] == 'call'].copy()
+    calls['delta_notional'] = calls['open_interest'] * calls['delta'] * 100 * qqq_price
+    
+    # Put delta exposure (dealers long puts = short delta)
+    # Put delta is already negative, so we flip the sign
+    puts = df[df['type'] == 'put'].copy()
+    puts['delta_notional'] = puts['open_interest'] * puts['delta'] * 100 * qqq_price * -1
+    
+    # Combine
+    all_delta = pd.concat([calls, puts])
+    strike_delta = all_delta.groupby('strike')['delta_notional'].sum().reset_index()
     strike_delta = strike_delta.sort_values('strike')
-    strike_delta['cumulative_delta'] = strike_delta['delta_exposure'].cumsum()
-    zero_cross = strike_delta[strike_delta['cumulative_delta'].abs() == strike_delta['cumulative_delta'].abs().min()]
-    if len(zero_cross) > 0:
-        dn_strike = zero_cross.iloc[0]['strike']
+    
+    # Cumulative delta
+    strike_delta['cumulative_delta'] = strike_delta['delta_notional'].cumsum()
+    
+    # Find zero crossing
+    # Look for sign change in cumulative delta
+    strike_delta['sign'] = np.sign(strike_delta['cumulative_delta'])
+    strike_delta['sign_change'] = strike_delta['sign'].diff()
+    
+    # Zero cross is where sign changes
+    zero_crosses = strike_delta[strike_delta['sign_change'] != 0]
+    
+    if len(zero_crosses) > 0:
+        # Take first zero cross
+        dn_strike = zero_crosses.iloc[0]['strike']
     else:
-        dn_strike = qqq_price
+        # Fallback: find minimum absolute cumulative delta
+        min_idx = strike_delta['cumulative_delta'].abs().idxmin()
+        dn_strike = strike_delta.loc[min_idx, 'strike']
+    
     return dn_strike, strike_delta
-
 # ─────────────────────────────────────────────
 # MAIN APP
 # ─────────────────────────────────────────────
