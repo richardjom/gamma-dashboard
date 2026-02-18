@@ -613,6 +613,7 @@ if tab_names:
                 st.markdown("### Futures & Indices")
                 col1, col2, col3, col4 = st.columns(4)
                 
+                # ES - SAFE ACCESS
                 if 'es' in market_data and market_data['es']['price']:
                     es = market_data['es']
                     col1.metric(
@@ -623,7 +624,7 @@ if tab_names:
                 else:
                     col1.metric("S&P 500 (ES)", "N/A")
                 
-               # Calculate NQ change percentage
+                # NQ - WITH PERCENTAGE
                 try:
                     nq_ticker = yf.Ticker("NQ=F")
                     nq_hist = nq_ticker.history(period="1d")
@@ -637,19 +638,11 @@ if tab_names:
                             f"{nq_change:+.2f} ({nq_change_pct:+.2f}%)"
                         )
                     else:
-                        col2.metric(
-                            "Nasdaq (NQ)",
-                            f"{nq_now:.2f}",
-                            nq_source
-                        )
+                        col2.metric("Nasdaq (NQ)", f"{nq_now:.2f}", nq_source)
                 except:
-                    col2.metric(
-                        "Nasdaq (NQ)",
-                        f"{nq_now:.2f}",
-                        nq_source
-                        )
-                )
+                    col2.metric("Nasdaq (NQ)", f"{nq_now:.2f}", nq_source)
                 
+                # YM - SAFE ACCESS
                 if 'ym' in market_data and market_data['ym']['price']:
                     ym = market_data['ym']
                     col3.metric(
@@ -660,6 +653,7 @@ if tab_names:
                 else:
                     col3.metric("Dow (YM)", "N/A")
                 
+                # RTY - SAFE ACCESS
                 if 'rty' in market_data and market_data['rty']['price']:
                     rty = market_data['rty']
                     col4.metric(
@@ -674,6 +668,7 @@ if tab_names:
                 st.markdown("### Market Indicators")
                 col1, col2, col3 = st.columns(3)
                 
+                # VIX - SAFE ACCESS
                 if 'vix' in market_data and market_data['vix']['price']:
                     vix = market_data['vix']
                     col1.metric(
@@ -684,6 +679,7 @@ if tab_names:
                 else:
                     col1.metric("VIX (Volatility)", "N/A")
                 
+                # 10Y - SAFE ACCESS
                 if '10y' in market_data and market_data['10y']['price']:
                     tnx = market_data['10y']
                     col2.metric(
@@ -694,6 +690,7 @@ if tab_names:
                 else:
                     col2.metric("10Y Treasury", "N/A")
                 
+                # DXY - SAFE ACCESS
                 if 'dxy' in market_data and market_data['dxy']['price']:
                     dxy = market_data['dxy']
                     col3.metric(
