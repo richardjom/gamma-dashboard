@@ -475,7 +475,7 @@ def calculate_sentiment_score(data_0dte, nq_now, vix_level, fg_score):
     return max(0, min(100, score))
 
 def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
-    """Process single expiration and return all analysis"""
+    """Process single expiration and return all analysis - FIXED LEVEL LOGIC"""
     df = df_raw[df_raw['expiration'] == target_exp].copy()
     df = df[df['open_interest'] > 0].copy()
     df = df[df['iv'] > 0].copy()
@@ -517,33 +517,49 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
         axis=1
     )
     
-    # Levels
+    # FIXED LEVEL LOGIC - Ensures proper ordering
     calls = df[df['type'] == 'call'].sort_values('GEX', ascending=False)
     puts = df[df['type'] == 'put'].sort_values('GEX', ascending=True)
     
-    p_wall_strike = calls.iloc[0]['strike'] if len(calls) > 0 else qqq_price
-    p_floor_strike = puts.iloc[0]['strike'] if len(puts) > 0 else qqq_price
+    # Primary Wall = highest call GEX ABOVE current price
+    calls_above = calls[calls['strike'] > qqq_price]
+    if len(calls_above) > 0:
+        p_wall_strike = calls_above.iloc[0]['strike']
+    else:
+        p_wall_strike = calls.iloc[0]['strike'] if len(calls) > 0 else qqq_price * 1.01
     
-    if p_floor_strike == p_wall_strike and len(puts) > 1:
-        p_floor_strike = puts.iloc[1]['strike']
+    # Primary Floor = highest put GEX BELOW current price
+    puts_below = puts[puts['strike'] < qqq_price]
+    if len(puts_below) > 0:
+        p_floor_strike = puts_below.iloc[0]['strike']
+    else:
+        p_floor_strike = puts.iloc[0]['strike'] if len(puts) > 0 else qqq_price * 0.99
     
-    # Secondary Wall
+    # CRITICAL: Ensure floor is ALWAYS below wall
+    if p_floor_strike >= p_wall_strike:
+        p_floor_strike = min(puts['strike']) if len(puts) > 0 else qqq_price * 0.99
+        p_wall_strike = max(calls['strike']) if len(calls) > 0 else qqq_price * 1.01
+    
+    # Secondary Wall - must be ABOVE primary wall
     s_wall_strike = p_wall_strike
-    for i in range(1, len(calls)):
+    for i in range(len(calls)):
         candidate = calls.iloc[i]['strike']
-        if candidate > p_wall_strike:
+        if candidate > p_wall_strike and candidate != p_wall_strike:
             s_wall_strike = candidate
             break
     
-    # Secondary Floor
+    # Secondary Floor - must be BELOW primary floor
     s_floor_strike = p_floor_strike
-    for i in range(1, len(puts)):
+    for i in range(len(puts)):
         candidate = puts.iloc[i]['strike']
-        if (candidate < p_floor_strike and 
-            candidate != p_wall_strike and 
-            candidate != s_wall_strike):
+        if candidate < p_floor_strike and candidate != p_floor_strike:
             s_floor_strike = candidate
             break
+    
+    # Final validation
+    if s_floor_strike >= s_wall_strike:
+        s_floor_strike = p_floor_strike * 0.995
+        s_wall_strike = p_wall_strike * 1.005
     
     g_flip_strike = df.groupby('strike')['GEX'].sum().abs().idxmin()
     
@@ -571,6 +587,8 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
         'net_delta': net_delta,
         'p_wall': p_wall_strike * ratio,
         'p_floor': p_floor_strike * ratio,
+        's_wall': s_wall_strike * ratio,
+        's_floor': s_floor_strike * ratio,
         'calls': calls,
         'puts': puts,
         'strike_delta': strike_delta,
@@ -579,7 +597,6 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
         'nq_em_full': nq_em_full,
         'atm_strike': atm_strike
     }
-
 # ─────────────────────────────────────────────
 # MAIN APP
 # ─────────────────────────────────────────────
