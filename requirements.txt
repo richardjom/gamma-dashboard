@@ -7,3 +7,4 @@ scipy
 requests
 python-dateutil
 plotly
+feedparser
