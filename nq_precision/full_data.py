@@ -35,6 +35,35 @@ def _get_secret(name, default=""):
         return default
 
 
+def _set_quote_meta(symbol, source, timestamp_ms=None):
+    if timestamp_ms is None:
+        timestamp_ms = int(time.time() * 1000)
+    st.session_state[f"quote_meta::{symbol}"] = {
+        "source": source,
+        "timestamp_ms": int(timestamp_ms),
+    }
+
+
+def get_quote_age_seconds(symbol):
+    meta = st.session_state.get(f"quote_meta::{symbol}", {})
+    ts = meta.get("timestamp_ms")
+    if not ts:
+        return None
+    now_ms = int(time.time() * 1000)
+    return max(0, int((now_ms - ts) / 1000))
+
+
+def get_quote_age_label(symbol):
+    age = get_quote_age_seconds(symbol)
+    if age is None:
+        return "N/A"
+    if age < 60:
+        return f"{age}s"
+    mins = age // 60
+    secs = age % 60
+    return f"{mins}m {secs:02d}s"
+
+
 def schwab_is_configured():
     return bool(_get_secret("SCHWAB_APP_KEY") and _get_secret("SCHWAB_APP_SECRET"))
 
@@ -298,6 +327,7 @@ def _get_schwab_futures_price(futures_symbol):
             ts = _extract_quote_timestamp_ms(quotes[key])
             if price and _validate_price_range(futures_symbol, price) and _validate_stale_quote(ts):
                 if _validate_jump(futures_symbol, price):
+                    _set_quote_meta(futures_symbol, f"Schwab ({key})", ts or int(time.time() * 1000))
                     return price, f"Schwab ({key})"
 
     for quote_key, value in quotes.items():
@@ -305,6 +335,11 @@ def _get_schwab_futures_price(futures_symbol):
         ts = _extract_quote_timestamp_ms(value)
         if price and _validate_price_range(futures_symbol, price) and _validate_stale_quote(ts):
             if _validate_jump(futures_symbol, price):
+                _set_quote_meta(
+                    futures_symbol,
+                    f"Schwab ({quote_key})",
+                    ts or int(time.time() * 1000),
+                )
                 return price, f"Schwab ({quote_key})"
     return None, "Schwab unavailable"
 
@@ -318,6 +353,7 @@ def _get_yahoo_chart_price(symbol, min_price=0):
             data = response.json()
             price = data["chart"]["result"][0]["meta"]["regularMarketPrice"]
             if price and price > min_price:
+                _set_quote_meta(symbol, "Yahoo Finance")
                 return float(price)
     except Exception:
         pass
@@ -401,6 +437,7 @@ def get_nq_price_auto(_finnhub_key):
         nq = yf.Ticker("NQ=F")
         data = nq.history(period="1d", interval="1m")
         if not data.empty:
+            _set_quote_meta("NQ=F", "yfinance")
             return float(data["Close"].iloc[-1]), "yfinance"
     except Exception:
         pass
@@ -432,7 +469,7 @@ def get_qqq_price(finnhub_key):
     return None
 
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=30)
 def get_market_overview_yahoo():
     data = {}
     symbols = {
@@ -462,6 +499,7 @@ def get_market_overview_yahoo():
                     "change_pct": float(change_pct),
                     "source": "Yahoo Finance",
                 }
+                _set_quote_meta(symbol, "Yahoo Finance")
             else:
                 data[key] = {
                     "price": 0,
@@ -704,6 +742,7 @@ def get_futures_price(symbol):
         ticker = yf.Ticker(symbol)
         data = ticker.history(period="1d", interval="1m")
         if not data.empty:
+            _set_quote_meta(symbol, "yfinance")
             return float(data["Close"].iloc[-1]), "yfinance"
     except Exception:
         pass

@@ -17,6 +17,7 @@ from nq_precision.full_data import (
     get_market_overview_yahoo,
     get_nq_intraday_data,
     get_nq_price_auto,
+    get_quote_age_label,
     get_qqq_price,
     get_runtime_health,
     get_rss_news,
@@ -108,6 +109,37 @@ def _theme_css(bg_color, card_bg, text_color, accent_color, border_color):
 """,
         unsafe_allow_html=True,
     )
+
+
+def _build_level_interactions(nq_data, data_0dte):
+    if nq_data is None or nq_data.empty or not data_0dte:
+        return None
+
+    levels = {
+        "Delta Neutral": data_0dte["dn_nq"],
+        "Gamma Flip": data_0dte["g_flip_nq"],
+        "Primary Wall": data_0dte["p_wall"],
+        "Primary Floor": data_0dte["p_floor"],
+    }
+    interactions = []
+    prev_close = nq_data["Close"].shift(1)
+    for name, level in levels.items():
+        touches_mask = (nq_data["Low"] <= level) & (nq_data["High"] >= level)
+        breaks_above = ((prev_close < level) & (nq_data["Close"] >= level)).sum()
+        breaks_below = ((prev_close > level) & (nq_data["Close"] <= level)).sum()
+        touches = int(touches_mask.sum())
+        rejections = max(0, touches - int(breaks_above) - int(breaks_below))
+        interactions.append(
+            {
+                "Level": name,
+                "Price": round(level, 2),
+                "Touches": touches,
+                "Breaks Up": int(breaks_above),
+                "Breaks Down": int(breaks_below),
+                "Rejections": int(rejections),
+            }
+        )
+    return pd.DataFrame(interactions)
 
 
 def run_full_app():
@@ -255,6 +287,16 @@ def run_full_app():
                 nq_source = "Manual Fallback"
 
         ratio = nq_now / qqq_price if qqq_price > 0 else 0
+        nq_day_change_pct = 0.0
+        try:
+            nq_hist = yf.Ticker("NQ=F").history(period="1d")
+            if not nq_hist.empty:
+                nq_prev_close = nq_hist["Open"].iloc[0]
+                nq_day_change_pct = (
+                    (nq_now - nq_prev_close) / nq_prev_close * 100 if nq_prev_close != 0 else 0
+                )
+        except Exception:
+            nq_day_change_pct = 0.0
 
         df_raw, cboe_price = get_cboe_options("QQQ")
         if df_raw is None:
@@ -381,6 +423,7 @@ def run_full_app():
 
     st.markdown("---")
 
+    level_interactions_df = None
     if data_0dte:
         st.subheader("📈 NQ Price Action with Key Levels")
         nq_data = get_nq_intraday_data()
@@ -448,6 +491,7 @@ def run_full_app():
 
             fig.update_xaxes(rangeslider_visible=False)
             st.plotly_chart(fig, use_container_width=True)
+            level_interactions_df = _build_level_interactions(nq_data, data_0dte)
         else:
             st.info("📊 Intraday chart data unavailable - check back during market hours")
 
@@ -571,33 +615,19 @@ def run_full_app():
                             f"{es['price']:.2f}",
                             f"{es.get('change', 0):+.2f} ({es.get('change_pct', 0):+.2f}%)",
                         )
-                        col1.caption(f"Source: {es.get('source', 'unknown')}")
+                        col1.caption(
+                            f"Source: {es.get('source', 'unknown')} | Age: {get_quote_age_label('ES=F')}"
+                        )
                     else:
                         col1.metric("S&P 500 (ES)", "N/A")
 
-                    try:
-                        nq_ticker = yf.Ticker("NQ=F")
-                        nq_hist = nq_ticker.history(period="1d")
-                        if not nq_hist.empty:
-                            nq_prev_close = nq_hist["Open"].iloc[0]
-                            nq_change = nq_now - nq_prev_close
-                            nq_change_pct = (
-                                (nq_change / nq_prev_close) * 100
-                                if nq_prev_close != 0
-                                else 0
-                            )
-                            col2.metric(
-                                "Nasdaq (NQ)",
-                                f"{nq_now:.2f}",
-                                f"{nq_change:+.2f} ({nq_change_pct:+.2f}%)",
-                            )
-                            col2.caption(f"Source: {nq_source}")
-                        else:
-                            col2.metric("Nasdaq (NQ)", f"{nq_now:.2f}", nq_source)
-                            col2.caption(f"Source: {nq_source}")
-                    except Exception:
-                        col2.metric("Nasdaq (NQ)", f"{nq_now:.2f}", nq_source)
-                        col2.caption(f"Source: {nq_source}")
+                    nq_change = nq_now * (nq_day_change_pct / 100)
+                    col2.metric(
+                        "Nasdaq (NQ)",
+                        f"{nq_now:.2f}",
+                        f"{nq_change:+.2f} ({nq_day_change_pct:+.2f}%)",
+                    )
+                    col2.caption(f"Source: {nq_source} | Age: {get_quote_age_label('NQ=F')}")
 
                     if "ym" in market_data and market_data["ym"]["price"]:
                         ym = market_data["ym"]
@@ -606,7 +636,9 @@ def run_full_app():
                             f"{ym['price']:.2f}",
                             f"{ym.get('change', 0):+.2f} ({ym.get('change_pct', 0):+.2f}%)",
                         )
-                        col3.caption(f"Source: {ym.get('source', 'unknown')}")
+                        col3.caption(
+                            f"Source: {ym.get('source', 'unknown')} | Age: {get_quote_age_label('YM=F')}"
+                        )
                     else:
                         col3.metric("Dow (YM)", "N/A")
 
@@ -617,7 +649,9 @@ def run_full_app():
                             f"{rty['price']:.2f}",
                             f"{rty.get('change', 0):+.2f} ({rty.get('change_pct', 0):+.2f}%)",
                         )
-                        col4.caption(f"Source: {rty.get('source', 'unknown')}")
+                        col4.caption(
+                            f"Source: {rty.get('source', 'unknown')} | Age: {get_quote_age_label('RTY=F')}"
+                        )
                     else:
                         col4.metric("Russell (RTY)", "N/A")
 
@@ -628,7 +662,9 @@ def run_full_app():
                             f"{gc['price']:.2f}",
                             f"{gc.get('change', 0):+.2f} ({gc.get('change_pct', 0):+.2f}%)",
                         )
-                        col5.caption(f"Source: {gc.get('source', 'unknown')}")
+                        col5.caption(
+                            f"Source: {gc.get('source', 'unknown')} | Age: {get_quote_age_label('GC=F')}"
+                        )
                     else:
                         col5.metric("Gold (GC)", "N/A")
 
@@ -663,7 +699,9 @@ def run_full_app():
                             f"{dxy['price']:.2f}",
                             f"{dxy.get('change', 0):+.2f} ({dxy.get('change_pct', 0):+.2f}%)",
                         )
-                        col3.caption(f"Source: {dxy.get('source', 'unknown')}")
+                        col3.caption(
+                            f"Source: {dxy.get('source', 'unknown')} | Age: {get_quote_age_label('DX=F')}"
+                        )
                     else:
                         col3.metric("Dollar Index", "N/A")
                 else:
@@ -717,6 +755,23 @@ def run_full_app():
                 else:
                     st.info(risk_text)
 
+                es_chg = market_data.get("es", {}).get("change_pct", 0)
+                ym_chg = market_data.get("ym", {}).get("change_pct", 0)
+                rty_chg = market_data.get("rty", {}).get("change_pct", 0)
+                divergence_score = (
+                    abs(nq_day_change_pct - es_chg)
+                    + abs(nq_day_change_pct - ym_chg)
+                    + abs(nq_day_change_pct - rty_chg)
+                ) / 3
+                divergence_text = (
+                    f"Cross-Asset Divergence: **{divergence_score:.2f}%** | "
+                    f"NQ {nq_day_change_pct:+.2f}% vs ES {es_chg:+.2f}% / YM {ym_chg:+.2f}% / RTY {rty_chg:+.2f}%"
+                )
+                if divergence_score >= 1.0:
+                    st.warning(divergence_text)
+                else:
+                    st.info(divergence_text)
+
                 if data_0dte:
                     long_trigger = data_0dte["p_floor"]
                     short_trigger = data_0dte["p_wall"]
@@ -728,6 +783,13 @@ def run_full_app():
                     st.info(trigger_text)
                 else:
                     st.info("Action Triggers: unavailable (waiting for options levels)")
+
+            st.markdown("---")
+            st.markdown("### 🧭 Level Interaction Panel")
+            if level_interactions_df is not None and not level_interactions_df.empty:
+                st.dataframe(level_interactions_df, width="stretch", hide_index=True)
+            else:
+                st.info("Level interaction data unavailable (requires intraday candles).")
 
             st.markdown("---")
             st.markdown("### Top Movers")
