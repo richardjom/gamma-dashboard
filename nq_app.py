@@ -559,6 +559,51 @@ def process_multi_asset():
     
     return results
     
+# ═══════════════════════════════════════════════════
+# RSS NEWS FEED (FREE REAL-TIME)
+# ═══════════════════════════════════════════════════
+
+import feedparser
+from datetime import datetime, timedelta
+
+@st.cache_data(ttl=30)  # 30 second refresh
+def get_rss_news():
+    """Get real-time news from RSS feeds - FREE"""
+    
+    feeds = {
+        'Reuters Business': 'http://feeds.reuters.com/reuters/businessNews',
+        'MarketWatch Top Stories': 'http://feeds.marketwatch.com/marketwatch/topstories',
+        'CNBC Top News': 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664',
+        'WSJ Markets': 'https://feeds.a.dj.com/rss/RSSMarketsMain.xml',
+    }
+    
+    all_news = []
+    
+    for source_name, feed_url in feeds.items():
+        try:
+            feed = feedparser.parse(feed_url)
+            
+            for entry in feed.entries[:5]:  # Top 5 from each source
+                try:
+                    # Parse published date
+                    pub_date = entry.get('published', '')
+                    
+                    all_news.append({
+                        'headline': entry.get('title', 'No title'),
+                        'source': source_name,
+                        'link': entry.get('link', '#'),
+                        'published': pub_date,
+                        'summary': entry.get('summary', '')[:200]  # First 200 chars
+                    })
+                except:
+                    continue
+                    
+        except Exception as e:
+            continue
+    
+    # Sort by most recent (RSS feeds return newest first, so this maintains order)
+    return all_news[:20]  # Return top 20 overall
+    
 @st.cache_data(ttl=14400)  # 4 hours - matches CBOE data refresh
 def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
     """Process single expiration and return all analysis - FIXED LEVEL LOGIC"""
