@@ -840,7 +840,7 @@ if data_0dte:
             </div>
         </div>
         
-        <div style="margin-top: 20px;">
+       <div style="margin-top: 20px;">
             <div class="quick-glance-label">MARKET SENTIMENT</div>
             <div class="sentiment-meter">
                 <div class="sentiment-marker" style="left: {sentiment_score}%;"></div>
@@ -853,7 +853,7 @@ if data_0dte:
         </div>
     </div>
     """, unsafe_allow_html=True)
-
+    
 st.markdown("---")
 
 # ═══════════════════════════════════════════════════
