@@ -7,9 +7,11 @@ import re
 import finnhub
 import yfinance as yf
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import time
 
 # ─────────────────────────────────────────────
-# PAGE CONFIG & DARK THEME
+# PAGE CONFIG
 # ─────────────────────────────────────────────
 st.set_page_config(
     page_title="NQ Precision Map",
@@ -17,51 +19,113 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for dark theme
-st.markdown("""
+# ─────────────────────────────────────────────
+# THEME TOGGLE (STORED IN SESSION STATE)
+# ─────────────────────────────────────────────
+if 'theme' not in st.session_state:
+    st.session_state.theme = 'dark'
+
+def toggle_theme():
+    st.session_state.theme = 'light' if st.session_state.theme == 'dark' else 'dark'
+
+# Theme-specific colors
+if st.session_state.theme == 'dark':
+    BG_COLOR = "#0E1117"
+    CARD_BG = "#1E1E1E"
+    TEXT_COLOR = "#FFF"
+    ACCENT_COLOR = "#00D9FF"
+    BORDER_COLOR = "#333"
+else:
+    BG_COLOR = "#FFFFFF"
+    CARD_BG = "#F0F2F6"
+    TEXT_COLOR = "#000"
+    ACCENT_COLOR = "#0066CC"
+    BORDER_COLOR = "#DDD"
+
+# Custom CSS with theme support
+st.markdown(f"""
 <style>
-    .main {
-        background-color: #0E1117;
-    }
-    .stMetric {
-        background-color: #1E1E1E;
+    .main {{
+        background-color: {BG_COLOR};
+    }}
+    .stMetric {{
+        background-color: {CARD_BG};
         padding: 15px;
         border-radius: 10px;
-        border: 1px solid #333;
-    }
-    .stMetric label {
+        border: 1px solid {BORDER_COLOR};
+    }}
+    .stMetric label {{
         color: #888;
         font-size: 14px;
-    }
-    .stMetric [data-testid="stMetricValue"] {
+    }}
+    .stMetric [data-testid="stMetricValue"] {{
         font-size: 28px;
-        color: #00D9FF;
-    }
-    h1 {
-        color: #00D9FF;
+        color: {ACCENT_COLOR};
+    }}
+    h1 {{
+        color: {ACCENT_COLOR};
         font-weight: 700;
-    }
-    h2, h3 {
-        color: #FFF;
-    }
-    .stTabs [data-baseweb="tab-list"] {
+    }}
+    h2, h3 {{
+        color: {TEXT_COLOR};
+    }}
+    .stTabs [data-baseweb="tab-list"] {{
         gap: 24px;
-        background-color: #1E1E1E;
+        background-color: {CARD_BG};
         padding: 10px;
         border-radius: 10px;
-    }
-    .stTabs [data-baseweb="tab"] {
+    }}
+    .stTabs [data-baseweb="tab"] {{
         background-color: transparent;
         color: #888;
         font-weight: 600;
         padding: 10px 20px;
         border-radius: 5px;
-    }
-    .stTabs [aria-selected="true"] {
-        background-color: #00D9FF;
+    }}
+    .stTabs [aria-selected="true"] {{
+        background-color: {ACCENT_COLOR};
         color: #000;
-    }
+    }}
+    .quick-glance {{
+        background: linear-gradient(135deg, {CARD_BG} 0%, {BORDER_COLOR} 100%);
+        padding: 25px;
+        border-radius: 15px;
+        border: 2px solid {ACCENT_COLOR};
+        margin-bottom: 20px;
+    }}
+    .sentiment-meter {{
+        height: 30px;
+        background: linear-gradient(90deg, #FF4444 0%, #FFAA00 50%, #44FF44 100%);
+        border-radius: 15px;
+        position: relative;
+    }}
+    .sentiment-marker {{
+        position: absolute;
+        width: 4px;
+        height: 40px;
+        background: #000;
+        top: -5px;
+        border-radius: 2px;
+    }}
+    .keyboard-hint {{
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background: {CARD_BG};
+        padding: 10px;
+        border-radius: 8px;
+        font-size: 12px;
+        color: #888;
+        border: 1px solid {BORDER_COLOR};
+    }}
 </style>
+""", unsafe_allow_html=True)
+
+# Keyboard shortcuts hint
+st.markdown("""
+<div class="keyboard-hint">
+⌨️ Shortcuts: R=Refresh | 1-6=Tabs | T=Theme
+</div>
 """, unsafe_allow_html=True)
 
 st.title("📊 NQ Precision Map")
@@ -73,7 +137,35 @@ FINNHUB_KEY = "csie7q9r01qt46e7sjm0csie7q9r01qt46e7sjmg"
 # SIDEBAR
 # ─────────────────────────────────────────────
 st.sidebar.header("⚙️ Settings")
+
+# Theme toggle button
+if st.sidebar.button("🎨 Toggle Theme", on_click=toggle_theme):
+    st.rerun()
+
 manual_override = st.sidebar.checkbox("✏️ Manual NQ Override")
+
+# Auto-refresh toggle
+auto_refresh = st.sidebar.checkbox("🔄 Auto-Refresh (60s)", value=True)
+if auto_refresh:
+    refresh_interval = st.sidebar.slider("Refresh Interval (seconds)", 30, 300, 60)
+
+# ─────────────────────────────────────────────
+# AUTO-REFRESH COUNTDOWN
+# ─────────────────────────────────────────────
+if auto_refresh:
+    if 'last_refresh' not in st.session_state:
+        st.session_state.last_refresh = time.time()
+    
+    time_since_refresh = time.time() - st.session_state.last_refresh
+    time_until_refresh = max(0, refresh_interval - int(time_since_refresh))
+    
+    if time_until_refresh == 0:
+        st.session_state.last_refresh = time.time()
+        st.rerun()
+    
+    st.sidebar.markdown(f"**Next refresh in:** {time_until_refresh}s")
+    placeholder = st.sidebar.empty()
+    placeholder.progress((refresh_interval - time_until_refresh) / refresh_interval)
 
 # ─────────────────────────────────────────────
 # DATA FUNCTIONS
@@ -133,6 +225,18 @@ def get_nq_price_auto(finnhub_key):
     return None, "unavailable"
 
 @st.cache_data(ttl=10)
+def get_nq_intraday_data():
+    """Get last 50 candles for chart"""
+    try:
+        nq = yf.Ticker("NQ=F")
+        data = nq.history(period="1d", interval="5m")
+        if not data.empty:
+            return data.tail(50)
+    except:
+        pass
+    return None
+
+@st.cache_data(ttl=10)
 def get_qqq_price(finnhub_key):
     try:
         client = finnhub.Client(api_key=finnhub_key)
@@ -146,7 +250,7 @@ def get_qqq_price(finnhub_key):
 
 @st.cache_data(ttl=300)
 def get_market_overview_yahoo():
-    """Get market data from Yahoo Finance - FREE"""
+    """Get market data from Yahoo Finance"""
     data = {}
     
     symbols = {
@@ -329,6 +433,47 @@ def calculate_delta_neutral(df, qqq_price):
     
     return dn_strike, strike_delta, df_calc
 
+def calculate_sentiment_score(data_0dte, nq_now, vix_level, fg_score):
+    """Calculate 0-100 sentiment score"""
+    score = 50  # Start neutral
+    
+    if data_0dte:
+        dn_distance = nq_now - data_0dte['dn_nq']
+        gf_distance = nq_now - data_0dte['g_flip_nq']
+        
+        # Delta Neutral positioning (-20 to +20)
+        if abs(dn_distance) > 200:
+            if dn_distance > 0:
+                score -= 15  # Overextended bearish
+            else:
+                score += 15  # Oversold bullish
+        
+        # Gamma regime (-15 to +15)
+        if gf_distance > 0:
+            score -= 10  # Negative gamma = bearish
+        else:
+            score += 10  # Positive gamma = bullish
+        
+        # Net Delta (-10 to +10)
+        if data_0dte['net_delta'] > 0:
+            score += 5  # Bullish positioning
+        else:
+            score -= 5  # Bearish positioning
+    
+    # VIX level (-10 to +10)
+    if vix_level > 20:
+        score -= 10  # High fear
+    elif vix_level < 15:
+        score += 5  # Low fear
+    
+    # Fear & Greed (-10 to +10)
+    if fg_score < 30:
+        score += 10  # Extreme fear = contrarian buy
+    elif fg_score > 70:
+        score -= 10  # Extreme greed = contrarian sell
+    
+    return max(0, min(100, score))
+
 def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
     """Process single expiration and return all analysis"""
     df = df_raw[df_raw['expiration'] == target_exp].copy()
@@ -339,7 +484,7 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
     if len(df) == 0:
         return None
     
-    # Calculate DN
+    # Calculate Delta Neutral
     dn_strike, strike_delta, df = calculate_delta_neutral(df, qqq_price)
     dn_nq = dn_strike * ratio
     
@@ -372,7 +517,7 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
         axis=1
     )
     
-    # Levels - FIXED LOGIC
+    # Levels
     calls = df[df['type'] == 'call'].sort_values('GEX', ascending=False)
     puts = df[df['type'] == 'put'].sort_values('GEX', ascending=True)
     
@@ -382,7 +527,7 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
     if p_floor_strike == p_wall_strike and len(puts) > 1:
         p_floor_strike = puts.iloc[1]['strike']
     
-    # Secondary Wall - must be ABOVE primary wall
+    # Secondary Wall
     s_wall_strike = p_wall_strike
     for i in range(1, len(calls)):
         candidate = calls.iloc[i]['strike']
@@ -390,7 +535,7 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
             s_wall_strike = candidate
             break
     
-    # Secondary Floor - must be BELOW primary floor
+    # Secondary Floor
     s_floor_strike = p_floor_strike
     for i in range(1, len(puts)):
         candidate = puts.iloc[i]['strike']
@@ -404,12 +549,12 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
     
     results = [
         ("Delta Neutral", dn_nq, 5.0, "⚖️"),
-        ("Target Res", (p_wall_strike * ratio) + 35, 3.0, "🎯"),
+        ("Target Resistance", (p_wall_strike * ratio) + 35, 3.0, "🎯"),
         ("Primary Wall", p_wall_strike * ratio, 5.0, "🔴"),
         ("Primary Floor", p_floor_strike * ratio, 5.0, "🟢"),
-        ("Target Supp", (p_floor_strike * ratio) - 35, 3.0, "🎯"),
+        ("Target Support", (p_floor_strike * ratio) - 35, 3.0, "🎯"),
         ("Secondary Wall", s_wall_strike * ratio, 3.0, "🟠"),
-        ("Secondary Flr", s_floor_strike * ratio, 3.0, "🟡"),
+        ("Secondary Floor", s_floor_strike * ratio, 3.0, "🟡"),
         ("Gamma Flip", g_flip_strike * ratio, 10.0, "⚡"),
         ("Upper 0.50σ", nq_now + nq_em_050, 5.0, "📊"),
         ("Upper 0.25σ", nq_now + nq_em_025, 3.0, "📊"),
@@ -492,6 +637,191 @@ with st.spinner("🔄 Loading multi-timeframe data..."):
     
     if exp_monthly and exp_monthly not in [exp_0dte, exp_weekly]:
         data_monthly = process_expiration(df_raw, exp_monthly, qqq_price, ratio, nq_now)
+    
+    # Get market data for sentiment
+    market_data = get_market_overview_yahoo()
+    vix_level = market_data.get('vix', {}).get('price', 15)
+    fg = get_fear_greed_index()
+    
+    # Calculate sentiment score
+    sentiment_score = calculate_sentiment_score(data_0dte, nq_now, vix_level, fg['score'])
+
+# ═══════════════════════════════════════════════════
+# QUICK GLANCE DASHBOARD (NEW FEATURE #2)
+# ═══════════════════════════════════════════════════
+if data_0dte:
+    dn_distance = nq_now - data_0dte['dn_nq']
+    gf_distance = nq_now - data_0dte['g_flip_nq']
+    above_gf = gf_distance > 0
+    
+    # Determine regime and bias
+    if above_gf:
+        regime = "🔴 NEGATIVE GAMMA"
+        regime_desc = "Unstable / Whipsaw Risk"
+    else:
+        regime = "🟢 POSITIVE GAMMA"
+        regime_desc = "Stable / Range-Bound"
+    
+    if abs(dn_distance) > 200:
+        if dn_distance > 0:
+            bias = "⬇️ SHORT BIAS"
+            bias_desc = f"Price extended {dn_distance:.0f}pts above Delta Neutral"
+        else:
+            bias = "⬆️ LONG BIAS"
+            bias_desc = f"Price {abs(dn_distance):.0f}pts below Delta Neutral"
+    else:
+        bias = "⚖️ NEUTRAL"
+        bias_desc = "Price near Delta Neutral equilibrium"
+    
+    key_level_price = data_0dte['g_flip_nq'] if above_gf else data_0dte['dn_nq']
+    key_level_name = "Gamma Flip" if above_gf else "Delta Neutral"
+    
+    st.markdown(f"""
+    <div class="quick-glance">
+        <h2 style="margin-top: 0;">🎯 QUICK GLANCE</h2>
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-top: 20px;">
+            <div>
+                <p style="color: #888; margin: 0; font-size: 14px;">CURRENT PRICE</p>
+                <p style="font-size: 32px; margin: 5px 0; color: {ACCENT_COLOR}; font-weight: bold;">{nq_now:.2f}</p>
+                <p style="color: #888; margin: 0; font-size: 12px;">{nq_source}</p>
+            </div>
+            <div>
+                <p style="color: #888; margin: 0; font-size: 14px;">REGIME</p>
+                <p style="font-size: 24px; margin: 5px 0; font-weight: bold;">{regime}</p>
+                <p style="color: #888; margin: 0; font-size: 12px;">{regime_desc}</p>
+            </div>
+            <div>
+                <p style="color: #888; margin: 0; font-size: 14px;">BIAS</p>
+                <p style="font-size: 24px; margin: 5px 0; font-weight: bold;">{bias}</p>
+                <p style="color: #888; margin: 0; font-size: 12px;">{bias_desc}</p>
+            </div>
+            <div>
+                <p style="color: #888; margin: 0; font-size: 14px;">KEY LEVEL</p>
+                <p style="font-size: 24px; margin: 5px 0; font-weight: bold;">{key_level_price:.2f}</p>
+                <p style="color: #888; margin: 0; font-size: 12px;">{key_level_name}</p>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Sentiment Score Meter (NEW FEATURE #11)
+    st.markdown("### 📊 Market Sentiment Score")
+    
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        # Sentiment interpretation
+        if sentiment_score < 30:
+            sentiment_text = "BEARISH"
+            sentiment_color = "#FF4444"
+        elif sentiment_score < 45:
+            sentiment_text = "CAUTIOUS BEARISH"
+            sentiment_color = "#FFAA00"
+        elif sentiment_score < 55:
+            sentiment_text = "NEUTRAL"
+            sentiment_color = "#FFFF00"
+        elif sentiment_score < 70:
+            sentiment_text = "CAUTIOUS BULLISH"
+            sentiment_color = "#AAFF00"
+        else:
+            sentiment_text = "BULLISH"
+            sentiment_color = "#44FF44"
+        
+        st.markdown(f"""
+        <div style="position: relative;">
+            <div class="sentiment-meter">
+                <div class="sentiment-marker" style="left: {sentiment_score}%;"></div>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-top: 5px; font-size: 12px; color: #888;">
+                <span>0 (Bearish)</span>
+                <span>50 (Neutral)</span>
+                <span>100 (Bullish)</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.metric("Score", f"{sentiment_score}/100", sentiment_text)
+
+st.markdown("---")
+
+# ═══════════════════════════════════════════════════
+# INTERACTIVE CHART WITH LEVELS (NEW FEATURE #3)
+# ═══════════════════════════════════════════════════
+if data_0dte:
+    st.subheader("📈 NQ Price Action with Key Levels")
+    
+    nq_data = get_nq_intraday_data()
+    
+    if nq_data is not None and not nq_data.empty:
+        fig = go.Figure()
+        
+        # Candlestick chart
+        fig.add_trace(go.Candlestick(
+            x=nq_data.index,
+            open=nq_data['Open'],
+            high=nq_data['High'],
+            low=nq_data['Low'],
+            close=nq_data['Close'],
+            name='NQ',
+            increasing_line_color='#44FF44',
+            decreasing_line_color='#FF4444'
+        ))
+        
+        # Add key levels as horizontal lines
+        levels_to_plot = [
+            (data_0dte['dn_nq'], "Delta Neutral", "#FFD700", "dot"),
+            (data_0dte['g_flip_nq'], "Gamma Flip", "#FF00FF", "dash"),
+            (data_0dte['p_wall'], "Primary Wall", "#FF4444", "solid"),
+            (data_0dte['p_floor'], "Primary Floor", "#44FF44", "solid"),
+        ]
+        
+        for level_price, level_name, color, dash in levels_to_plot:
+            fig.add_hline(
+                y=level_price,
+                line_dash=dash,
+                line_color=color,
+                annotation_text=f"{level_name}: {level_price:.2f}",
+                annotation_position="right"
+            )
+        
+        # Shade gamma regime zones
+        if data_0dte['g_flip_nq'] < nq_data['High'].max():
+            fig.add_hrect(
+                y0=data_0dte['g_flip_nq'],
+                y1=nq_data['High'].max(),
+                fillcolor="red",
+                opacity=0.1,
+                annotation_text="Negative Gamma Zone",
+                annotation_position="top right"
+            )
+        
+        if data_0dte['g_flip_nq'] > nq_data['Low'].min():
+            fig.add_hrect(
+                y0=nq_data['Low'].min(),
+                y1=data_0dte['g_flip_nq'],
+                fillcolor="green",
+                opacity=0.1,
+                annotation_text="Positive Gamma Zone",
+                annotation_position="bottom right"
+            )
+        
+        fig.update_layout(
+            template="plotly_dark" if st.session_state.theme == 'dark' else "plotly_white",
+            height=500,
+            xaxis_title="Time (5-min candles)",
+            yaxis_title="NQ Price",
+            showlegend=False,
+            hovermode='x unified'
+        )
+        
+        fig.update_xaxes(rangeslider_visible=False)
+        
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("📊 Intraday chart data unavailable - check back during market hours")
+
+st.markdown("---")
 
 # ─────────────────────────────────────────────
 # COMPACT HEADER METRICS
@@ -517,12 +847,6 @@ elif data_0dte:
     col2.metric("⚡ Gamma Flip", f"{data_0dte['g_flip_nq']:.2f}")
     delta_sentiment = "🟢 Bullish" if data_0dte['net_delta'] > 0 else "🔴 Bearish"
     col3.metric("📊 Net Delta", f"{data_0dte['net_delta']:,.0f}", delta_sentiment)
-elif data_weekly:
-    col1, col2, col3 = st.columns(3)
-    col1.metric("⚖️ Delta Neutral", f"{data_weekly['dn_nq']:.2f}")
-    col2.metric("⚡ Gamma Flip", f"{data_weekly['g_flip_nq']:.2f}")
-    delta_sentiment = "🟢 Bullish" if data_weekly['net_delta'] > 0 else "🔴 Bearish"
-    col3.metric("📊 Net Delta", f"{data_weekly['net_delta']:,.0f}", delta_sentiment)
 
 st.markdown("---")
 
@@ -607,7 +931,6 @@ if tab_names:
         st.subheader("📈 Market Overview")
         
         with st.spinner("Loading market data..."):
-            market_data = get_market_overview_yahoo()
             
             if market_data:
                 st.markdown("### Futures & Indices")
@@ -700,7 +1023,6 @@ if tab_names:
         st.markdown("---")
         
         st.markdown("### Market Sentiment")
-        fg = get_fear_greed_index()
         
         col1, col2 = st.columns([1, 3])
         with col1:
@@ -915,7 +1237,7 @@ if tab_names:
         
         tab_idx += 1
     
-    # Daily Bread Tab
+    # Daily Bread Tab (continues from previous code...)
     with tabs[tab_idx]:
         st.markdown("# 🍞 DAILY BREAD")
         st.markdown(f"**Your NQ Market Intelligence Report** • {datetime.now().strftime('%A, %B %d, %Y')}")
@@ -940,9 +1262,6 @@ if tab_names:
                 tone = "⚖️ BALANCED"
                 tone_color = "🟢"
             
-            gamma_regime = "🔴 NEGATIVE GAMMA" if above_gf else "🟢 POSITIVE GAMMA"
-            dealer_stance = "🔴 NET SHORT DELTA" if data_0dte['net_delta'] < 0 else "🟢 NET LONG DELTA"
-            
             # EXECUTIVE SUMMARY
             st.markdown("---")
             st.markdown("## 📊 EXECUTIVE SUMMARY")
@@ -952,7 +1271,7 @@ if tab_names:
                 summary = f"""NQ is trading **{dn_distance:.0f} points above Delta Neutral** at {data_0dte['dn_nq']:.2f}, indicating an 
 **overextended market** with dealers holding massive short delta positions. Price is operating in **negative gamma** 
 territory above {data_0dte['g_flip_nq']:.2f}, creating unstable conditions prone to whipsaws and exaggerated moves. 
-**Mean reversion back toward DN is the highest probability scenario**, with rallies likely facing heavy resistance 
+**Mean reversion back toward Delta Neutral is the highest probability scenario**, with rallies likely facing heavy resistance 
 at the {data_0dte['p_wall']:.2f} primary wall."""
             elif not above_dn and not above_gf:
                 summary = f"""NQ is trading **{abs(dn_distance):.0f} points below Delta Neutral** at {data_0dte['dn_nq']:.2f} in **positive gamma** 
@@ -993,7 +1312,7 @@ resistance or {data_0dte['p_floor']:.2f} support to establish directional bias."
             
             with col4:
                 st.metric(
-                    "DN Distance",
+                    "Delta Neutral Distance",
                     f"{abs(dn_distance):.0f} pts",
                     "Above" if above_dn else "Below"
                 )
@@ -1005,7 +1324,7 @@ resistance or {data_0dte['p_floor']:.2f} support to establish directional bias."
             # Determine top 3 most important levels
             levels_priority = []
             
-            # Always include DN and GF
+            # Always include Delta Neutral and Gamma Flip
             levels_priority.append({
                 'level': 'Delta Neutral',
                 'price': data_0dte['dn_nq'],
@@ -1120,9 +1439,9 @@ resistance or {data_0dte['p_floor']:.2f} support to establish directional bias."
             if data_weekly:
                 dn_spread = abs(data_0dte['dn_nq'] - data_weekly['dn_nq'])
                 if dn_spread < 50:
-                    watch_list.append(f"🔍 **Timeframe alignment** - 0DTE/Weekly DN converging creates strong magnet")
+                    watch_list.append(f"🔍 **Timeframe alignment** - 0DTE/Weekly Delta Neutral converging creates strong magnet")
                 else:
-                    watch_list.append(f"🔍 **Timeframe divergence** - {dn_spread:.0f} point spread between 0DTE/Weekly DN suggests chop")
+                    watch_list.append(f"🔍 **Timeframe divergence** - {dn_spread:.0f} point spread between 0DTE/Weekly Delta Neutral suggests chop")
             
             # Options expiration
             watch_list.append("🔍 **0DTE expiration** - Levels reset tomorrow, gamma exposure shifts")
@@ -1188,7 +1507,13 @@ resistance or {data_0dte['p_floor']:.2f} support to establish directional bias."
             fig.add_trace(go.Bar(x=pos_gex['strike'], y=pos_gex['GEX'], name='Calls', marker_color='#FF4444'))
             fig.add_trace(go.Bar(x=neg_gex['strike'], y=neg_gex['GEX'], name='Puts', marker_color='#44FF44'))
             fig.add_vline(x=qqq_price, line_dash="dash", line_color="#00D9FF", annotation_text="Current")
-            fig.update_layout(template="plotly_dark", plot_bgcolor='#0E1117', paper_bgcolor='#0E1117', height=400, showlegend=True)
+            fig.update_layout(
+                template="plotly_dark" if st.session_state.theme == 'dark' else "plotly_white",
+                plot_bgcolor='#0E1117' if st.session_state.theme == 'dark' else '#FFFFFF',
+                paper_bgcolor='#0E1117' if st.session_state.theme == 'dark' else '#FFFFFF',
+                height=400,
+                showlegend=True
+            )
             st.plotly_chart(fig, use_container_width=True)
         
         if data_weekly:
@@ -1200,7 +1525,13 @@ resistance or {data_0dte['p_floor']:.2f} support to establish directional bias."
             fig.add_trace(go.Bar(x=pos_gex['strike'], y=pos_gex['GEX'], name='Calls', marker_color='#FF4444'))
             fig.add_trace(go.Bar(x=neg_gex['strike'], y=neg_gex['GEX'], name='Puts', marker_color='#44FF44'))
             fig.add_vline(x=qqq_price, line_dash="dash", line_color="#00D9FF", annotation_text="Current")
-            fig.update_layout(template="plotly_dark", plot_bgcolor='#0E1117', paper_bgcolor='#0E1117', height=400, showlegend=True)
+            fig.update_layout(
+                template="plotly_dark" if st.session_state.theme == 'dark' else "plotly_white",
+                plot_bgcolor='#0E1117' if st.session_state.theme == 'dark' else '#FFFFFF',
+                paper_bgcolor='#0E1117' if st.session_state.theme == 'dark' else '#FFFFFF',
+                height=400,
+                showlegend=True
+            )
             st.plotly_chart(fig, use_container_width=True)
         
         if data_monthly:
@@ -1212,7 +1543,13 @@ resistance or {data_0dte['p_floor']:.2f} support to establish directional bias."
             fig.add_trace(go.Bar(x=pos_gex['strike'], y=pos_gex['GEX'], name='Calls', marker_color='#FF4444'))
             fig.add_trace(go.Bar(x=neg_gex['strike'], y=neg_gex['GEX'], name='Puts', marker_color='#44FF44'))
             fig.add_vline(x=qqq_price, line_dash="dash", line_color="#00D9FF", annotation_text="Current")
-            fig.update_layout(template="plotly_dark", plot_bgcolor='#0E1117', paper_bgcolor='#0E1117', height=400, showlegend=True)
+            fig.update_layout(
+                template="plotly_dark" if st.session_state.theme == 'dark' else "plotly_white",
+                plot_bgcolor='#0E1117' if st.session_state.theme == 'dark' else '#FFFFFF',
+                paper_bgcolor='#0E1117' if st.session_state.theme == 'dark' else '#FFFFFF',
+                height=400,
+                showlegend=True
+            )
             st.plotly_chart(fig, use_container_width=True)
     
     tab_idx += 1
@@ -1233,9 +1570,14 @@ resistance or {data_0dte['p_floor']:.2f} support to establish directional bias."
                 fill='tozeroy'
             ))
             fig.add_hline(y=0, line_dash="dash", line_color="white")
-            fig.add_vline(x=data_0dte['dn_strike'], line_dash="dot", line_color="#FFD700", annotation_text="DN")
+            fig.add_vline(x=data_0dte['dn_strike'], line_dash="dot", line_color="#FFD700", annotation_text="Delta Neutral")
             fig.add_vline(x=qqq_price, line_dash="dash", line_color="#FF4444", annotation_text="Current")
-            fig.update_layout(template="plotly_dark", plot_bgcolor='#0E1117', paper_bgcolor='#0E1117', height=400)
+            fig.update_layout(
+                template="plotly_dark" if st.session_state.theme == 'dark' else "plotly_white",
+                plot_bgcolor='#0E1117' if st.session_state.theme == 'dark' else '#FFFFFF',
+                paper_bgcolor='#0E1117' if st.session_state.theme == 'dark' else '#FFFFFF',
+                height=400
+            )
             st.plotly_chart(fig, use_container_width=True)
         
         if data_weekly:
@@ -1250,9 +1592,14 @@ resistance or {data_0dte['p_floor']:.2f} support to establish directional bias."
                 fill='tozeroy'
             ))
             fig.add_hline(y=0, line_dash="dash", line_color="white")
-            fig.add_vline(x=data_weekly['dn_strike'], line_dash="dot", line_color="#FFD700", annotation_text="DN")
+            fig.add_vline(x=data_weekly['dn_strike'], line_dash="dot", line_color="#FFD700", annotation_text="Delta Neutral")
             fig.add_vline(x=qqq_price, line_dash="dash", line_color="#FF4444", annotation_text="Current")
-            fig.update_layout(template="plotly_dark", plot_bgcolor='#0E1117', paper_bgcolor='#0E1117', height=400)
+            fig.update_layout(
+                template="plotly_dark" if st.session_state.theme == 'dark' else "plotly_white",
+                plot_bgcolor='#0E1117' if st.session_state.theme == 'dark' else '#FFFFFF',
+                paper_bgcolor='#0E1117' if st.session_state.theme == 'dark' else '#FFFFFF',
+                height=400
+            )
             st.plotly_chart(fig, use_container_width=True)
         
         if data_monthly:
@@ -1267,14 +1614,21 @@ resistance or {data_0dte['p_floor']:.2f} support to establish directional bias."
                 fill='tozeroy'
             ))
             fig.add_hline(y=0, line_dash="dash", line_color="white")
-            fig.add_vline(x=data_monthly['dn_strike'], line_dash="dot", line_color="#FFD700", annotation_text="DN")
+            fig.add_vline(x=data_monthly['dn_strike'], line_dash="dot", line_color="#FFD700", annotation_text="Delta Neutral")
             fig.add_vline(x=qqq_price, line_dash="dash", line_color="#FF4444", annotation_text="Current")
-            fig.update_layout(template="plotly_dark", plot_bgcolor='#0E1117', paper_bgcolor='#0E1117', height=400)
+            fig.update_layout(
+                template="plotly_dark" if st.session_state.theme == 'dark' else "plotly_white",
+                plot_bgcolor='#0E1117' if st.session_state.theme == 'dark' else '#FFFFFF',
+                paper_bgcolor='#0E1117' if st.session_state.theme == 'dark' else '#FFFFFF',
+                height=400
+            )
             st.plotly_chart(fig, use_container_width=True)
 
 st.markdown("---")
 st.caption(f"Updated: {datetime.now().strftime('%H:%M:%S')} | CBOE • {nq_source}")
 
-if st.sidebar.button("🔄 Refresh", width='stretch'):
+# Manual refresh button
+if st.sidebar.button("🔄 Refresh Now", use_container_width=True):
+    st.session_state.last_refresh = time.time()
     st.cache_data.clear()
     st.rerun()
