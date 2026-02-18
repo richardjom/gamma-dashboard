@@ -885,7 +885,7 @@ with col_left:
         }
         
         levels_df = pd.DataFrame(levels_data)
-        st.dataframe(levels_df, hide_index=True, use_container_width=True)
+        st.dataframe(levels_df, hide_index=True, width='stretch')
     
     st.markdown('</div>', unsafe_allow_html=True)
     
@@ -985,14 +985,20 @@ with col_middle:
     
     st.markdown('</div>', unsafe_allow_html=True)
     
-    # Daily Bread Summary
+   # Daily Bread Summary
     st.markdown('<div class="koyfin-card"><div class="koyfin-card-header">🍞 Daily Bread Summary</div>', unsafe_allow_html=True)
     
     if data_0dte:
-        if above_dn and above_gf and abs(dn_distance) > 200:
-            summary = f"**OVEREXTENDED UPSIDE:** NQ trading {dn_distance:.0f}pts above Delta Neutral in negative gamma. High reversion risk to {data_0dte['dn_nq']:.2f}. Fade rallies into {data_0dte['p_wall']:.2f} wall."
+        # Recalculate these variables for this section
+        dn_dist = nq_now - data_0dte['dn_nq']
+        gf_dist = nq_now - data_0dte['g_flip_nq']
+        is_above_dn = dn_dist > 0
+        is_above_gf = gf_dist > 0
+        
+        if is_above_dn and is_above_gf and abs(dn_dist) > 200:
+            summary = f"**OVEREXTENDED UPSIDE:** NQ trading {dn_dist:.0f}pts above Delta Neutral in negative gamma. High reversion risk to {data_0dte['dn_nq']:.2f}. Fade rallies into {data_0dte['p_wall']:.2f} wall."
             st.warning(summary)
-        elif not above_dn and not above_gf:
+        elif not is_above_dn and not is_above_gf:
             summary = f"**RANGE-BOUND:** Positive gamma regime. Price stable between {data_0dte['p_floor']:.2f} floor and {data_0dte['p_wall']:.2f} wall. Mean reversion trades favored."
             st.success(summary)
         else:
@@ -1000,7 +1006,7 @@ with col_middle:
             st.info(summary)
     
     st.markdown('</div>', unsafe_allow_html=True)
-
+    
 # RIGHT COLUMN - News & Events
 with col_right:
     # Economic Calendar
