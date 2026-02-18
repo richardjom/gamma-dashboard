@@ -1,0 +1,2 @@
+"""NQ Precision app package."""
+
