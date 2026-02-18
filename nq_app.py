@@ -623,10 +623,31 @@ if tab_names:
                 else:
                     col1.metric("S&P 500 (ES)", "N/A")
                 
-                col2.metric(
-                    "Nasdaq (NQ)",
-                    f"{nq_now:.2f}",
-                    nq_source
+               # Calculate NQ change percentage
+                try:
+                    nq_ticker = yf.Ticker("NQ=F")
+                    nq_hist = nq_ticker.history(period="1d")
+                    if not nq_hist.empty:
+                        nq_prev_close = nq_hist['Open'].iloc[0]
+                        nq_change = nq_now - nq_prev_close
+                        nq_change_pct = (nq_change / nq_prev_close) * 100 if nq_prev_close != 0 else 0
+                        col2.metric(
+                            "Nasdaq (NQ)",
+                            f"{nq_now:.2f}",
+                            f"{nq_change:+.2f} ({nq_change_pct:+.2f}%)"
+                        )
+                    else:
+                        col2.metric(
+                            "Nasdaq (NQ)",
+                            f"{nq_now:.2f}",
+                            nq_source
+                        )
+                except:
+                    col2.metric(
+                        "Nasdaq (NQ)",
+                        f"{nq_now:.2f}",
+                        nq_source
+                        )
                 )
                 
                 if 'ym' in market_data and market_data['ym']['price']:
