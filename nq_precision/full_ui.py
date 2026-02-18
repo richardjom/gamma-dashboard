@@ -80,6 +80,41 @@ def _theme_css(bg_color, card_bg, text_color, accent_color, border_color):
         border: 2px solid {accent_color};
         margin-bottom: 20px;
     }}
+    .quick-grid {{
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 20px;
+        margin-top: 20px;
+    }}
+    .quick-grid-compact {{
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 12px;
+        margin-top: 14px;
+    }}
+    .quick-stat {{
+        border: 1px solid {border_color};
+        background: rgba(0, 0, 0, 0.12);
+        border-radius: 10px;
+        padding: 10px 12px;
+    }}
+    .quick-stat .label {{
+        color: #888;
+        font-size: 11px;
+        margin: 0;
+        letter-spacing: 0.3px;
+    }}
+    .quick-stat .value {{
+        font-size: 17px;
+        margin: 4px 0 0 0;
+        font-weight: 700;
+        color: {text_color};
+    }}
+    .quick-stat .sub {{
+        color: #9aa0a6;
+        font-size: 11px;
+        margin: 4px 0 0 0;
+    }}
     .sentiment-meter {{
         height: 30px;
         background: linear-gradient(90deg, #FF4444 0%, #FFAA00 50%, #44FF44 100%);
@@ -355,12 +390,17 @@ def run_full_app():
 
         key_level_price = data_0dte["g_flip_nq"] if above_gf else data_0dte["dn_nq"]
         key_level_name = "Gamma Flip" if above_gf else "Delta Neutral"
+        em_points = data_0dte.get("nq_em_full", 0)
+        gf_dist = nq_now - data_0dte["g_flip_nq"]
+        dn_dist = nq_now - data_0dte["dn_nq"]
+        level_gap = abs(data_0dte["p_wall"] - data_0dte["p_floor"])
+        source_age = get_quote_age_label("NQ=F")
 
         st.markdown(
             f"""
     <div class="quick-glance">
         <h2 style="margin-top: 0;">🎯 QUICK GLANCE</h2>
-        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-top: 20px;">
+        <div class="quick-grid">
             <div>
                 <p style="color: #888; margin: 0; font-size: 14px;">CURRENT PRICE</p>
                 <p style="font-size: 32px; margin: 5px 0; color: {accent_color}; font-weight: bold;">{nq_now:.2f}</p>
@@ -380,6 +420,33 @@ def run_full_app():
                 <p style="color: #888; margin: 0; font-size: 14px;">KEY LEVEL</p>
                 <p style="font-size: 24px; margin: 5px 0; font-weight: bold;">{key_level_price:.2f}</p>
                 <p style="color: #888; margin: 0; font-size: 12px;">{key_level_name}</p>
+            </div>
+        </div>
+        <div class="quick-grid-compact">
+            <div class="quick-stat">
+                <p class="label">GAMMA FLIP DISTANCE</p>
+                <p class="value">{gf_dist:+.0f} pts</p>
+                <p class="sub">vs {data_0dte['g_flip_nq']:.2f}</p>
+            </div>
+            <div class="quick-stat">
+                <p class="label">DELTA NEUTRAL DISTANCE</p>
+                <p class="value">{dn_dist:+.0f} pts</p>
+                <p class="sub">vs {data_0dte['dn_nq']:.2f}</p>
+            </div>
+            <div class="quick-stat">
+                <p class="label">EXPECTED MOVE</p>
+                <p class="value">±{em_points:.0f}</p>
+                <p class="sub">0DTE implied range</p>
+            </div>
+            <div class="quick-stat">
+                <p class="label">WALL-FLOOR SPAN</p>
+                <p class="value">{level_gap:.0f} pts</p>
+                <p class="sub">{data_0dte['p_floor']:.0f} → {data_0dte['p_wall']:.0f}</p>
+            </div>
+            <div class="quick-stat">
+                <p class="label">DATA HEALTH</p>
+                <p class="value">{source_age}</p>
+                <p class="sub">{nq_source}</p>
             </div>
         </div>
     </div>
