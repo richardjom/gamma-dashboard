@@ -474,6 +474,7 @@ def calculate_sentiment_score(data_0dte, nq_now, vix_level, fg_score):
     
     return max(0, min(100, score))
 
+@st.cache_data(ttl=14400)  # 4 hours - matches CBOE data refresh
 def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
     """Process single expiration and return all analysis - FIXED LEVEL LOGIC"""
     df = df_raw[df_raw['expiration'] == target_exp].copy()
