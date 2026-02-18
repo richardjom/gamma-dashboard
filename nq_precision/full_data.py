@@ -1,4 +1,5 @@
 import re
+import time
 from datetime import datetime
 
 import feedparser
@@ -7,6 +8,172 @@ import pandas as pd
 import requests
 import streamlit as st
 import yfinance as yf
+
+
+SCHWAB_TOKEN_URL = "https://api.schwabapi.com/v1/oauth/token"
+SCHWAB_QUOTES_URL = "https://api.schwabapi.com/marketdata/v1/quotes"
+
+
+def _get_secret(name, default=""):
+    try:
+        return st.secrets.get(name, default)
+    except Exception:
+        return default
+
+
+def schwab_is_configured():
+    return bool(_get_secret("SCHWAB_APP_KEY") and _get_secret("SCHWAB_APP_SECRET"))
+
+
+def _map_futures_symbol(futures_symbol):
+    overrides = {
+        "NQ=F": _get_secret("SCHWAB_SYMBOL_NQ", ""),
+        "ES=F": _get_secret("SCHWAB_SYMBOL_ES", ""),
+        "YM=F": _get_secret("SCHWAB_SYMBOL_YM", ""),
+        "RTY=F": _get_secret("SCHWAB_SYMBOL_RTY", ""),
+        "DX=F": _get_secret("SCHWAB_SYMBOL_DX", ""),
+    }
+    if overrides.get(futures_symbol):
+        return overrides[futures_symbol]
+    defaults = {
+        "NQ=F": "/NQ",
+        "ES=F": "/ES",
+        "YM=F": "/YM",
+        "RTY=F": "/RTY",
+        "DX=F": "/DX",
+    }
+    return defaults.get(futures_symbol, futures_symbol)
+
+
+def _get_schwab_access_token():
+    static_token = _get_secret("SCHWAB_ACCESS_TOKEN")
+    if static_token:
+        return static_token
+
+    now = time.time()
+    cached_token = st.session_state.get("schwab_access_token")
+    cached_exp = st.session_state.get("schwab_access_expires_at", 0)
+    if cached_token and now < (cached_exp - 30):
+        return cached_token
+
+    app_key = _get_secret("SCHWAB_APP_KEY")
+    app_secret = _get_secret("SCHWAB_APP_SECRET")
+    refresh_token = _get_secret("SCHWAB_REFRESH_TOKEN")
+    if not (app_key and app_secret and refresh_token):
+        return None
+
+    try:
+        response = requests.post(
+            SCHWAB_TOKEN_URL,
+            data={"grant_type": "refresh_token", "refresh_token": refresh_token},
+            auth=(app_key, app_secret),
+            timeout=10,
+        )
+        if response.status_code != 200:
+            return None
+        payload = response.json()
+        token = payload.get("access_token")
+        if not token:
+            return None
+        expires_in = int(payload.get("expires_in", 1800))
+        st.session_state["schwab_access_token"] = token
+        st.session_state["schwab_access_expires_at"] = now + expires_in
+        return token
+    except Exception:
+        return None
+
+
+def exchange_schwab_auth_code(auth_code, redirect_uri):
+    app_key = _get_secret("SCHWAB_APP_KEY")
+    app_secret = _get_secret("SCHWAB_APP_SECRET")
+    if not (app_key and app_secret):
+        return None, "Missing SCHWAB_APP_KEY or SCHWAB_APP_SECRET in secrets."
+    if not auth_code:
+        return None, "Authorization code is required."
+
+    try:
+        response = requests.post(
+            SCHWAB_TOKEN_URL,
+            data={
+                "grant_type": "authorization_code",
+                "code": auth_code,
+                "redirect_uri": redirect_uri,
+            },
+            auth=(app_key, app_secret),
+            timeout=15,
+        )
+        if response.status_code != 200:
+            return None, f"Token exchange failed ({response.status_code}): {response.text[:200]}"
+        return response.json(), None
+    except Exception as e:
+        return None, f"Token exchange failed: {e}"
+
+
+def _extract_quote_price(quote_obj):
+    if not isinstance(quote_obj, dict):
+        return None
+    nested_quote = quote_obj.get("quote", {})
+    candidates = [
+        nested_quote.get("lastPrice"),
+        nested_quote.get("mark"),
+        nested_quote.get("closePrice"),
+        quote_obj.get("lastPrice"),
+        quote_obj.get("mark"),
+        quote_obj.get("closePrice"),
+    ]
+    for value in candidates:
+        if value in (None, "", 0):
+            continue
+        try:
+            price = float(value)
+            if price > 0:
+                return price
+        except Exception:
+            continue
+    return None
+
+
+def _get_schwab_quotes(symbols):
+    token = _get_schwab_access_token()
+    if not token:
+        return {}
+    try:
+        response = requests.get(
+            SCHWAB_QUOTES_URL,
+            params={"symbols": ",".join(symbols), "fields": "quote"},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10,
+        )
+        if response.status_code == 401:
+            st.session_state.pop("schwab_access_token", None)
+            st.session_state.pop("schwab_access_expires_at", None)
+            return {}
+        if response.status_code != 200:
+            return {}
+        payload = response.json()
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
+def _get_schwab_futures_price(futures_symbol):
+    mapped = _map_futures_symbol(futures_symbol)
+    quotes = _get_schwab_quotes([mapped])
+    if not quotes:
+        return None, "Schwab unavailable"
+
+    candidates = [mapped, mapped.lstrip("/"), futures_symbol]
+    for key in candidates:
+        if key in quotes:
+            price = _extract_quote_price(quotes[key])
+            if price:
+                return price, f"Schwab ({key})"
+
+    for value in quotes.values():
+        price = _extract_quote_price(value)
+        if price:
+            return price, "Schwab"
+    return None, "Schwab unavailable"
 
 
 @st.cache_data(ttl=14400)
@@ -46,6 +213,10 @@ def get_cboe_options(ticker="QQQ"):
 
 @st.cache_data(ttl=10)
 def get_nq_price_auto(_finnhub_key):
+    schwab_price, schwab_source = _get_schwab_futures_price("NQ=F")
+    if schwab_price and schwab_price > 10000:
+        return float(schwab_price), schwab_source
+
     try:
         url = "https://query1.finance.yahoo.com/v8/finance/chart/NQ=F"
         headers = {"User-Agent": "Mozilla/5.0"}
@@ -119,11 +290,24 @@ def get_market_overview_yahoo():
                     "price": float(current),
                     "change": float(change),
                     "change_pct": float(change_pct),
+                    "source": "Yahoo Finance",
                 }
             else:
-                data[key] = {"price": 0, "change": 0, "change_pct": 0}
+                data[key] = {
+                    "price": 0,
+                    "change": 0,
+                    "change_pct": 0,
+                    "source": "unavailable",
+                }
         except Exception:
-            data[key] = {"price": 0, "change": 0, "change_pct": 0}
+            data[key] = {"price": 0, "change": 0, "change_pct": 0, "source": "unavailable"}
+
+    # Prefer Schwab real-time futures quotes when configured.
+    for key, symbol in {"es": "ES=F", "ym": "YM=F", "rty": "RTY=F", "dxy": "DX=F"}.items():
+        schwab_price, source = _get_schwab_futures_price(symbol)
+        if schwab_price:
+            data[key]["price"] = float(schwab_price)
+            data[key]["source"] = source
 
     return data
 
@@ -332,6 +516,10 @@ def calculate_sentiment_score(data_0dte, nq_now, vix_level, fg_score):
 
 @st.cache_data(ttl=10)
 def get_futures_price(symbol):
+    schwab_price, schwab_source = _get_schwab_futures_price(symbol)
+    if schwab_price and schwab_price > 100:
+        return float(schwab_price), schwab_source
+
     try:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
         headers = {"User-Agent": "Mozilla/5.0"}

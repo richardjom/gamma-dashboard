@@ -8,6 +8,7 @@ import yfinance as yf
 
 from nq_precision.full_data import (
     calculate_sentiment_score,
+    exchange_schwab_auth_code,
     generate_daily_bread,
     get_cboe_options,
     get_economic_calendar,
@@ -21,6 +22,7 @@ from nq_precision.full_data import (
     get_top_movers,
     process_expiration,
     process_multi_asset,
+    schwab_is_configured,
 )
 
 
@@ -155,6 +157,37 @@ def run_full_app():
     finnhub_key = st.sidebar.text_input(
         "Finnhub API Key", value=default_key, type="password"
     )
+    if schwab_is_configured():
+        st.sidebar.caption("Realtime futures source: Schwab (with Yahoo fallback)")
+    else:
+        st.sidebar.caption("Realtime futures source: Yahoo Finance")
+
+    with st.sidebar.expander("Schwab OAuth (one-time setup)", expanded=False):
+        default_redirect = "https://developer.schwab.com/oauth2-redirect.html"
+        try:
+            default_redirect = st.secrets.get("SCHWAB_REDIRECT_URI", default_redirect)
+        except Exception:
+            pass
+        redirect_uri = st.text_input("Redirect URI", value=default_redirect, key="schwab_redirect_uri")
+        auth_code = st.text_input("Auth Code", value="", key="schwab_auth_code")
+        if st.button("Exchange Code for Tokens"):
+            token_payload, err = exchange_schwab_auth_code(auth_code, redirect_uri)
+            if err:
+                st.error(err)
+            else:
+                refresh_token = token_payload.get("refresh_token", "")
+                access_token = token_payload.get("access_token", "")
+                st.success("Token exchange succeeded.")
+                st.code(
+                    "\n".join(
+                        [
+                            "# Add these to .streamlit/secrets.toml",
+                            f'SCHWAB_REFRESH_TOKEN = "{refresh_token}"',
+                            f'# Optional short-lived token: SCHWAB_ACCESS_TOKEN = "{access_token}"',
+                        ]
+                    ),
+                    language="toml",
+                )
 
     if st.sidebar.button("🎨 Toggle Theme"):
         toggle_theme()
@@ -530,6 +563,7 @@ def run_full_app():
                             f"{es['price']:.2f}",
                             f"{es.get('change', 0):+.2f} ({es.get('change_pct', 0):+.2f}%)",
                         )
+                        col1.caption(f"Source: {es.get('source', 'unknown')}")
                     else:
                         col1.metric("S&P 500 (ES)", "N/A")
 
@@ -549,10 +583,13 @@ def run_full_app():
                                 f"{nq_now:.2f}",
                                 f"{nq_change:+.2f} ({nq_change_pct:+.2f}%)",
                             )
+                            col2.caption(f"Source: {nq_source}")
                         else:
                             col2.metric("Nasdaq (NQ)", f"{nq_now:.2f}", nq_source)
+                            col2.caption(f"Source: {nq_source}")
                     except Exception:
                         col2.metric("Nasdaq (NQ)", f"{nq_now:.2f}", nq_source)
+                        col2.caption(f"Source: {nq_source}")
 
                     if "ym" in market_data and market_data["ym"]["price"]:
                         ym = market_data["ym"]
@@ -561,6 +598,7 @@ def run_full_app():
                             f"{ym['price']:.2f}",
                             f"{ym.get('change', 0):+.2f} ({ym.get('change_pct', 0):+.2f}%)",
                         )
+                        col3.caption(f"Source: {ym.get('source', 'unknown')}")
                     else:
                         col3.metric("Dow (YM)", "N/A")
 
@@ -571,6 +609,7 @@ def run_full_app():
                             f"{rty['price']:.2f}",
                             f"{rty.get('change', 0):+.2f} ({rty.get('change_pct', 0):+.2f}%)",
                         )
+                        col4.caption(f"Source: {rty.get('source', 'unknown')}")
                     else:
                         col4.metric("Russell (RTY)", "N/A")
 
@@ -605,6 +644,7 @@ def run_full_app():
                             f"{dxy['price']:.2f}",
                             f"{dxy.get('change', 0):+.2f} ({dxy.get('change_pct', 0):+.2f}%)",
                         )
+                        col3.caption(f"Source: {dxy.get('source', 'unknown')}")
                     else:
                         col3.metric("Dollar Index", "N/A")
                 else:

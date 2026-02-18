@@ -15,11 +15,24 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-3. Run a script:
+3. Configure API secrets (optional but recommended for real-time Schwab futures):
+
+Create `/Users/bobert/Documents/Gamma/.streamlit/secrets.toml`:
+
+```toml
+FINNHUB_KEY = "..."
+SCHWAB_APP_KEY = "..."
+SCHWAB_APP_SECRET = "..."
+SCHWAB_REFRESH_TOKEN = "..."
+# Optional overrides if your Schwab symbols differ:
+# SCHWAB_SYMBOL_NQ = "/NQH26"
+# SCHWAB_SYMBOL_ES = "/ESH26"
+```
+
+4. Run the app:
 
 ```bash
-python get_full_nq_dashboard.py
-python GEX_Levels.py
+streamlit run nq_app.py
 ```
 
 Notes:
