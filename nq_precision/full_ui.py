@@ -18,6 +18,7 @@ from nq_precision.full_data import (
     get_nq_intraday_data,
     get_nq_price_auto,
     get_qqq_price,
+    get_runtime_health,
     get_rss_news,
     get_top_movers,
     process_expiration,
@@ -161,6 +162,13 @@ def run_full_app():
         st.sidebar.caption("Realtime futures source: Schwab (with Yahoo fallback)")
     else:
         st.sidebar.caption("Realtime futures source: Yahoo Finance")
+
+    with st.sidebar.expander("System Health", expanded=False):
+        for check_name, ok, detail in get_runtime_health():
+            if ok:
+                st.success(f"{check_name}: {detail}")
+            else:
+                st.warning(f"{check_name}: {detail}")
 
     with st.sidebar.expander("Schwab OAuth (one-time setup)", expanded=False):
         default_redirect = "https://developer.schwab.com/oauth2-redirect.html"

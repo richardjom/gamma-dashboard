@@ -1,6 +1,6 @@
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 import feedparser
 import finnhub
@@ -12,6 +12,20 @@ import yfinance as yf
 
 SCHWAB_TOKEN_URL = "https://api.schwabapi.com/v1/oauth/token"
 SCHWAB_QUOTES_URL = "https://api.schwabapi.com/marketdata/v1/quotes"
+FUTURES_MONTH_CODES = {
+    1: "F",
+    2: "G",
+    3: "H",
+    4: "J",
+    5: "K",
+    6: "M",
+    7: "N",
+    8: "Q",
+    9: "U",
+    10: "V",
+    11: "X",
+    12: "Z",
+}
 
 
 def _get_secret(name, default=""):
@@ -23,6 +37,23 @@ def _get_secret(name, default=""):
 
 def schwab_is_configured():
     return bool(_get_secret("SCHWAB_APP_KEY") and _get_secret("SCHWAB_APP_SECRET"))
+
+
+def _next_quarterly_contracts(count=3):
+    now = datetime.now(timezone.utc)
+    quarter_months = [3, 6, 9, 12]
+    contracts = []
+    year = now.year
+    month = now.month
+    while len(contracts) < count:
+        for q_month in quarter_months:
+            if year == now.year and q_month < month:
+                continue
+            contracts.append((year, q_month))
+            if len(contracts) == count:
+                break
+        year += 1
+    return contracts
 
 
 def _map_futures_symbol(futures_symbol):
@@ -43,6 +74,33 @@ def _map_futures_symbol(futures_symbol):
         "DX=F": "/DX",
     }
     return defaults.get(futures_symbol, futures_symbol)
+
+
+def _candidate_schwab_symbols(futures_symbol):
+    mapped = _map_futures_symbol(futures_symbol)
+    # If user provides explicit contract override, trust it as-is.
+    if any(ch.isdigit() for ch in mapped):
+        return [mapped]
+    candidates = [mapped]
+    if not mapped.startswith("/"):
+        return candidates
+
+    for year, month in _next_quarterly_contracts(count=4):
+        month_code = FUTURES_MONTH_CODES[month]
+        yy = str(year)[-2:]
+        yyyy = str(year)
+        candidates.append(f"{mapped}{month_code}{yy}")
+        candidates.append(f"{mapped}{month_code}{yyyy}")
+
+    # Keep order stable but unique.
+    seen = set()
+    deduped = []
+    for sym in candidates:
+        if sym in seen:
+            continue
+        seen.add(sym)
+        deduped.append(sym)
+    return deduped
 
 
 def _get_schwab_access_token():
@@ -133,6 +191,70 @@ def _extract_quote_price(quote_obj):
     return None
 
 
+def _extract_quote_timestamp_ms(quote_obj):
+    if not isinstance(quote_obj, dict):
+        return None
+    nested = quote_obj.get("quote", {})
+    for key in (
+        "quoteTime",
+        "tradeTime",
+        "lastTradeTime",
+        "regularMarketTradeTime",
+        "timestamp",
+    ):
+        raw = nested.get(key, quote_obj.get(key))
+        if raw in (None, ""):
+            continue
+        try:
+            value = int(float(raw))
+            # Normalize seconds/microseconds to milliseconds.
+            if value < 10**11:
+                value *= 1000
+            if value > 10**14:
+                value //= 1000
+            return value
+        except Exception:
+            continue
+    return None
+
+
+def _validate_price_range(symbol, price):
+    symbol_ranges = {
+        "NQ=F": (10000, 50000),
+        "ES=F": (1000, 10000),
+        "YM=F": (10000, 100000),
+        "RTY=F": (500, 5000),
+        "DX=F": (50, 200),
+    }
+    min_p, max_p = symbol_ranges.get(symbol, (0.01, 1e9))
+    return min_p <= price <= max_p
+
+
+def _validate_stale_quote(timestamp_ms):
+    if not timestamp_ms:
+        return True
+    max_stale_sec = int(_get_secret("SCHWAB_MAX_STALE_SECONDS", 180))
+    now_ms = int(time.time() * 1000)
+    return (now_ms - timestamp_ms) <= (max_stale_sec * 1000)
+
+
+def _validate_jump(symbol, price):
+    key = f"last_good_price::{symbol}"
+    previous = st.session_state.get(key)
+    if not previous:
+        st.session_state[key] = price
+        return True
+    if previous <= 0:
+        st.session_state[key] = price
+        return True
+    jump_pct = abs(price - previous) / previous * 100
+    max_jump_pct = float(_get_secret("MAX_ONE_TICK_JUMP_PCT", 5.0))
+    if jump_pct > max_jump_pct:
+        return False
+    st.session_state[key] = price
+    return True
+
+
 def _get_schwab_quotes(symbols):
     token = _get_schwab_access_token()
     if not token:
@@ -157,23 +279,74 @@ def _get_schwab_quotes(symbols):
 
 
 def _get_schwab_futures_price(futures_symbol):
-    mapped = _map_futures_symbol(futures_symbol)
-    quotes = _get_schwab_quotes([mapped])
+    candidates = _candidate_schwab_symbols(futures_symbol)
+    quotes = _get_schwab_quotes(candidates)
     if not quotes:
         return None, "Schwab unavailable"
 
-    candidates = [mapped, mapped.lstrip("/"), futures_symbol]
-    for key in candidates:
+    lookup_keys = []
+    for sym in candidates:
+        lookup_keys.extend([sym, sym.lstrip("/")])
+    lookup_keys.append(futures_symbol)
+
+    for key in lookup_keys:
         if key in quotes:
             price = _extract_quote_price(quotes[key])
-            if price:
-                return price, f"Schwab ({key})"
+            ts = _extract_quote_timestamp_ms(quotes[key])
+            if price and _validate_price_range(futures_symbol, price) and _validate_stale_quote(ts):
+                if _validate_jump(futures_symbol, price):
+                    return price, f"Schwab ({key})"
 
-    for value in quotes.values():
+    for quote_key, value in quotes.items():
         price = _extract_quote_price(value)
-        if price:
-            return price, "Schwab"
+        ts = _extract_quote_timestamp_ms(value)
+        if price and _validate_price_range(futures_symbol, price) and _validate_stale_quote(ts):
+            if _validate_jump(futures_symbol, price):
+                return price, f"Schwab ({quote_key})"
     return None, "Schwab unavailable"
+
+
+def _get_yahoo_chart_price(symbol, min_price=0):
+    try:
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(url, headers=headers, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            price = data["chart"]["result"][0]["meta"]["regularMarketPrice"]
+            if price and price > min_price:
+                return float(price)
+    except Exception:
+        pass
+    return None
+
+
+def _schwab_cross_source_ok(yahoo_symbol, schwab_price):
+    yahoo_price = _get_yahoo_chart_price(yahoo_symbol, min_price=0)
+    if not yahoo_price:
+        return True
+    allowed_dev_pct = float(_get_secret("MAX_CROSS_SOURCE_DEVIATION_PCT", 3.0))
+    deviation = abs(schwab_price - yahoo_price) / yahoo_price * 100
+    return deviation <= allowed_dev_pct
+
+
+def get_runtime_health():
+    checks = []
+    app_key = _get_secret("SCHWAB_APP_KEY")
+    app_secret = _get_secret("SCHWAB_APP_SECRET")
+    refresh = _get_secret("SCHWAB_REFRESH_TOKEN")
+    redirect = _get_secret("SCHWAB_REDIRECT_URI")
+    checks.append(("SCHWAB_APP_KEY", bool(app_key), "Present" if app_key else "Missing"))
+    checks.append(("SCHWAB_APP_SECRET", bool(app_secret), "Present" if app_secret else "Missing"))
+    checks.append(
+        ("SCHWAB_REFRESH_TOKEN", bool(refresh), "Present" if refresh else "Missing (OAuth required)")
+    )
+    checks.append(
+        ("SCHWAB_REDIRECT_URI", bool(redirect), redirect if redirect else "Missing")
+    )
+    token = _get_schwab_access_token() if (app_key and app_secret and refresh) else None
+    checks.append(("Schwab token refresh", bool(token), "OK" if token else "Failed/unavailable"))
+    return checks
 
 
 @st.cache_data(ttl=14400)
@@ -214,20 +387,13 @@ def get_cboe_options(ticker="QQQ"):
 @st.cache_data(ttl=10)
 def get_nq_price_auto(_finnhub_key):
     schwab_price, schwab_source = _get_schwab_futures_price("NQ=F")
-    if schwab_price and schwab_price > 10000:
+    if schwab_price and schwab_price > 10000 and _schwab_cross_source_ok("NQ=F", schwab_price):
         return float(schwab_price), schwab_source
 
-    try:
-        url = "https://query1.finance.yahoo.com/v8/finance/chart/NQ=F"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(url, headers=headers, timeout=5)
-        if response.status_code == 200:
-            data = response.json()
-            price = data["chart"]["result"][0]["meta"]["regularMarketPrice"]
-            if price and price > 10000:
-                return float(price), "Yahoo Finance"
-    except Exception:
-        pass
+    yahoo_price = _get_yahoo_chart_price("NQ=F", min_price=10000)
+    if yahoo_price:
+        return float(yahoo_price), "Yahoo Finance"
+
     try:
         nq = yf.Ticker("NQ=F")
         data = nq.history(period="1d", interval="1m")
@@ -517,20 +683,13 @@ def calculate_sentiment_score(data_0dte, nq_now, vix_level, fg_score):
 @st.cache_data(ttl=10)
 def get_futures_price(symbol):
     schwab_price, schwab_source = _get_schwab_futures_price(symbol)
-    if schwab_price and schwab_price > 100:
+    if schwab_price and schwab_price > 100 and _schwab_cross_source_ok(symbol, schwab_price):
         return float(schwab_price), schwab_source
 
-    try:
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(url, headers=headers, timeout=5)
-        if response.status_code == 200:
-            data = response.json()
-            price = data["chart"]["result"][0]["meta"]["regularMarketPrice"]
-            if price and price > 100:
-                return float(price), "Yahoo Finance"
-    except Exception:
-        pass
+    yahoo_price = _get_yahoo_chart_price(symbol, min_price=100)
+    if yahoo_price:
+        return float(yahoo_price), "Yahoo Finance"
+
     try:
         ticker = yf.Ticker(symbol)
         data = ticker.history(period="1d", interval="1m")

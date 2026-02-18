@@ -24,6 +24,10 @@ FINNHUB_KEY = "..."
 SCHWAB_APP_KEY = "..."
 SCHWAB_APP_SECRET = "..."
 SCHWAB_REFRESH_TOKEN = "..."
+# Optional tuning:
+# SCHWAB_MAX_STALE_SECONDS = 180
+# MAX_ONE_TICK_JUMP_PCT = 5
+# MAX_CROSS_SOURCE_DEVIATION_PCT = 3
 # Optional overrides if your Schwab symbols differ:
 # SCHWAB_SYMBOL_NQ = "/NQH26"
 # SCHWAB_SYMBOL_ES = "/ESH26"
