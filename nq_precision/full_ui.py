@@ -677,20 +677,57 @@ def run_full_app():
                 st.metric("Fear & Greed Index", f"{fg['score']:.0f}", fg["rating"])
 
             with col2:
-                if fg["score"] < 25:
-                    st.error(
-                        f"**{fg['rating']}** - Extreme fear typically signals buying opportunity"
+                if data_0dte:
+                    gf_distance = nq_now - data_0dte["g_flip_nq"]
+                    dn_distance = nq_now - data_0dte["dn_nq"]
+                    gamma_state = "Negative Gamma" if gf_distance > 0 else "Positive Gamma"
+                    regime_text = (
+                        f"Regime: **{gamma_state}** | "
+                        f"NQ vs Gamma Flip: {gf_distance:+.0f} pts | "
+                        f"NQ vs Delta Neutral: {dn_distance:+.0f} pts"
                     )
-                elif fg["score"] < 45:
-                    st.warning(f"**{fg['rating']}** - Cautious sentiment")
-                elif fg["score"] < 55:
-                    st.info(f"**{fg['rating']}** - Balanced market")
-                elif fg["score"] < 75:
-                    st.warning(f"**{fg['rating']}** - Greedy sentiment")
+                    if gf_distance > 0:
+                        st.warning(regime_text)
+                    else:
+                        st.success(regime_text)
                 else:
-                    st.error(
-                        f"**{fg['rating']}** - Extreme greed signals potential top"
+                    st.info("Regime: unavailable (no 0DTE data)")
+
+                vix = market_data.get("vix", {}).get("price", 0)
+                dxy_chg = market_data.get("dxy", {}).get("change_pct", 0)
+                tnx_chg = market_data.get("10y", {}).get("change", 0)
+                risk_score = 0
+                if vix >= 20:
+                    risk_score += 2
+                elif vix >= 16:
+                    risk_score += 1
+                if dxy_chg > 0.3:
+                    risk_score += 1
+                if tnx_chg > 0.05:
+                    risk_score += 1
+                risk_label = "High Risk" if risk_score >= 3 else "Moderate Risk" if risk_score >= 2 else "Low Risk"
+                risk_text = (
+                    f"Risk Meter: **{risk_label}** | "
+                    f"VIX {vix:.2f} | DXY {dxy_chg:+.2f}% | 10Y {tnx_chg:+.2f}"
+                )
+                if risk_score >= 3:
+                    st.error(risk_text)
+                elif risk_score >= 2:
+                    st.warning(risk_text)
+                else:
+                    st.info(risk_text)
+
+                if data_0dte:
+                    long_trigger = data_0dte["p_floor"]
+                    short_trigger = data_0dte["p_wall"]
+                    trigger_text = (
+                        f"Action Triggers: Long reaction zone near **{long_trigger:.2f}** | "
+                        f"Short reaction zone near **{short_trigger:.2f}** | "
+                        f"Regime pivot at **{data_0dte['g_flip_nq']:.2f}**"
                     )
+                    st.info(trigger_text)
+                else:
+                    st.info("Action Triggers: unavailable (waiting for options levels)")
 
             st.markdown("---")
             st.markdown("### Top Movers")
