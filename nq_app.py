@@ -1161,9 +1161,7 @@ Creates potential for **choppy, whipsaw action**
         st.subheader("⚖️ Cumulative Delta - All Timeframes")
         
         if data_0dte:
-            st.markdown("
-                        
-st.markdown("**0DTE**")
+            st.markdown("**0DTE**")
             fig = go.Figure()
             fig.add_trace(go.Scatter(
                 x=data_0dte['strike_delta']['strike'],
