@@ -949,35 +949,27 @@ if tab_names:
             gamma_regime = "🔴 NEGATIVE GAMMA" if above_gf else "🟢 POSITIVE GAMMA"
             dealer_stance = "🔴 NET SHORT DELTA" if data_0dte['net_delta'] < 0 else "🟢 NET LONG DELTA"
             
-            # ═══════════════════════════════════════════════════
             # EXECUTIVE SUMMARY
-            # ═══════════════════════════════════════════════════
             st.markdown("---")
             st.markdown("## 📊 EXECUTIVE SUMMARY")
             
             # Generate executive summary based on conditions
             if above_dn and above_gf and abs(dn_distance) > 200:
-                summary = f"""
-NQ is trading **{dn_distance:.0f} points above Delta Neutral** at {data_0dte['dn_nq']:.2f}, indicating an 
+                summary = f"""NQ is trading **{dn_distance:.0f} points above Delta Neutral** at {data_0dte['dn_nq']:.2f}, indicating an 
 **overextended market** with dealers holding massive short delta positions. Price is operating in **negative gamma** 
 territory above {data_0dte['g_flip_nq']:.2f}, creating unstable conditions prone to whipsaws and exaggerated moves. 
 **Mean reversion back toward DN is the highest probability scenario**, with rallies likely facing heavy resistance 
-at the {data_0dte['p_wall']:.2f} primary wall.
-                """
+at the {data_0dte['p_wall']:.2f} primary wall."""
             elif not above_dn and not above_gf:
-                summary = f"""
-NQ is trading **{abs(dn_distance):.0f} points below Delta Neutral** at {data_0dte['dn_nq']:.2f} in **positive gamma** 
+                summary = f"""NQ is trading **{abs(dn_distance):.0f} points below Delta Neutral** at {data_0dte['dn_nq']:.2f} in **positive gamma** 
 territory, suggesting dealers will actively stabilize price action. The market is positioned for **range-bound trading** 
 between {data_0dte['p_floor']:.2f} floor and {data_0dte['p_wall']:.2f} wall, with dips likely finding support and rallies 
-facing resistance. Breakout attempts are less likely to follow through in this regime.
-                """
+facing resistance. Breakout attempts are less likely to follow through in this regime."""
             else:
-                summary = f"""
-NQ is trading near equilibrium around the {data_0dte['dn_nq']:.2f} Delta Neutral level with relatively **balanced dealer 
+                summary = f"""NQ is trading near equilibrium around the {data_0dte['dn_nq']:.2f} Delta Neutral level with relatively **balanced dealer 
 positioning**. Current gamma regime is **{'negative' if above_gf else 'positive'}**, suggesting 
 **{'volatile' if above_gf else 'stable'}** price action ahead. Watch for a break of key levels at {data_0dte['p_wall']:.2f} 
-resistance or {data_0dte['p_floor']:.2f} support to establish directional bias.
-                """
+resistance or {data_0dte['p_floor']:.2f} support to establish directional bias."""
             
             st.info(summary)
             
@@ -1012,9 +1004,7 @@ resistance or {data_0dte['p_floor']:.2f} support to establish directional bias.
                     "Above" if above_dn else "Below"
                 )
             
-            # ═══════════════════════════════════════════════════
             # KEY LEVELS TO WATCH
-            # ═══════════════════════════════════════════════════
             st.markdown("---")
             st.markdown("## 🎯 KEY LEVELS TO WATCH TODAY")
             
@@ -1075,9 +1065,7 @@ resistance or {data_0dte['p_floor']:.2f} support to establish directional bias.
                     if idx < len(levels_priority) - 1:
                         st.markdown("")
             
-            # ═══════════════════════════════════════════════════
             # TODAY'S CATALYST CALENDAR
-            # ═══════════════════════════════════════════════════
             st.markdown("---")
             st.markdown("## 📅 TODAY'S CATALYST CALENDAR")
             
@@ -1093,13 +1081,13 @@ resistance or {data_0dte['p_floor']:.2f} support to establish directional bias.
                     st.markdown("🔴 **HIGH IMPACT**")
                     for event in high_impact[:3]:
                         time_str = event.get('time', '')[:16] if event.get('time') else 'TBD'
-                        st.markdown(f"- **{event.get('event', 'Unknown')}** • {time_str}")
+                        st.markdown(f"• **{event.get('event', 'Unknown')}** • {time_str}")
                 
                 if medium_impact:
                     st.markdown("🟡 **MEDIUM IMPACT**")
                     for event in medium_impact[:3]:
                         time_str = event.get('time', '')[:16] if event.get('time') else 'TBD'
-                        st.markdown(f"- {event.get('event', 'Unknown')} • {time_str}")
+                        st.markdown(f"• {event.get('event', 'Unknown')} • {time_str}")
                 
                 if not high_impact and not medium_impact:
                     st.info("No major economic events scheduled today - technical levels dominate")
@@ -1116,9 +1104,7 @@ resistance or {data_0dte['p_floor']:.2f} support to establish directional bias.
             else:
                 st.markdown("*No major headlines at this time*")
             
-            # ═══════════════════════════════════════════════════
             # TOMORROW'S PREVIEW
-            # ═══════════════════════════════════════════════════
             st.markdown("---")
             st.markdown("## 🔮 TOMORROW'S PREVIEW")
             
@@ -1155,35 +1141,37 @@ resistance or {data_0dte['p_floor']:.2f} support to establish directional bias.
             st.markdown("### 💼 TRADING GAME PLAN")
             
             if above_dn and above_gf:
-                st.warning(f"""
-**SHORT BIAS SETUP**
+                plan = f"""**SHORT BIAS SETUP**
+
 - **Entry:** Fade rallies into {data_0dte['p_wall']:.2f} resistance
 - **Target:** {data_0dte['dn_nq']:.2f} Delta Neutral
 - **Stop:** Above {data_0dte['results'][5][1]:.2f} (Secondary Wall)
 - **Risk:** Negative gamma = whipsaw potential
 
-*Conservative:* Wait for break below {data_0dte['g_flip_nq']:.2f} Gamma Flip before entering shorts
-                """)
+*Conservative:* Wait for break below {data_0dte['g_flip_nq']:.2f} Gamma Flip before entering shorts"""
+                st.warning(plan)
+                
             elif not above_dn and not above_gf:
-                st.success(f"""
-**LONG BIAS SETUP**
+                plan = f"""**LONG BIAS SETUP**
+
 - **Entry:** Buy dips toward {data_0dte['p_floor']:.2f} support
 - **Target:** {data_0dte['dn_nq']:.2f} Delta Neutral
 - **Stop:** Below {data_0dte['results'][6][1]:.2f} (Secondary Floor)
 - **Edge:** Positive gamma supports mean reversion
 
-*Aggressive:* Long current levels if holding above floor
-                """)
+*Aggressive:* Long current levels if holding above floor"""
+                st.success(plan)
+                
             else:
-                st.info(f"""
-**RANGE TRADING SETUP**
+                plan = f"""**RANGE TRADING SETUP**
+
 - **Sell:** Rallies near {data_0dte['p_wall']:.2f} wall
 - **Buy:** Dips near {data_0dte['p_floor']:.2f} floor
 - **Range:** {data_0dte['p_floor']:.2f} - {data_0dte['p_wall']:.2f}
 - **Breakout:** Watch for sustained move outside range
 
-*Patience required* - Let price come to levels
-                """)
+*Patience required* - Let price come to levels"""
+                st.info(plan)
         
         else:
             st.info("No 0DTE data available for Daily Bread analysis")
@@ -1192,16 +1180,6 @@ resistance or {data_0dte['p_floor']:.2f} support to establish directional bias.
         st.caption("⚠️ Daily Bread is generated from live options market data and should not be considered financial advice. Always manage risk appropriately.")
     
     tab_idx += 1
-#### 🎯 Current Positioning
-
-**Price Location:**
-- NQ is trading at **{nq_now:.2f}**
-- **{abs(dn_distance):.2f} points** {'above' if above_dn else 'below'} Delta Neutral ({data_0dte['dn_nq']:.2f})
-- **{abs(gf_distance):.2f} points** {'above' if above_gf else 'below'} Gamma Flip ({data_0dte['g_flip_nq']:.2f})
-- **{wall_distance:.2f} points** from Primary Wall ({data_0dte['p_wall']:.2f})
-- **{floor_distance:.2f} points** above Primary Floor ({data_0dte['p_floor']:.2f})
-
----
 
 #### ⚖️ Delta Positioning Analysis
 
