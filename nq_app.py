@@ -907,7 +907,7 @@ with col_left:
         
         if indicators_data:
             indicators_df = pd.DataFrame(indicators_data)
-            st.dataframe(indicators_df, hide_index=True, use_container_width=True)
+            st.dataframe(indicators_df, hide_index=True, width='stretch')
     
     st.markdown('</div>', unsafe_allow_html=True)
     
@@ -979,7 +979,7 @@ with col_middle:
             
             fig.update_xaxes(rangeslider_visible=False)
             
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
         else:
             st.info("Chart data unavailable - check back during market hours")
     
