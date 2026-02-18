@@ -16,236 +16,156 @@ import time
 st.set_page_config(
     page_title="NQ Precision Map",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
 # ─────────────────────────────────────────────
-# KOYFIN-INSPIRED THEME
+# THEME TOGGLE (STORED IN SESSION STATE)
 # ─────────────────────────────────────────────
-st.markdown("""
+if 'theme' not in st.session_state:
+    st.session_state.theme = 'dark'
+
+def toggle_theme():
+    st.session_state.theme = 'light' if st.session_state.theme == 'dark' else 'dark'
+
+# Theme-specific colors
+if st.session_state.theme == 'dark':
+    BG_COLOR = "#0E1117"
+    CARD_BG = "#1E1E1E"
+    TEXT_COLOR = "#FFF"
+    ACCENT_COLOR = "#00D9FF"
+    BORDER_COLOR = "#333"
+else:
+    BG_COLOR = "#FFFFFF"
+    CARD_BG = "#F0F2F6"
+    TEXT_COLOR = "#000"
+    ACCENT_COLOR = "#0066CC"
+    BORDER_COLOR = "#DDD"
+
+# Custom CSS with theme support
+st.markdown(f"""
 <style>
-    /* Global Theme */
-    .main {
-        background-color: #0a0e1a;
-        color: #e8eaed;
-    }
-    
-    /* Hide Streamlit branding */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    
-    /* Card Styling */
-    .koyfin-card {
-        background: linear-gradient(135deg, #141824 0%, #1a1f2e 100%);
-        border: 1px solid #2a3142;
-        border-radius: 8px;
-        padding: 16px;
-        margin-bottom: 16px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-    }
-    
-    .koyfin-card-header {
-        font-size: 13px;
-        font-weight: 600;
-        color: #8b92a8;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        margin-bottom: 12px;
-        border-bottom: 1px solid #2a3142;
-        padding-bottom: 8px;
-    }
-    
-    /* Metrics */
-    .stMetric {
-        background: #141824;
-        padding: 12px;
-        border-radius: 6px;
-        border: 1px solid #2a3142;
-    }
-    
-    .stMetric label {
-        color: #8b92a8;
-        font-size: 11px;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.3px;
-    }
-    
-    .stMetric [data-testid="stMetricValue"] {
-        font-size: 24px;
-        color: #e8eaed;
-        font-weight: 600;
-    }
-    
-    /* Headers */
-    h1 {
-        color: #e8eaed;
-        font-weight: 700;
-        font-size: 28px;
-        margin-bottom: 24px;
-    }
-    
-    h2 {
-        color: #e8eaed;
-        font-size: 16px;
-        font-weight: 600;
-        margin-top: 24px;
-        margin-bottom: 16px;
-    }
-    
-    h3 {
-        color: #8b92a8;
-        font-size: 13px;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        margin-bottom: 12px;
-    }
-    
-    /* Tabs */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-        background-color: #141824;
-        padding: 8px;
-        border-radius: 6px;
-        border: 1px solid #2a3142;
-    }
-    
-    .stTabs [data-baseweb="tab"] {
-        background-color: transparent;
-        color: #8b92a8;
-        font-weight: 600;
-        font-size: 12px;
-        padding: 8px 16px;
-        border-radius: 4px;
-    }
-    
-    .stTabs [aria-selected="true"] {
-        background-color: #2563eb;
-        color: #fff;
-    }
-    
-    /* Quick Glance */
-    .quick-glance {
-        background: linear-gradient(135deg, #1a1f2e 0%, #141824 100%);
-        padding: 24px;
-        border-radius: 8px;
-        border: 1px solid #2a3142;
-        margin-bottom: 20px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-    }
-    
-    .quick-glance-title {
-        color: #2563eb;
+    .main {{
+        background-color: {BG_COLOR};
+    }}
+    .stMetric {{
+        background-color: {CARD_BG};
+        padding: 15px;
+        border-radius: 10px;
+        border: 1px solid {BORDER_COLOR};
+    }}
+    .stMetric label {{
+        color: #888;
         font-size: 14px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        margin-bottom: 16px;
-    }
-    
-    .quick-glance-grid {
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 20px;
-    }
-    
-    .quick-glance-item {
-        background: #0a0e1a;
-        padding: 16px;
-        border-radius: 6px;
-        border: 1px solid #2a3142;
-    }
-    
-    .quick-glance-label {
-        color: #8b92a8;
-        font-size: 11px;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        margin-bottom: 8px;
-    }
-    
-    .quick-glance-value {
-        color: #e8eaed;
+    }}
+    .stMetric [data-testid="stMetricValue"] {{
         font-size: 28px;
+        color: {ACCENT_COLOR};
+    }}
+    h1 {{
+        color: {ACCENT_COLOR};
         font-weight: 700;
-        margin-bottom: 4px;
-    }
-    
-    .quick-glance-subtext {
-        color: #6b7280;
-        font-size: 11px;
-    }
-    
-    /* Sentiment Meter */
-    .sentiment-meter {
-        height: 24px;
-        background: linear-gradient(90deg, #dc2626 0%, #facc15 50%, #16a34a 100%);
-        border-radius: 12px;
-        position: relative;
-        margin: 12px 0;
-    }
-    
-    .sentiment-marker {
-        position: absolute;
-        width: 3px;
-        height: 32px;
-        background: #fff;
-        top: -4px;
-        border-radius: 2px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.5);
-    }
-    
-    .sentiment-labels {
-        display: flex;
-        justify-content: space-between;
-        font-size: 10px;
-        color: #6b7280;
-        margin-top: 4px;
-    }
-    
-    /* Badges */
-    .badge {
-        display: inline-block;
-        padding: 2px 8px;
-        border-radius: 4px;
-        font-size: 10px;
+    }}
+    h2, h3 {{
+        color: {TEXT_COLOR};
+    }}
+    .stTabs [data-baseweb="tab-list"] {{
+        gap: 24px;
+        background-color: {CARD_BG};
+        padding: 10px;
+        border-radius: 10px;
+    }}
+    .stTabs [data-baseweb="tab"] {{
+        background-color: transparent;
+        color: #888;
         font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.3px;
-    }
-    
-    .badge-bullish {
-        background: #16a34a;
-        color: #fff;
-    }
-    
-    .badge-bearish {
-        background: #dc2626;
-        color: #fff;
-    }
+        padding: 10px 20px;
+        border-radius: 5px;
+    }}
+    .stTabs [aria-selected="true"] {{
+        background-color: {ACCENT_COLOR};
+        color: #000;
+    }}
+    .quick-glance {{
+        background: linear-gradient(135deg, {CARD_BG} 0%, {BORDER_COLOR} 100%);
+        padding: 25px;
+        border-radius: 15px;
+        border: 2px solid {ACCENT_COLOR};
+        margin-bottom: 20px;
+    }}
+    .sentiment-meter {{
+        height: 30px;
+        background: linear-gradient(90deg, #FF4444 0%, #FFAA00 50%, #44FF44 100%);
+        border-radius: 15px;
+        position: relative;
+    }}
+    .sentiment-marker {{
+        position: absolute;
+        width: 4px;
+        height: 40px;
+        background: #000;
+        top: -5px;
+        border-radius: 2px;
+    }}
+    .keyboard-hint {{
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background: {CARD_BG};
+        padding: 10px;
+        border-radius: 8px;
+        font-size: 12px;
+        color: #888;
+        border: 1px solid {BORDER_COLOR};
+    }}
 </style>
 """, unsafe_allow_html=True)
 
-st.title("📊 NQ PRECISION MAP")
-st.markdown("**Multi-Timeframe GEX & Delta Analysis** • Real-time Options Flow")
+# Keyboard shortcuts hint
+st.markdown("""
+<div class="keyboard-hint">
+⌨️ Shortcuts: R=Refresh | 1-6=Tabs | T=Theme
+</div>
+""", unsafe_allow_html=True)
+
+st.title("📊 NQ Precision Map")
+st.markdown("**Multi-Timeframe GEX & Delta Analysis** • Powered by CBOE Data")
 
 FINNHUB_KEY = "csie7q9r01qt46e7sjm0csie7q9r01qt46e7sjmg"
 
 # ─────────────────────────────────────────────
-# AUTO-REFRESH
+# SIDEBAR
 # ─────────────────────────────────────────────
-if 'last_refresh' not in st.session_state:
-    st.session_state.last_refresh = time.time()
+st.sidebar.header("⚙️ Settings")
 
-refresh_interval = 60
-time_since_refresh = time.time() - st.session_state.last_refresh
-
-if time_since_refresh >= refresh_interval:
-    st.session_state.last_refresh = time.time()
+# Theme toggle button
+if st.sidebar.button("🎨 Toggle Theme", on_click=toggle_theme):
     st.rerun()
+
+manual_override = st.sidebar.checkbox("✏️ Manual NQ Override")
+
+# Auto-refresh toggle
+auto_refresh = st.sidebar.checkbox("🔄 Auto-Refresh (60s)", value=True)
+if auto_refresh:
+    refresh_interval = st.sidebar.slider("Refresh Interval (seconds)", 30, 300, 60)
+
+# ─────────────────────────────────────────────
+# AUTO-REFRESH COUNTDOWN
+# ─────────────────────────────────────────────
+if auto_refresh:
+    if 'last_refresh' not in st.session_state:
+        st.session_state.last_refresh = time.time()
+    
+    time_since_refresh = time.time() - st.session_state.last_refresh
+    time_until_refresh = max(0, refresh_interval - int(time_since_refresh))
+    
+    if time_until_refresh == 0:
+        st.session_state.last_refresh = time.time()
+        st.rerun()
+    
+    st.sidebar.markdown(f"**Next refresh in:** {time_until_refresh}s")
+    placeholder = st.sidebar.empty()
+    placeholder.progress((refresh_interval - time_until_refresh) / refresh_interval)
 
 # ─────────────────────────────────────────────
 # DATA FUNCTIONS
@@ -279,6 +199,7 @@ def get_cboe_options(ticker="QQQ"):
         df = df[df['type'] != 'unknown'].copy()
         return df, current_price
     except Exception as e:
+        st.error(f"CBOE fetch failed: {e}")
         return None, None
 
 @st.cache_data(ttl=10)
@@ -305,6 +226,7 @@ def get_nq_price_auto(finnhub_key):
 
 @st.cache_data(ttl=10)
 def get_nq_intraday_data():
+    """Get last 50 candles for chart"""
     try:
         nq = yf.Ticker("NQ=F")
         data = nq.history(period="1d", interval="5m")
@@ -328,7 +250,9 @@ def get_qqq_price(finnhub_key):
 
 @st.cache_data(ttl=300)
 def get_market_overview_yahoo():
+    """Get market data from Yahoo Finance"""
     data = {}
+    
     symbols = {
         'vix': '^VIX',
         'es': 'ES=F',
@@ -363,22 +287,27 @@ def get_market_overview_yahoo():
 
 @st.cache_data(ttl=3600)
 def get_economic_calendar(finnhub_key):
+    """Get today's economic events"""
     client = finnhub.Client(api_key=finnhub_key)
     today = datetime.now().date()
     
     try:
         calendar = client.economic_calendar()
+        
         today_events = [
             event for event in calendar.get('economicCalendar', [])
             if event.get('time', '').startswith(str(today))
         ]
+        
         today_events.sort(key=lambda x: x.get('time', ''))
+        
         return today_events[:10]
     except:
         return []
 
 @st.cache_data(ttl=600)
 def get_market_news(finnhub_key):
+    """Get latest market news"""
     client = finnhub.Client(api_key=finnhub_key)
     
     try:
@@ -394,6 +323,7 @@ def get_market_news(finnhub_key):
 
 @st.cache_data(ttl=300)
 def get_fear_greed_index():
+    """Get Fear & Greed Index"""
     try:
         url = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
         response = requests.get(url, timeout=5)
@@ -408,6 +338,7 @@ def get_fear_greed_index():
 
 @st.cache_data(ttl=300)
 def get_top_movers(finnhub_key):
+    """Get top gainers and losers"""
     client = finnhub.Client(api_key=finnhub_key)
     
     tickers = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META', 'AMD', 
@@ -434,6 +365,7 @@ def get_top_movers(finnhub_key):
         return {'gainers': [], 'losers': []}
 
 def get_expirations_by_type(df):
+    """Get nearest 0DTE, Weekly, and Monthly expirations"""
     today = datetime.now().date()
     expirations = sorted(df['expiration'].dropna().unique())
     
@@ -477,6 +409,7 @@ def get_expirations_by_type(df):
     return dte_0, weekly, monthly
 
 def calculate_delta_neutral(df, qqq_price):
+    """Calculate Delta Neutral Level"""
     df_calc = df.copy()
     
     calls = df_calc[df_calc['type'] == 'call'].copy()
@@ -501,41 +434,48 @@ def calculate_delta_neutral(df, qqq_price):
     return dn_strike, strike_delta, df_calc
 
 def calculate_sentiment_score(data_0dte, nq_now, vix_level, fg_score):
-    score = 50
+    """Calculate 0-100 sentiment score"""
+    score = 50  # Start neutral
     
     if data_0dte:
         dn_distance = nq_now - data_0dte['dn_nq']
         gf_distance = nq_now - data_0dte['g_flip_nq']
         
+        # Delta Neutral positioning (-20 to +20)
         if abs(dn_distance) > 200:
             if dn_distance > 0:
-                score -= 15
+                score -= 15  # Overextended bearish
             else:
-                score += 15
+                score += 15  # Oversold bullish
         
+        # Gamma regime (-15 to +15)
         if gf_distance > 0:
-            score -= 10
+            score -= 10  # Negative gamma = bearish
         else:
-            score += 10
+            score += 10  # Positive gamma = bullish
         
+        # Net Delta (-10 to +10)
         if data_0dte['net_delta'] > 0:
-            score += 5
+            score += 5  # Bullish positioning
         else:
-            score -= 5
+            score -= 5  # Bearish positioning
     
+    # VIX level (-10 to +10)
     if vix_level > 20:
-        score -= 10
+        score -= 10  # High fear
     elif vix_level < 15:
-        score += 5
+        score += 5  # Low fear
     
+    # Fear & Greed (-10 to +10)
     if fg_score < 30:
-        score += 10
+        score += 10  # Extreme fear = contrarian buy
     elif fg_score > 70:
-        score -= 10
+        score -= 10  # Extreme greed = contrarian sell
     
     return max(0, min(100, score))
 
 def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
+    """Process single expiration and return all analysis"""
     df = df_raw[df_raw['expiration'] == target_exp].copy()
     df = df[df['open_interest'] > 0].copy()
     df = df[df['iv'] > 0].copy()
@@ -544,13 +484,16 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
     if len(df) == 0:
         return None
     
+    # Calculate Delta Neutral
     dn_strike, strike_delta, df = calculate_delta_neutral(df, qqq_price)
     dn_nq = dn_strike * ratio
     
+    # Net Delta
     total_call_delta = df[df['type'] == 'call']['delta_exposure'].sum()
     total_put_delta = df[df['type'] == 'put']['delta_exposure'].sum()
     net_delta = total_call_delta + total_put_delta
     
+    # Expected Move
     atm_strike = df.iloc[(df['strike'] - qqq_price).abs().argsort()[:1]]['strike'].values[0]
     atm_opts = df[df['strike'] == atm_strike]
     atm_call = atm_opts[atm_opts['type'] == 'call']
@@ -564,13 +507,17 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
         straddle = qqq_price * 0.012
     
     nq_em_full = (straddle * 1.25 if straddle > 0 else qqq_price * 0.012) * ratio
+    nq_em_050 = nq_em_full * 0.50
+    nq_em_025 = nq_em_full * 0.25
     
+    # GEX
     df['GEX'] = df.apply(
         lambda x: x['open_interest'] * x['gamma'] * (qqq_price ** 2) * 0.01 *
         (1 if x['type'] == 'call' else -1),
         axis=1
     )
     
+    # Levels
     calls = df[df['type'] == 'call'].sort_values('GEX', ascending=False)
     puts = df[df['type'] == 'put'].sort_values('GEX', ascending=True)
     
@@ -580,6 +527,7 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
     if p_floor_strike == p_wall_strike and len(puts) > 1:
         p_floor_strike = puts.iloc[1]['strike']
     
+    # Secondary Wall
     s_wall_strike = p_wall_strike
     for i in range(1, len(calls)):
         candidate = calls.iloc[i]['strike']
@@ -587,6 +535,7 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
             s_wall_strike = candidate
             break
     
+    # Secondary Floor
     s_floor_strike = p_floor_strike
     for i in range(1, len(puts)):
         candidate = puts.iloc[i]['strike']
@@ -597,6 +546,21 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
             break
     
     g_flip_strike = df.groupby('strike')['GEX'].sum().abs().idxmin()
+    
+    results = [
+        ("Delta Neutral", dn_nq, 5.0, "⚖️"),
+        ("Target Resistance", (p_wall_strike * ratio) + 35, 3.0, "🎯"),
+        ("Primary Wall", p_wall_strike * ratio, 5.0, "🔴"),
+        ("Primary Floor", p_floor_strike * ratio, 5.0, "🟢"),
+        ("Target Support", (p_floor_strike * ratio) - 35, 3.0, "🎯"),
+        ("Secondary Wall", s_wall_strike * ratio, 3.0, "🟠"),
+        ("Secondary Floor", s_floor_strike * ratio, 3.0, "🟡"),
+        ("Gamma Flip", g_flip_strike * ratio, 10.0, "⚡"),
+        ("Upper 0.50σ", nq_now + nq_em_050, 5.0, "📊"),
+        ("Upper 0.25σ", nq_now + nq_em_025, 3.0, "📊"),
+        ("Lower 0.25σ", nq_now - nq_em_025, 3.0, "📊"),
+        ("Lower 0.50σ", nq_now - nq_em_050, 5.0, "📊")
+    ]
     
     return {
         'df': df,
@@ -610,295 +574,1061 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
         'calls': calls,
         'puts': puts,
         'strike_delta': strike_delta,
+        'results': results,
+        'straddle': straddle,
         'nq_em_full': nq_em_full,
+        'atm_strike': atm_strike
     }
 
 # ─────────────────────────────────────────────
-# LOAD DATA
+# MAIN APP
 # ─────────────────────────────────────────────
-with st.spinner("Loading..."):
+with st.spinner("🔄 Loading multi-timeframe data..."):
+
     qqq_price = get_qqq_price(FINNHUB_KEY)
     if not qqq_price:
         st.error("Could not fetch QQQ price")
         st.stop()
 
-    nq_now, nq_source = get_nq_price_auto(FINNHUB_KEY)
-    if not nq_now:
-        nq_now = 24760.0
+    if manual_override:
+        nq_now = st.sidebar.number_input(
+            "NQ Price",
+            min_value=10000.0,
+            max_value=50000.0,
+            value=24760.0,
+            step=0.25,
+            format="%.2f"
+        )
+        nq_source = "Manual"
+    else:
+        nq_now, nq_source = get_nq_price_auto(FINNHUB_KEY)
+        if not nq_now:
+            nq_now = st.sidebar.number_input(
+                "NQ Price (auto-fetch failed)",
+                min_value=10000.0,
+                max_value=50000.0,
+                value=24760.0,
+                step=0.25,
+                format="%.2f"
+            )
+            nq_source = "Manual Fallback"
 
-    ratio = nq_now / qqq_price
+    ratio = nq_now / qqq_price if qqq_price > 0 else 0
 
     df_raw, cboe_price = get_cboe_options("QQQ")
     if df_raw is None:
         st.error("Failed to fetch options")
         st.stop()
 
+    if qqq_price == 0:
+        qqq_price = cboe_price
+
     exp_0dte, exp_weekly, exp_monthly = get_expirations_by_type(df_raw)
     
-    data_0dte = process_expiration(df_raw, exp_0dte, qqq_price, ratio, nq_now) if exp_0dte else None
-    data_weekly = process_expiration(df_raw, exp_weekly, qqq_price, ratio, nq_now) if exp_weekly and exp_weekly != exp_0dte else None
-    data_monthly = process_expiration(df_raw, exp_monthly, qqq_price, ratio, nq_now) if exp_monthly and exp_monthly not in [exp_0dte, exp_weekly] else None
+    data_0dte = None
+    data_weekly = None
+    data_monthly = None
     
+    if exp_0dte:
+        data_0dte = process_expiration(df_raw, exp_0dte, qqq_price, ratio, nq_now)
+    
+    if exp_weekly and exp_weekly != exp_0dte:
+        data_weekly = process_expiration(df_raw, exp_weekly, qqq_price, ratio, nq_now)
+    
+    if exp_monthly and exp_monthly not in [exp_0dte, exp_weekly]:
+        data_monthly = process_expiration(df_raw, exp_monthly, qqq_price, ratio, nq_now)
+    
+    # Get market data for sentiment
     market_data = get_market_overview_yahoo()
     vix_level = market_data.get('vix', {}).get('price', 15)
     fg = get_fear_greed_index()
+    
+    # Calculate sentiment score
     sentiment_score = calculate_sentiment_score(data_0dte, nq_now, vix_level, fg['score'])
 
 # ═══════════════════════════════════════════════════
-# QUICK GLANCE
+# QUICK GLANCE DASHBOARD (NEW FEATURE #2)
 # ═══════════════════════════════════════════════════
 if data_0dte:
     dn_distance = nq_now - data_0dte['dn_nq']
     gf_distance = nq_now - data_0dte['g_flip_nq']
     above_gf = gf_distance > 0
     
-    regime = "NEGATIVE GAMMA" if above_gf else "POSITIVE GAMMA"
-    regime_emoji = "🔴" if above_gf else "🟢"
+    # Determine regime and bias
+    if above_gf:
+        regime = "🔴 NEGATIVE GAMMA"
+        regime_desc = "Unstable / Whipsaw Risk"
+    else:
+        regime = "🟢 POSITIVE GAMMA"
+        regime_desc = "Stable / Range-Bound"
     
     if abs(dn_distance) > 200:
-        bias = "SHORT" if dn_distance > 0 else "LONG"
-        bias_emoji = "⬇️" if dn_distance > 0 else "⬆️"
-    else:
-        bias = "NEUTRAL"
-        bias_emoji = "⚖️"
-    
-    try:
-        nq_ticker = yf.Ticker("NQ=F")
-        nq_hist = nq_ticker.history(period="1d")
-        if not nq_hist.empty:
-            nq_prev_close = nq_hist['Open'].iloc[0]
-            nq_change = nq_now - nq_prev_close
-            nq_change_pct = (nq_change / nq_prev_close) * 100
+        if dn_distance > 0:
+            bias = "⬇️ SHORT BIAS"
+            bias_desc = f"Price extended {dn_distance:.0f}pts above Delta Neutral"
         else:
-            nq_change = 0
-            nq_change_pct = 0
-    except:
-        nq_change = 0
-        nq_change_pct = 0
+            bias = "⬆️ LONG BIAS"
+            bias_desc = f"Price {abs(dn_distance):.0f}pts below Delta Neutral"
+    else:
+        bias = "⚖️ NEUTRAL"
+        bias_desc = "Price near Delta Neutral equilibrium"
     
-    change_color = "#16a34a" if nq_change >= 0 else "#dc2626"
-    change_sign = "+" if nq_change >= 0 else ""
+    key_level_price = data_0dte['g_flip_nq'] if above_gf else data_0dte['dn_nq']
+    key_level_name = "Gamma Flip" if above_gf else "Delta Neutral"
     
     st.markdown(f"""
     <div class="quick-glance">
-        <div class="quick-glance-title">⚡ MARKET SNAPSHOT</div>
-        <div class="quick-glance-grid">
-            <div class="quick-glance-item">
-                <div class="quick-glance-label">NQ FUTURES</div>
-                <div class="quick-glance-value">{nq_now:,.2f}</div>
-                <div class="quick-glance-subtext" style="color: {change_color};">{change_sign}{nq_change:.2f} ({change_sign}{nq_change_pct:.2f}%)</div>
+        <h2 style="margin-top: 0;">🎯 QUICK GLANCE</h2>
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-top: 20px;">
+            <div>
+                <p style="color: #888; margin: 0; font-size: 14px;">CURRENT PRICE</p>
+                <p style="font-size: 32px; margin: 5px 0; color: {ACCENT_COLOR}; font-weight: bold;">{nq_now:.2f}</p>
+                <p style="color: #888; margin: 0; font-size: 12px;">{nq_source}</p>
             </div>
-            <div class="quick-glance-item">
-                <div class="quick-glance-label">GAMMA REGIME</div>
-                <div class="quick-glance-value" style="font-size: 20px;">{regime_emoji} {regime}</div>
-                <div class="quick-glance-subtext">{'Volatile/Unstable' if above_gf else 'Stable/Range-Bound'}</div>
+            <div>
+                <p style="color: #888; margin: 0; font-size: 14px;">REGIME</p>
+                <p style="font-size: 24px; margin: 5px 0; font-weight: bold;">{regime}</p>
+                <p style="color: #888; margin: 0; font-size: 12px;">{regime_desc}</p>
             </div>
-            <div class="quick-glance-item">
-                <div class="quick-glance-label">TRADING BIAS</div>
-                <div class="quick-glance-value" style="font-size: 20px;">{bias_emoji} {bias}</div>
-                <div class="quick-glance-subtext">{abs(dn_distance):.0f}pts from Delta Neutral</div>
+            <div>
+                <p style="color: #888; margin: 0; font-size: 14px;">BIAS</p>
+                <p style="font-size: 24px; margin: 5px 0; font-weight: bold;">{bias}</p>
+                <p style="color: #888; margin: 0; font-size: 12px;">{bias_desc}</p>
             </div>
-            <div class="quick-glance-item">
-                <div class="quick-glance-label">KEY LEVEL</div>
-                <div class="quick-glance-value" style="font-size: 22px;">{data_0dte['dn_nq']:.2f}</div>
-                <div class="quick-glance-subtext">Delta Neutral</div>
-            </div>
-        </div>
-        
-        <div style="margin-top: 20px;">
-            <div class="quick-glance-label">MARKET SENTIMENT</div>
-            <div class="sentiment-meter">
-                <div class="sentiment-marker" style="left: {sentiment_score}%;"></div>
-            </div>
-            <div class="sentiment-labels">
-                <span>BEARISH</span>
-                <span>NEUTRAL</span>
-                <span>BULLISH</span>
+            <div>
+                <p style="color: #888; margin: 0; font-size: 14px;">KEY LEVEL</p>
+                <p style="font-size: 24px; margin: 5px 0; font-weight: bold;">{key_level_price:.2f}</p>
+                <p style="color: #888; margin: 0; font-size: 12px;">{key_level_name}</p>
             </div>
         </div>
     </div>
     """, unsafe_allow_html=True)
-
-st.markdown("---")
-
-# ═══════════════════════════════════════════════════
-# GRID LAYOUT
-# ═══════════════════════════════════════════════════
-
-col_left, col_middle, col_right = st.columns([2, 3, 2])
-
-with col_left:
-    st.markdown('<div class="koyfin-card"><div class="koyfin-card-header">📊 Key Levels (0DTE)</div>', unsafe_allow_html=True)
     
-    if data_0dte:
-        levels_data = {
-            'Level': ['Delta Neutral', 'Gamma Flip', 'Primary Wall', 'Primary Floor'],
-            'Price': [
-                f"{data_0dte['dn_nq']:.2f}",
-                f"{data_0dte['g_flip_nq']:.2f}",
-                f"{data_0dte['p_wall']:.2f}",
-                f"{data_0dte['p_floor']:.2f}"
-            ],
-            'Distance': [
-                f"{abs(nq_now - data_0dte['dn_nq']):.0f}",
-                f"{abs(nq_now - data_0dte['g_flip_nq']):.0f}",
-                f"{abs(nq_now - data_0dte['p_wall']):.0f}",
-                f"{abs(nq_now - data_0dte['p_floor']):.0f}"
-            ]
-        }
-        
-        st.dataframe(pd.DataFrame(levels_data), hide_index=True, width='stretch')
+    # Sentiment Score Meter (NEW FEATURE #11)
+    st.markdown("### 📊 Market Sentiment Score")
     
-    st.markdown('</div>', unsafe_allow_html=True)
+    col1, col2 = st.columns([3, 1])
     
-    st.markdown('<div class="koyfin-card"><div class="koyfin-card-header">📈 Market Indicators</div>', unsafe_allow_html=True)
-    
-    if market_data:
-        indicators_data = []
-        for key, label in [('vix', 'VIX'), ('10y', '10Y Treasury'), ('dxy', 'Dollar Index')]:
-            if key in market_data and market_data[key]['price']:
-                price = market_data[key]['price']
-                chg = market_data[key].get('change_pct', 0)
-                indicators_data.append({
-                    'Indicator': label,
-                    'Price': f"{price:.2f}{'%' if key == '10y' else ''}",
-                    'Change %': f"{chg:+.2f}%"
-                })
-        
-        if indicators_data:
-            st.dataframe(pd.DataFrame(indicators_data), hide_index=True, width='stretch')
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    st.markdown('<div class="koyfin-card"><div class="koyfin-card-header">📊 Top Movers</div>', unsafe_allow_html=True)
-    
-    movers = get_top_movers(FINNHUB_KEY)
-    
-    col1, col2 = st.columns(2)
     with col1:
-        st.markdown("**Gainers**")
-        if movers['gainers']:
-            for mover in movers['gainers'][:3]:
-                st.markdown(f"<span class='badge badge-bullish'>{mover['symbol']}</span> +{mover['change_pct']:.1f}%", unsafe_allow_html=True)
+        # Sentiment interpretation
+        if sentiment_score < 30:
+            sentiment_text = "BEARISH"
+            sentiment_color = "#FF4444"
+        elif sentiment_score < 45:
+            sentiment_text = "CAUTIOUS BEARISH"
+            sentiment_color = "#FFAA00"
+        elif sentiment_score < 55:
+            sentiment_text = "NEUTRAL"
+            sentiment_color = "#FFFF00"
+        elif sentiment_score < 70:
+            sentiment_text = "CAUTIOUS BULLISH"
+            sentiment_color = "#AAFF00"
+        else:
+            sentiment_text = "BULLISH"
+            sentiment_color = "#44FF44"
+        
+        st.markdown(f"""
+        <div style="position: relative;">
+            <div class="sentiment-meter">
+                <div class="sentiment-marker" style="left: {sentiment_score}%;"></div>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-top: 5px; font-size: 12px; color: #888;">
+                <span>0 (Bearish)</span>
+                <span>50 (Neutral)</span>
+                <span>100 (Bullish)</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     
     with col2:
-        st.markdown("**Losers**")
-        if movers['losers']:
-            for mover in movers['losers'][:3]:
-                st.markdown(f"<span class='badge badge-bearish'>{mover['symbol']}</span> {mover['change_pct']:.1f}%", unsafe_allow_html=True)
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-
-with col_middle:
-    st.markdown('<div class="koyfin-card"><div class="koyfin-card-header">📈 NQ Price Action (5min)</div>', unsafe_allow_html=True)
-    
-    if data_0dte:
-        nq_data = get_nq_intraday_data()
-        
-        if nq_data is not None and not nq_data.empty:
-            fig = go.Figure()
-            
-            fig.add_trace(go.Candlestick(
-                x=nq_data.index,
-                open=nq_data['Open'],
-                high=nq_data['High'],
-                low=nq_data['Low'],
-                close=nq_data['Close'],
-                name='NQ',
-                increasing_line_color='#16a34a',
-                decreasing_line_color='#dc2626'
-            ))
-            
-            fig.add_hline(y=data_0dte['dn_nq'], line_dash="dot", line_color="#facc15", annotation_text="DN")
-            fig.add_hline(y=data_0dte['g_flip_nq'], line_dash="dash", line_color="#a855f7", annotation_text="GF")
-            fig.add_hline(y=data_0dte['p_wall'], line_color="#dc2626", annotation_text="Wall")
-            fig.add_hline(y=data_0dte['p_floor'], line_color="#16a34a", annotation_text="Floor")
-            
-            if data_0dte['g_flip_nq'] < nq_data['High'].max():
-                fig.add_hrect(y0=data_0dte['g_flip_nq'], y1=nq_data['High'].max(), fillcolor="red", opacity=0.05)
-            
-            if data_0dte['g_flip_nq'] > nq_data['Low'].min():
-                fig.add_hrect(y0=nq_data['Low'].min(), y1=data_0dte['g_flip_nq'], fillcolor="green", opacity=0.05)
-            
-            fig.update_layout(
-                template="plotly_dark",
-                height=400,
-                showlegend=False,
-                hovermode='x unified',
-                paper_bgcolor='#0a0e1a',
-                plot_bgcolor='#0a0e1a'
-            )
-            
-            fig.update_xaxes(rangeslider_visible=False)
-            
-            st.plotly_chart(fig, width='stretch')
-        else:
-            st.info("Chart data unavailable")
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    st.markdown('<div class="koyfin-card"><div class="koyfin-card-header">🍞 Daily Bread Summary</div>', unsafe_allow_html=True)
-    
-    if data_0dte:
-        dn_dist = nq_now - data_0dte['dn_nq']
-        gf_dist = nq_now - data_0dte['g_flip_nq']
-        is_above_dn = dn_dist > 0
-        is_above_gf = gf_dist > 0
-        
-        if is_above_dn and is_above_gf and abs(dn_dist) > 200:
-            st.warning(f"**OVEREXTENDED:** {dn_dist:.0f}pts above DN. High reversion risk to {data_0dte['dn_nq']:.2f}")
-        elif not is_above_dn and not is_above_gf:
-            st.success(f"**RANGE-BOUND:** Stable between {data_0dte['p_floor']:.2f} - {data_0dte['p_wall']:.2f}")
-        else:
-            st.info(f"**BALANCED:** Watch {data_0dte['g_flip_nq']:.2f} for regime shifts")
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-
-with col_right:
-    st.markdown('<div class="koyfin-card"><div class="koyfin-card-header">📅 Today\'s Events</div>', unsafe_allow_html=True)
-    
-    events = get_economic_calendar(FINNHUB_KEY)
-    
-    if events:
-        high_impact = [e for e in events if e.get('impact') == 'high']
-        if high_impact:
-            for event in high_impact[:3]:
-                st.markdown(f"<span class='badge badge-bearish'>HIGH</span> {event.get('event', 'Unknown')}", unsafe_allow_html=True)
-        else:
-            st.info("Light calendar")
-    else:
-        st.info("No events")
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    st.markdown('<div class="koyfin-card"><div class="koyfin-card-header">📰 Headlines</div>', unsafe_allow_html=True)
-    
-    news = get_market_news(FINNHUB_KEY)
-    
-    if news:
-        for article in news[:4]:
-            headline = article.get('headline', 'No title')
-            if len(headline) > 60:
-                headline = headline[:57] + "..."
-            st.markdown(f"**{headline}**")
-            st.caption(article.get('source', 'Unknown'))
-    else:
-        st.info("No news")
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    st.markdown('<div class="koyfin-card"><div class="koyfin-card-header">😱 Fear & Greed</div>', unsafe_allow_html=True)
-    
-    st.metric("Score", f"{fg['score']}/100", fg['rating'])
-    
-    if fg['score'] < 30:
-        st.success("Extreme Fear")
-    elif fg['score'] > 70:
-        st.error("Extreme Greed")
-    else:
-        st.info(fg['rating'])
-    
-    st.markdown('</div>', unsafe_allow_html=True)
+        st.metric("Score", f"{sentiment_score}/100", sentiment_text)
 
 st.markdown("---")
-st.caption(f"Last updated: {datetime.now().strftime('%H:%M:%S')} • Auto-refresh: 60s")
+
+# ═══════════════════════════════════════════════════
+# INTERACTIVE CHART WITH LEVELS (NEW FEATURE #3)
+# ═══════════════════════════════════════════════════
+if data_0dte:
+    st.subheader("📈 NQ Price Action with Key Levels")
+    
+    nq_data = get_nq_intraday_data()
+    
+    if nq_data is not None and not nq_data.empty:
+        fig = go.Figure()
+        
+        # Candlestick chart
+        fig.add_trace(go.Candlestick(
+            x=nq_data.index,
+            open=nq_data['Open'],
+            high=nq_data['High'],
+            low=nq_data['Low'],
+            close=nq_data['Close'],
+            name='NQ',
+            increasing_line_color='#44FF44',
+            decreasing_line_color='#FF4444'
+        ))
+        
+        # Add key levels as horizontal lines
+        levels_to_plot = [
+            (data_0dte['dn_nq'], "Delta Neutral", "#FFD700", "dot"),
+            (data_0dte['g_flip_nq'], "Gamma Flip", "#FF00FF", "dash"),
+            (data_0dte['p_wall'], "Primary Wall", "#FF4444", "solid"),
+            (data_0dte['p_floor'], "Primary Floor", "#44FF44", "solid"),
+        ]
+        
+        for level_price, level_name, color, dash in levels_to_plot:
+            fig.add_hline(
+                y=level_price,
+                line_dash=dash,
+                line_color=color,
+                annotation_text=f"{level_name}: {level_price:.2f}",
+                annotation_position="right"
+            )
+        
+        # Shade gamma regime zones
+        if data_0dte['g_flip_nq'] < nq_data['High'].max():
+            fig.add_hrect(
+                y0=data_0dte['g_flip_nq'],
+                y1=nq_data['High'].max(),
+                fillcolor="red",
+                opacity=0.1,
+                annotation_text="Negative Gamma Zone",
+                annotation_position="top right"
+            )
+        
+        if data_0dte['g_flip_nq'] > nq_data['Low'].min():
+            fig.add_hrect(
+                y0=nq_data['Low'].min(),
+                y1=data_0dte['g_flip_nq'],
+                fillcolor="green",
+                opacity=0.1,
+                annotation_text="Positive Gamma Zone",
+                annotation_position="bottom right"
+            )
+        
+        fig.update_layout(
+            template="plotly_dark" if st.session_state.theme == 'dark' else "plotly_white",
+            height=500,
+            xaxis_title="Time (5-min candles)",
+            yaxis_title="NQ Price",
+            showlegend=False,
+            hovermode='x unified'
+        )
+        
+        fig.update_xaxes(rangeslider_visible=False)
+        
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("📊 Intraday chart data unavailable - check back during market hours")
+
+st.markdown("---")
+
+# ─────────────────────────────────────────────
+# COMPACT HEADER METRICS
+# ─────────────────────────────────────────────
+col1, col2, col3 = st.columns(3)
+col1.metric("NQ Price", f"{nq_now:.2f}", f"↑ {nq_source}")
+col2.metric("QQQ Price", f"${qqq_price:.2f}")
+col3.metric("Ratio", f"{ratio:.4f}")
+
+if data_0dte and data_weekly:
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    col1.metric("⚖️ Delta Neutral (0DTE)", f"{data_0dte['dn_nq']:.2f}")
+    col2.metric("⚖️ Delta Neutral (Weekly)", f"{data_weekly['dn_nq']:.2f}")
+    col3.metric("⚡ Gamma Flip (0DTE)", f"{data_0dte['g_flip_nq']:.2f}")
+    col4.metric("⚡ Gamma Flip (Weekly)", f"{data_weekly['g_flip_nq']:.2f}")
+    delta_0 = "🟢 Bullish" if data_0dte['net_delta'] > 0 else "🔴 Bearish"
+    delta_w = "🟢 Bullish" if data_weekly['net_delta'] > 0 else "🔴 Bearish"
+    col5.metric("📊 Net Delta (0DTE)", f"{data_0dte['net_delta']:,.0f}", delta_0)
+    col6.metric("📊 Net Delta (Weekly)", f"{data_weekly['net_delta']:,.0f}", delta_w)
+elif data_0dte:
+    col1, col2, col3 = st.columns(3)
+    col1.metric("⚖️ Delta Neutral", f"{data_0dte['dn_nq']:.2f}")
+    col2.metric("⚡ Gamma Flip", f"{data_0dte['g_flip_nq']:.2f}")
+    delta_sentiment = "🟢 Bullish" if data_0dte['net_delta'] > 0 else "🔴 Bearish"
+    col3.metric("📊 Net Delta", f"{data_0dte['net_delta']:,.0f}", delta_sentiment)
+
+st.markdown("---")
+
+# ─────────────────────────────────────────────
+# MULTI-TIMEFRAME OVERVIEW
+# ─────────────────────────────────────────────
+st.subheader("🎯 Multi-Timeframe Key Levels")
+
+overview_data = []
+
+if data_0dte:
+    days = (exp_0dte.date() - datetime.now().date()).days
+    label = "0DTE" if days == 0 else f"{days}DTE"
+    overview_data.append({
+        'Timeframe': label,
+        'Expiration': exp_0dte.strftime('%Y-%m-%d'),
+        'Delta Neutral': data_0dte['dn_nq'],
+        'Gamma Flip': data_0dte['g_flip_nq'],
+        'Primary Wall': data_0dte['p_wall'],
+        'Primary Floor': data_0dte['p_floor'],
+        'Net Delta': data_0dte['net_delta']
+    })
+
+if data_weekly:
+    days = (exp_weekly.date() - datetime.now().date()).days
+    label = f"Weekly ({days}D)"
+    overview_data.append({
+        'Timeframe': label,
+        'Expiration': exp_weekly.strftime('%Y-%m-%d'),
+        'Delta Neutral': data_weekly['dn_nq'],
+        'Gamma Flip': data_weekly['g_flip_nq'],
+        'Primary Wall': data_weekly['p_wall'],
+        'Primary Floor': data_weekly['p_floor'],
+        'Net Delta': data_weekly['net_delta']
+    })
+
+if data_monthly:
+    days = (exp_monthly.date() - datetime.now().date()).days
+    label = f"Monthly ({days}D)"
+    overview_data.append({
+        'Timeframe': label,
+        'Expiration': exp_monthly.strftime('%Y-%m-%d'),
+        'Delta Neutral': data_monthly['dn_nq'],
+        'Gamma Flip': data_monthly['g_flip_nq'],
+        'Primary Wall': data_monthly['p_wall'],
+        'Primary Floor': data_monthly['p_floor'],
+        'Net Delta': data_monthly['net_delta']
+    })
+
+if overview_data:
+    overview_df = pd.DataFrame(overview_data)
+    st.dataframe(
+        overview_df.style.format({
+            'Delta Neutral': '{:.2f}',
+            'Gamma Flip': '{:.2f}',
+            'Primary Wall': '{:.2f}',
+            'Primary Floor': '{:.2f}',
+            'Net Delta': '{:,.0f}'
+        }),
+        width='stretch',
+        hide_index=True
+    )
+
+st.markdown("---")
+
+# ─────────────────────────────────────────────
+# DETAILED TABS
+# ─────────────────────────────────────────────
+tab_names = ["📈 Market Overview"]
+if data_0dte: tab_names.append("📊 0DTE Levels")
+if data_weekly: tab_names.append("📊 Weekly Levels")
+if data_monthly: tab_names.append("📊 Monthly Levels")
+tab_names.extend(["🍞 Daily Bread", "📈 GEX Charts", "⚖️ Delta Charts"])
+
+if tab_names:
+    tabs = st.tabs(tab_names)
+    
+    tab_idx = 0
+    
+    # Market Overview Tab
+    with tabs[tab_idx]:
+        st.subheader("📈 Market Overview")
+        
+        with st.spinner("Loading market data..."):
+            
+            if market_data:
+                st.markdown("### Futures & Indices")
+                col1, col2, col3, col4 = st.columns(4)
+                
+                if 'es' in market_data and market_data['es']['price']:
+                    es = market_data['es']
+                    col1.metric(
+                        "S&P 500 (ES)",
+                        f"{es['price']:.2f}",
+                        f"{es.get('change', 0):+.2f} ({es.get('change_pct', 0):+.2f}%)"
+                    )
+                else:
+                    col1.metric("S&P 500 (ES)", "N/A")
+                
+                # NQ - WITH PERCENTAGE
+                try:
+                    nq_ticker = yf.Ticker("NQ=F")
+                    nq_hist = nq_ticker.history(period="1d")
+                    if not nq_hist.empty:
+                        nq_prev_close = nq_hist['Open'].iloc[0]
+                        nq_change = nq_now - nq_prev_close
+                        nq_change_pct = (nq_change / nq_prev_close) * 100 if nq_prev_close != 0 else 0
+                        col2.metric(
+                            "Nasdaq (NQ)",
+                            f"{nq_now:.2f}",
+                            f"{nq_change:+.2f} ({nq_change_pct:+.2f}%)"
+                        )
+                    else:
+                        col2.metric("Nasdaq (NQ)", f"{nq_now:.2f}", nq_source)
+                except:
+                    col2.metric("Nasdaq (NQ)", f"{nq_now:.2f}", nq_source)
+                
+                if 'ym' in market_data and market_data['ym']['price']:
+                    ym = market_data['ym']
+                    col3.metric(
+                        "Dow (YM)",
+                        f"{ym['price']:.2f}",
+                        f"{ym.get('change', 0):+.2f} ({ym.get('change_pct', 0):+.2f}%)"
+                    )
+                else:
+                    col3.metric("Dow (YM)", "N/A")
+                
+                if 'rty' in market_data and market_data['rty']['price']:
+                    rty = market_data['rty']
+                    col4.metric(
+                        "Russell (RTY)",
+                        f"{rty['price']:.2f}",
+                        f"{rty.get('change', 0):+.2f} ({rty.get('change_pct', 0):+.2f}%)"
+                    )
+                else:
+                    col4.metric("Russell (RTY)", "N/A")
+                
+                st.markdown("---")
+                st.markdown("### Market Indicators")
+                col1, col2, col3 = st.columns(3)
+                
+                if 'vix' in market_data and market_data['vix']['price']:
+                    vix = market_data['vix']
+                    col1.metric(
+                        "VIX (Volatility)",
+                        f"{vix['price']:.2f}",
+                        f"{vix.get('change', 0):+.2f} ({vix.get('change_pct', 0):+.2f}%)"
+                    )
+                else:
+                    col1.metric("VIX (Volatility)", "N/A")
+                
+                if '10y' in market_data and market_data['10y']['price']:
+                    tnx = market_data['10y']
+                    col2.metric(
+                        "10Y Treasury",
+                        f"{tnx['price']:.2f}%",
+                        f"{tnx.get('change', 0):+.2f}"
+                    )
+                else:
+                    col2.metric("10Y Treasury", "N/A")
+                
+                if 'dxy' in market_data and market_data['dxy']['price']:
+                    dxy = market_data['dxy']
+                    col3.metric(
+                        "Dollar Index",
+                        f"{dxy['price']:.2f}",
+                        f"{dxy.get('change', 0):+.2f} ({dxy.get('change_pct', 0):+.2f}%)"
+                    )
+                else:
+                    col3.metric("Dollar Index", "N/A")
+            else:
+                st.warning("Market data temporarily unavailable")
+        
+        st.markdown("---")
+        
+        st.markdown("### Market Sentiment")
+        
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            st.metric("Fear & Greed Index", f"{fg['score']:.0f}", fg['rating'])
+        
+        with col2:
+            if fg['score'] < 25:
+                st.error(f"**{fg['rating']}** - Extreme fear typically signals buying opportunity")
+            elif fg['score'] < 45:
+                st.warning(f"**{fg['rating']}** - Cautious sentiment")
+            elif fg['score'] < 55:
+                st.info(f"**{fg['rating']}** - Balanced market")
+            elif fg['score'] < 75:
+                st.warning(f"**{fg['rating']}** - Greedy sentiment")
+            else:
+                st.error(f"**{fg['rating']}** - Extreme greed signals potential top")
+        
+        st.markdown("---")
+        
+        st.markdown("### Top Movers")
+        movers = get_top_movers(FINNHUB_KEY)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**🟢 Top Gainers**")
+            if movers['gainers']:
+                gainers_df = pd.DataFrame(movers['gainers'])
+                st.dataframe(
+                    gainers_df[['symbol', 'price', 'change_pct']].style.format({
+                        'price': '${:.2f}',
+                        'change_pct': '{:+.2f}%'
+                    }),
+                    width='stretch',
+                    hide_index=True
+                )
+            else:
+                st.info("No data available")
+        
+        with col2:
+            st.markdown("**🔴 Top Losers**")
+            if movers['losers']:
+                losers_df = pd.DataFrame(movers['losers'])
+                st.dataframe(
+                    losers_df[['symbol', 'price', 'change_pct']].style.format({
+                        'price': '${:.2f}',
+                        'change_pct': '{:+.2f}%'
+                    }),
+                    width='stretch',
+                    hide_index=True
+                )
+            else:
+                st.info("No data available")
+        
+        st.markdown("---")
+        
+        st.markdown("### 📅 Today's Economic Events")
+        events = get_economic_calendar(FINNHUB_KEY)
+        
+        if events:
+            events_data = []
+            for event in events:
+                time_str = event.get('time', '')[:10] if event.get('time') else 'N/A'
+                events_data.append({
+                    'Time': time_str,
+                    'Event': event.get('event', 'Unknown'),
+                    'Impact': event.get('impact', 'N/A'),
+                    'Country': event.get('country', 'US')
+                })
+            
+            events_df = pd.DataFrame(events_data)
+            st.dataframe(events_df, width='stretch', hide_index=True)
+        else:
+            st.info("No major economic events today")
+        
+        st.markdown("---")
+        
+        st.markdown("### 📰 Latest Market News")
+        news = get_market_news(FINNHUB_KEY)
+        
+        if news:
+            for article in news[:5]:
+                with st.expander(f"**{article.get('headline', 'No title')}** - {article.get('source', 'Unknown')}"):
+                    st.markdown(f"*{article.get('summary', 'No summary available')}*")
+                    st.markdown(f"[Read more]({article.get('url', '#')})")
+                    st.caption(f"Published: {datetime.fromtimestamp(article.get('datetime', 0)).strftime('%Y-%m-%d %H:%M')}")
+        else:
+            st.info("No news available")
+    
+    tab_idx += 1
+    
+    # 0DTE Levels Tab
+    if data_0dte:
+        with tabs[tab_idx]:
+            st.subheader(f"0DTE Analysis - {exp_0dte.strftime('%Y-%m-%d')}")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Delta Neutral", f"{data_0dte['dn_nq']:.2f}")
+            col2.metric("Gamma Flip", f"{data_0dte['g_flip_nq']:.2f}")
+            col3.metric("Net Delta", f"{data_0dte['net_delta']:,.0f}", "🟢 Bull" if data_0dte['net_delta'] > 0 else "🔴 Bear")
+            col4.metric("Expected Move", f"±{data_0dte['nq_em_full']:.0f}")
+            
+            results_df = pd.DataFrame(data_0dte['results'], columns=['Level', 'Price', 'Width', 'Icon'])
+            results_df['Price'] = results_df['Price'].round(2)
+            st.dataframe(
+                results_df[['Icon', 'Level', 'Price', 'Width']].style.format({
+                    'Price': '{:.2f}',
+                    'Width': '{:.1f}'
+                }),
+                width='stretch',
+                height=500,
+                hide_index=True
+            )
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("**🔴 Top Call Strikes**")
+                st.dataframe(
+                    data_0dte['calls'][['strike', 'GEX', 'delta', 'open_interest', 'volume']].head(5),
+                    width='stretch',
+                    hide_index=True
+                )
+            with col2:
+                st.markdown("**🟢 Top Put Strikes**")
+                st.dataframe(
+                    data_0dte['puts'][['strike', 'GEX', 'delta', 'open_interest', 'volume']].head(5),
+                    width='stretch',
+                    hide_index=True
+                )
+        
+        tab_idx += 1
+    
+    # Weekly Levels Tab
+    if data_weekly:
+        with tabs[tab_idx]:
+            st.subheader(f"Weekly Analysis - {exp_weekly.strftime('%Y-%m-%d')}")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Delta Neutral", f"{data_weekly['dn_nq']:.2f}")
+            col2.metric("Gamma Flip", f"{data_weekly['g_flip_nq']:.2f}")
+            col3.metric("Net Delta", f"{data_weekly['net_delta']:,.0f}", "🟢 Bull" if data_weekly['net_delta'] > 0 else "🔴 Bear")
+            col4.metric("Expected Move", f"±{data_weekly['nq_em_full']:.0f}")
+            
+            results_df = pd.DataFrame(data_weekly['results'], columns=['Level', 'Price', 'Width', 'Icon'])
+            results_df['Price'] = results_df['Price'].round(2)
+            st.dataframe(
+                results_df[['Icon', 'Level', 'Price', 'Width']].style.format({
+                    'Price': '{:.2f}',
+                    'Width': '{:.1f}'
+                }),
+                width='stretch',
+                height=500,
+                hide_index=True
+            )
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("**🔴 Top Call Strikes**")
+                st.dataframe(
+                    data_weekly['calls'][['strike', 'GEX', 'delta', 'open_interest', 'volume']].head(5),
+                    width='stretch',
+                    hide_index=True
+                )
+            with col2:
+                st.markdown("**🟢 Top Put Strikes**")
+                st.dataframe(
+                    data_weekly['puts'][['strike', 'GEX', 'delta', 'open_interest', 'volume']].head(5),
+                    width='stretch',
+                    hide_index=True
+                )
+        
+        tab_idx += 1
+    
+    # Monthly Levels Tab
+    if data_monthly:
+        with tabs[tab_idx]:
+            st.subheader(f"Monthly Analysis - {exp_monthly.strftime('%Y-%m-%d')}")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Delta Neutral", f"{data_monthly['dn_nq']:.2f}")
+            col2.metric("Gamma Flip", f"{data_monthly['g_flip_nq']:.2f}")
+            col3.metric("Net Delta", f"{data_monthly['net_delta']:,.0f}", "🟢 Bull" if data_monthly['net_delta'] > 0 else "🔴 Bear")
+            col4.metric("Expected Move", f"±{data_monthly['nq_em_full']:.0f}")
+            
+            results_df = pd.DataFrame(data_monthly['results'], columns=['Level', 'Price', 'Width', 'Icon'])
+            results_df['Price'] = results_df['Price'].round(2)
+            st.dataframe(
+                results_df[['Icon', 'Level', 'Price', 'Width']].style.format({
+                    'Price': '{:.2f}',
+                    'Width': '{:.1f}'
+                }),
+                width='stretch',
+                height=500,
+                hide_index=True
+            )
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("**🔴 Top Call Strikes**")
+                st.dataframe(
+                    data_monthly['calls'][['strike', 'GEX', 'delta', 'open_interest', 'volume']].head(5),
+                    width='stretch',
+                    hide_index=True
+                )
+            with col2:
+                st.markdown("**🟢 Top Put Strikes**")
+                st.dataframe(
+                    data_monthly['puts'][['strike', 'GEX', 'delta', 'open_interest', 'volume']].head(5),
+                    width='stretch',
+                    hide_index=True
+                )
+        
+        tab_idx += 1
+    
+    # Daily Bread Tab (continues from previous code...)
+    with tabs[tab_idx]:
+        st.markdown("# 🍞 DAILY BREAD")
+        st.markdown(f"**Your NQ Market Intelligence Report** • {datetime.now().strftime('%A, %B %d, %Y')}")
+        
+        if data_0dte:
+            # Calculate key metrics
+            dn_distance = nq_now - data_0dte['dn_nq']
+            gf_distance = nq_now - data_0dte['g_flip_nq']
+            wall_distance = data_0dte['p_wall'] - nq_now
+            floor_distance = nq_now - data_0dte['p_floor']
+            above_dn = dn_distance > 0
+            above_gf = gf_distance > 0
+            
+            # Determine market tone
+            if above_dn and abs(dn_distance) > 200:
+                tone = "⚠️ EXTENDED UPSIDE"
+                tone_color = "🟡"
+            elif not above_dn and abs(dn_distance) > 200:
+                tone = "📉 OVERSOLD"
+                tone_color = "🟢"
+            else:
+                tone = "⚖️ BALANCED"
+                tone_color = "🟢"
+            
+            # EXECUTIVE SUMMARY
+            st.markdown("---")
+            st.markdown("## 📊 EXECUTIVE SUMMARY")
+            
+            # Generate executive summary based on conditions
+            if above_dn and above_gf and abs(dn_distance) > 200:
+                summary = f"""NQ is trading **{dn_distance:.0f} points above Delta Neutral** at {data_0dte['dn_nq']:.2f}, indicating an 
+**overextended market** with dealers holding massive short delta positions. Price is operating in **negative gamma** 
+territory above {data_0dte['g_flip_nq']:.2f}, creating unstable conditions prone to whipsaws and exaggerated moves. 
+**Mean reversion back toward Delta Neutral is the highest probability scenario**, with rallies likely facing heavy resistance 
+at the {data_0dte['p_wall']:.2f} primary wall."""
+            elif not above_dn and not above_gf:
+                summary = f"""NQ is trading **{abs(dn_distance):.0f} points below Delta Neutral** at {data_0dte['dn_nq']:.2f} in **positive gamma** 
+territory, suggesting dealers will actively stabilize price action. The market is positioned for **range-bound trading** 
+between {data_0dte['p_floor']:.2f} floor and {data_0dte['p_wall']:.2f} wall, with dips likely finding support and rallies 
+facing resistance. Breakout attempts are less likely to follow through in this regime."""
+            else:
+                summary = f"""NQ is trading near equilibrium around the {data_0dte['dn_nq']:.2f} Delta Neutral level with relatively **balanced dealer 
+positioning**. Current gamma regime is **{'negative' if above_gf else 'positive'}**, suggesting 
+**{'volatile' if above_gf else 'stable'}** price action ahead. Watch for a break of key levels at {data_0dte['p_wall']:.2f} 
+resistance or {data_0dte['p_floor']:.2f} support to establish directional bias."""
+            
+            st.info(summary)
+            
+            # Market Snapshot Cards
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric(
+                    "Market Tone",
+                    tone,
+                    tone_color
+                )
+            
+            with col2:
+                st.metric(
+                    "Gamma Regime",
+                    "NEGATIVE" if above_gf else "POSITIVE",
+                    "⚠️ Unstable" if above_gf else "✅ Stable"
+                )
+            
+            with col3:
+                st.metric(
+                    "Dealer Positioning",
+                    "SHORT DELTA" if data_0dte['net_delta'] < 0 else "LONG DELTA",
+                    f"{data_0dte['net_delta']:,.0f}"
+                )
+            
+            with col4:
+                st.metric(
+                    "Delta Neutral Distance",
+                    f"{abs(dn_distance):.0f} pts",
+                    "Above" if above_dn else "Below"
+                )
+            
+            # KEY LEVELS TO WATCH
+            st.markdown("---")
+            st.markdown("## 🎯 KEY LEVELS TO WATCH TODAY")
+            
+            # Determine top 3 most important levels
+            levels_priority = []
+            
+            # Always include Delta Neutral and Gamma Flip
+            levels_priority.append({
+                'level': 'Delta Neutral',
+                'price': data_0dte['dn_nq'],
+                'importance': '⭐⭐⭐',
+                'why': 'Primary gravitational pull - price tends to revert here',
+                'action': 'Watch for mean reversion' if abs(dn_distance) > 100 else 'Price is balanced here'
+            })
+            
+            levels_priority.append({
+                'level': 'Gamma Flip',
+                'price': data_0dte['g_flip_nq'],
+                'importance': '⭐⭐⭐',
+                'why': 'Regime change level - dealer hedging behavior shifts here',
+                'action': 'Break above = volatile / Break below = stable'
+            })
+            
+            # Add either wall or floor depending on where price is
+            if wall_distance < floor_distance:
+                levels_priority.append({
+                    'level': 'Primary Wall',
+                    'price': data_0dte['p_wall'],
+                    'importance': '⭐⭐',
+                    'why': 'Highest call GEX - heavy resistance zone',
+                    'action': f'Strong sell pressure if price reaches {data_0dte["p_wall"]:.2f}'
+                })
+            else:
+                levels_priority.append({
+                    'level': 'Primary Floor',
+                    'price': data_0dte['p_floor'],
+                    'importance': '⭐⭐',
+                    'why': 'Highest put GEX - strong support zone',
+                    'action': f'Expect buying if price tests {data_0dte["p_floor"]:.2f}'
+                })
+            
+            # Display as clean cards
+            for idx, level in enumerate(levels_priority):
+                with st.container():
+                    col1, col2, col3 = st.columns([2, 1, 3])
+                    
+                    with col1:
+                        st.markdown(f"**{idx + 1}. {level['level']}**")
+                        st.markdown(f"**{level['price']:.2f}**")
+                    
+                    with col2:
+                        st.markdown(f"{level['importance']}")
+                    
+                    with col3:
+                        st.markdown(f"*{level['why']}*")
+                        st.markdown(f"➜ {level['action']}")
+                    
+                    if idx < len(levels_priority) - 1:
+                        st.markdown("")
+            
+            # TODAY'S CATALYST CALENDAR
+            st.markdown("---")
+            st.markdown("## 📅 TODAY'S CATALYST CALENDAR")
+            
+            events = get_economic_calendar(FINNHUB_KEY)
+            
+            if events:
+                st.markdown("**Economic Events That Could Move Markets:**")
+                
+                high_impact = [e for e in events if e.get('impact') == 'high']
+                medium_impact = [e for e in events if e.get('impact') == 'medium']
+                
+                if high_impact:
+                    st.markdown("🔴 **HIGH IMPACT**")
+                    for event in high_impact[:3]:
+                        time_str = event.get('time', '')[:16] if event.get('time') else 'TBD'
+                        st.markdown(f"• **{event.get('event', 'Unknown')}** • {time_str}")
+                
+                if medium_impact:
+                    st.markdown("🟡 **MEDIUM IMPACT**")
+                    for event in medium_impact[:3]:
+                        time_str = event.get('time', '')[:16] if event.get('time') else 'TBD'
+                        st.markdown(f"• {event.get('event', 'Unknown')} • {time_str}")
+                
+                if not high_impact and not medium_impact:
+                    st.info("No major economic events scheduled today - technical levels dominate")
+            else:
+                st.info("📊 **Light calendar today** - Focus on technical levels and gamma positioning")
+            
+            # Add market-moving news
+            st.markdown("**📰 Market-Moving Headlines:**")
+            news = get_market_news(FINNHUB_KEY)
+            
+            if news:
+                for article in news[:3]:
+                    st.markdown(f"• **{article.get('headline', 'No title')}** - *{article.get('source', 'Unknown')}*")
+            else:
+                st.markdown("*No major headlines at this time*")
+            
+            # TOMORROW'S PREVIEW
+            st.markdown("---")
+            st.markdown("## 🔮 TOMORROW'S PREVIEW")
+            
+            st.markdown("**What To Watch:**")
+            
+            watch_list = []
+            
+            # Generate dynamic watch items based on current positioning
+            if above_gf:
+                watch_list.append(f"🔍 **Gamma Flip at {data_0dte['g_flip_nq']:.2f}** - Break below signals regime shift to stability")
+            
+            if abs(dn_distance) > 200:
+                watch_list.append(f"🔍 **Delta Neutral at {data_0dte['dn_nq']:.2f}** - Primary mean reversion target")
+            
+            # VIX watch
+            watch_list.append("🔍 **VIX levels** - Spike above 18 signals vol expansion")
+            
+            # Weekly levels alignment
+            if data_weekly:
+                dn_spread = abs(data_0dte['dn_nq'] - data_weekly['dn_nq'])
+                if dn_spread < 50:
+                    watch_list.append(f"🔍 **Timeframe alignment** - 0DTE/Weekly Delta Neutral converging creates strong magnet")
+                else:
+                    watch_list.append(f"🔍 **Timeframe divergence** - {dn_spread:.0f} point spread between 0DTE/Weekly Delta Neutral suggests chop")
+            
+            # Options expiration
+            watch_list.append("🔍 **0DTE expiration** - Levels reset tomorrow, gamma exposure shifts")
+            
+            for item in watch_list:
+                st.markdown(item)
+            
+            # Trading game plan
+            st.markdown("---")
+            st.markdown("### 💼 TRADING GAME PLAN")
+            
+            if above_dn and above_gf:
+                plan = f"""**SHORT BIAS SETUP**
+
+- **Entry:** Fade rallies into {data_0dte['p_wall']:.2f} resistance
+- **Target:** {data_0dte['dn_nq']:.2f} Delta Neutral
+- **Stop:** Above {data_0dte['results'][5][1]:.2f} (Secondary Wall)
+- **Risk:** Negative gamma = whipsaw potential
+
+*Conservative:* Wait for break below {data_0dte['g_flip_nq']:.2f} Gamma Flip before entering shorts"""
+                st.warning(plan)
+                
+            elif not above_dn and not above_gf:
+                plan = f"""**LONG BIAS SETUP**
+
+- **Entry:** Buy dips toward {data_0dte['p_floor']:.2f} support
+- **Target:** {data_0dte['dn_nq']:.2f} Delta Neutral
+- **Stop:** Below {data_0dte['results'][6][1]:.2f} (Secondary Floor)
+- **Edge:** Positive gamma supports mean reversion
+
+*Aggressive:* Long current levels if holding above floor"""
+                st.success(plan)
+                
+            else:
+                plan = f"""**RANGE TRADING SETUP**
+
+- **Sell:** Rallies near {data_0dte['p_wall']:.2f} wall
+- **Buy:** Dips near {data_0dte['p_floor']:.2f} floor
+- **Range:** {data_0dte['p_floor']:.2f} - {data_0dte['p_wall']:.2f}
+- **Breakout:** Watch for sustained move outside range
+
+*Patience required* - Let price come to levels"""
+                st.info(plan)
+        
+        else:
+            st.info("No 0DTE data available for Daily Bread analysis")
+        
+        st.markdown("---")
+        st.caption("⚠️ Daily Bread is generated from live options market data and should not be considered financial advice. Always manage risk appropriately.")
+    
+    tab_idx += 1
+    
+    # GEX Charts Tab
+    with tabs[tab_idx]:
+        st.subheader("📈 GEX by Strike - All Timeframes")
+        
+        if data_0dte:
+            st.markdown("**0DTE**")
+            gex_by_strike = data_0dte['df'].groupby('strike')['GEX'].sum().reset_index()
+            fig = go.Figure()
+            pos_gex = gex_by_strike[gex_by_strike['GEX'] > 0]
+            neg_gex = gex_by_strike[gex_by_strike['GEX'] < 0]
+            fig.add_trace(go.Bar(x=pos_gex['strike'], y=pos_gex['GEX'], name='Calls', marker_color='#FF4444'))
+            fig.add_trace(go.Bar(x=neg_gex['strike'], y=neg_gex['GEX'], name='Puts', marker_color='#44FF44'))
+            fig.add_vline(x=qqq_price, line_dash="dash", line_color="#00D9FF", annotation_text="Current")
+            fig.update_layout(
+                template="plotly_dark" if st.session_state.theme == 'dark' else "plotly_white",
+                plot_bgcolor='#0E1117' if st.session_state.theme == 'dark' else '#FFFFFF',
+                paper_bgcolor='#0E1117' if st.session_state.theme == 'dark' else '#FFFFFF',
+                height=400,
+                showlegend=True
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        
+        if data_weekly:
+            st.markdown("**Weekly**")
+            gex_by_strike = data_weekly['df'].groupby('strike')['GEX'].sum().reset_index()
+            fig = go.Figure()
+            pos_gex = gex_by_strike[gex_by_strike['GEX'] > 0]
+            neg_gex = gex_by_strike[gex_by_strike['GEX'] < 0]
+            fig.add_trace(go.Bar(x=pos_gex['strike'], y=pos_gex['GEX'], name='Calls', marker_color='#FF4444'))
+            fig.add_trace(go.Bar(x=neg_gex['strike'], y=neg_gex['GEX'], name='Puts', marker_color='#44FF44'))
+            fig.add_vline(x=qqq_price, line_dash="dash", line_color="#00D9FF", annotation_text="Current")
+            fig.update_layout(
+                template="plotly_dark" if st.session_state.theme == 'dark' else "plotly_white",
+                plot_bgcolor='#0E1117' if st.session_state.theme == 'dark' else '#FFFFFF',
+                paper_bgcolor='#0E1117' if st.session_state.theme == 'dark' else '#FFFFFF',
+                height=400,
+                showlegend=True
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        
+        if data_monthly:
+            st.markdown("**Monthly**")
+            gex_by_strike = data_monthly['df'].groupby('strike')['GEX'].sum().reset_index()
+            fig = go.Figure()
+            pos_gex = gex_by_strike[gex_by_strike['GEX'] > 0]
+            neg_gex = gex_by_strike[gex_by_strike['GEX'] < 0]
+            fig.add_trace(go.Bar(x=pos_gex['strike'], y=pos_gex['GEX'], name='Calls', marker_color='#FF4444'))
+            fig.add_trace(go.Bar(x=neg_gex['strike'], y=neg_gex['GEX'], name='Puts', marker_color='#44FF44'))
+            fig.add_vline(x=qqq_price, line_dash="dash", line_color="#00D9FF", annotation_text="Current")
+            fig.update_layout(
+                template="plotly_dark" if st.session_state.theme == 'dark' else "plotly_white",
+                plot_bgcolor='#0E1117' if st.session_state.theme == 'dark' else '#FFFFFF',
+                paper_bgcolor='#0E1117' if st.session_state.theme == 'dark' else '#FFFFFF',
+                height=400,
+                showlegend=True
+            )
+            st.plotly_chart(fig, use_container_width=True)
+    
+    tab_idx += 1
+    
+    # Delta Charts Tab
+    with tabs[tab_idx]:
+        st.subheader("⚖️ Cumulative Delta - All Timeframes")
+        
+        if data_0dte:
+            st.markdown("**0DTE**")
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=data_0dte['strike_delta']['strike'],
+                y=data_0dte['strike_delta']['cumulative_delta'],
+                mode='lines',
+                name='Cumulative Delta',
+                line=dict(color='#00D9FF', width=3),
+                fill='tozeroy'
+            ))
+            fig.add_hline(y=0, line_dash="dash", line_color="white")
+            fig.add_vline(x=data_0dte['dn_strike'], line_dash="dot", line_color="#FFD700", annotation_text="Delta Neutral")
+            fig.add_vline(x=qqq_price, line_dash="dash", line_color="#FF4444", annotation_text="Current")
+            fig.update_layout(
+                template="plotly_dark" if st.session_state.theme == 'dark' else "plotly_white",
+                plot_bgcolor='#0E1117' if st.session_state.theme == 'dark' else '#FFFFFF',
+                paper_bgcolor='#0E1117' if st.session_state.theme == 'dark' else '#FFFFFF',
+                height=400
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        
+        if data_weekly:
+            st.markdown("**Weekly**")
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=data_weekly['strike_delta']['strike'],
+                y=data_weekly['strike_delta']['cumulative_delta'],
+                mode='lines',
+                name='Cumulative Delta',
+                line=dict(color='#00D9FF', width=3),
+                fill='tozeroy'
+            ))
+            fig.add_hline(y=0, line_dash="dash", line_color="white")
+            fig.add_vline(x=data_weekly['dn_strike'], line_dash="dot", line_color="#FFD700", annotation_text="Delta Neutral")
+            fig.add_vline(x=qqq_price, line_dash="dash", line_color="#FF4444", annotation_text="Current")
+            fig.update_layout(
+                template="plotly_dark" if st.session_state.theme == 'dark' else "plotly_white",
+                plot_bgcolor='#0E1117' if st.session_state.theme == 'dark' else '#FFFFFF',
+                paper_bgcolor='#0E1117' if st.session_state.theme == 'dark' else '#FFFFFF',
+                height=400
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        
+        if data_monthly:
+            st.markdown("**Monthly**")
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=data_monthly['strike_delta']['strike'],
+                y=data_monthly['strike_delta']['cumulative_delta'],
+                mode='lines',
+                name='Cumulative Delta',
+                line=dict(color='#00D9FF', width=3),
+                fill='tozeroy'
+            ))
+            fig.add_hline(y=0, line_dash="dash", line_color="white")
+            fig.add_vline(x=data_monthly['dn_strike'], line_dash="dot", line_color="#FFD700", annotation_text="Delta Neutral")
+            fig.add_vline(x=qqq_price, line_dash="dash", line_color="#FF4444", annotation_text="Current")
+            fig.update_layout(
+                template="plotly_dark" if st.session_state.theme == 'dark' else "plotly_white",
+                plot_bgcolor='#0E1117' if st.session_state.theme == 'dark' else '#FFFFFF',
+                paper_bgcolor='#0E1117' if st.session_state.theme == 'dark' else '#FFFFFF',
+                height=400
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+st.markdown("---")
+st.caption(f"Updated: {datetime.now().strftime('%H:%M:%S')} | CBOE • {nq_source}")
+
+# Manual refresh button
+if st.sidebar.button("🔄 Refresh Now", use_container_width=True):
+    st.session_state.last_refresh = time.time()
+    st.cache_data.clear()
+    st.rerun()
