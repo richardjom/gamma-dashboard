@@ -170,7 +170,7 @@ if auto_refresh:
 # ─────────────────────────────────────────────
 # DATA FUNCTIONS
 # ─────────────────────────────────────────────
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=14400)
 def get_cboe_options(ticker="QQQ"):
     try:
         url = f"https://cdn.cboe.com/api/global/delayed_quotes/options/{ticker}.json"
@@ -248,7 +248,7 @@ def get_qqq_price(finnhub_key):
         pass
     return None
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=600)
 def get_market_overview_yahoo():
     """Get market data from Yahoo Finance"""
     data = {}
@@ -321,7 +321,7 @@ def get_market_news(finnhub_key):
     except:
         return []
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=86400)
 def get_fear_greed_index():
     """Get Fear & Greed Index"""
     try:
@@ -336,7 +336,7 @@ def get_fear_greed_index():
         pass
     return {'score': 50, 'rating': 'Neutral'}
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=900)
 def get_top_movers(finnhub_key):
     """Get top gainers and losers"""
     client = finnhub.Client(api_key=finnhub_key)
