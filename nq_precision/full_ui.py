@@ -146,8 +146,10 @@ def run_full_app():
     st.markdown("**Multi-Timeframe GEX & Delta Analysis** • Powered by CBOE Data")
 
     default_key = ""
-    if "FINNHUB_KEY" in st.secrets:
-        default_key = st.secrets["FINNHUB_KEY"]
+    try:
+        default_key = st.secrets.get("FINNHUB_KEY", "")
+    except Exception:
+        default_key = ""
 
     st.sidebar.header("⚙️ Settings")
     finnhub_key = st.sidebar.text_input(

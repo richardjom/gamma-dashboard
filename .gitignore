@@ -13,3 +13,4 @@ env/
 .mypy_cache/
 .ropeproject/
 .vscode/
+.streamlit/secrets.toml
