@@ -597,6 +597,142 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
         'nq_em_full': nq_em_full,
         'atm_strike': atm_strike
     }
+    
+@st.cache_data(ttl=14400)
+def generate_daily_bread(data_0dte, data_weekly, nq_now, market_data, fg, events, news):
+    """Generate Bloomberg-style Daily Bread - Updates 2x daily (4hr cache)"""
+    
+    current_hour = datetime.now().hour
+    is_morning = current_hour < 12
+    
+    report = {}
+    report['timestamp'] = datetime.now().strftime('%A, %B %d, %Y • %I:%M %p EST')
+    report['session'] = "MORNING BRIEF" if is_morning else "MARKET CLOSE SUMMARY"
+    
+    if not data_0dte:
+        return report
+    
+    dn_distance = nq_now - data_0dte['dn_nq']
+    gf_distance = nq_now - data_0dte['g_flip_nq']
+    above_dn = dn_distance > 0
+    above_gf = gf_distance > 0
+    
+    # EXECUTIVE SUMMARY
+    if above_dn and above_gf and abs(dn_distance) > 200:
+        tone = "BEARISH"
+        summary = f"""**OVEREXTENDED UPSIDE - MEAN REVERSION LIKELY**
+
+NQ futures are trading {dn_distance:.0f} points above the Delta Neutral level at {data_0dte['dn_nq']:.2f}, indicating significant overextension from dealer hedging levels. The market is operating in **negative gamma** territory above {data_0dte['g_flip_nq']:.2f}, creating unstable price action prone to whipsaws.
+
+**Net dealer positioning:** {data_0dte['net_delta']:,.0f} delta ({'short' if data_0dte['net_delta'] < 0 else 'long'})
+
+This configuration historically precedes mean reversion moves back toward Delta Neutral. Rallies into {data_0dte['p_wall']:.2f} primary resistance wall should face heavy selling pressure from systematic hedging flows."""
+        
+    elif not above_dn and not above_gf:
+        tone = "RANGE-BOUND"
+        summary = f"""**STABLE RANGE - POSITIVE GAMMA REGIME**
+
+NQ is trading {abs(dn_distance):.0f} points below Delta Neutral at {data_0dte['dn_nq']:.2f} within **positive gamma** territory. This regime favors range-bound trading between {data_0dte['p_floor']:.2f} support floor and {data_0dte['p_wall']:.2f} resistance wall.
+
+**Net dealer positioning:** {data_0dte['net_delta']:,.0f} delta ({'short' if data_0dte['net_delta'] < 0 else 'long'})
+
+In positive gamma, dealers actively stabilize price action by buying dips and selling rallies. Breakout attempts are less likely to follow through as systematic flows work against momentum. Mean reversion trades are favored."""
+        
+    else:
+        tone = "NEUTRAL"
+        summary = f"""**BALANCED POSITIONING - WATCH FOR CATALYSTS**
+
+NQ is trading near equilibrium around the {data_0dte['dn_nq']:.2f} Delta Neutral level with relatively balanced dealer positioning. Current gamma regime is **{'negative' if above_gf else 'positive'}**, suggesting **{'volatile' if above_gf else 'stable'}** price action ahead.
+
+**Net dealer positioning:** {data_0dte['net_delta']:,.0f} delta ({'short' if data_0dte['net_delta'] < 0 else 'long'})
+
+Watch for a decisive break of the {data_0dte['g_flip_nq']:.2f} Gamma Flip or {data_0dte['dn_nq']:.2f} Delta Neutral to establish directional bias. Key resistance at {data_0dte['p_wall']:.2f}, support at {data_0dte['p_floor']:.2f}."""
+    
+    report['tone'] = tone
+    report['summary'] = summary
+    
+    # KEY LEVELS
+    report['levels'] = f"""**CRITICAL LEVELS FOR TODAY:**
+
+- **Delta Neutral:** {data_0dte['dn_nq']:.2f} — Primary gravitational pull
+- **Gamma Flip:** {data_0dte['g_flip_nq']:.2f} — Regime change threshold
+- **Primary Resistance:** {data_0dte['p_wall']:.2f} — Heaviest call wall
+- **Primary Support:** {data_0dte['p_floor']:.2f} — Heaviest put floor
+- **Expected Move:** ±{data_0dte['nq_em_full']:.0f} points ({data_0dte['nq_em_full']/nq_now*100:.1f}%)"""
+    
+    # MARKET DRIVERS
+    vix = market_data.get('vix', {}).get('price', 0)
+    vix_change = market_data.get('vix', {}).get('change_pct', 0)
+    
+    drivers = f"""**MARKET DRIVERS:**
+
+- **VIX:** {vix:.2f} ({vix_change:+.2f}%) — {'Elevated volatility' if vix > 18 else 'Low volatility regime'}
+- **Fear & Greed:** {fg['score']}/100 ({fg['rating']}) — {'Contrarian buy signal' if fg['score'] < 30 else 'Contrarian sell signal' if fg['score'] > 70 else 'Neutral sentiment'}"""
+    
+    if events:
+        high_impact = [e for e in events if e.get('impact') == 'high']
+        if high_impact:
+            drivers += "\n• **High-impact events:** " + ", ".join([e.get('event', 'Unknown')[:40] for e in high_impact[:2]])
+    
+    report['drivers'] = drivers
+    
+    # TRADING STRATEGY
+    if above_dn and above_gf and abs(dn_distance) > 200:
+        strategy = f"""**RECOMMENDED APPROACH:**
+
+**Short Bias — Fade Strength**
+- Entry: Rallies into {data_0dte['p_wall']:.2f} resistance
+- Target: {data_0dte['dn_nq']:.2f} Delta Neutral
+- Stop: Above {data_0dte['s_wall']:.2f} (secondary wall)
+
+**Risk Management:** Negative gamma creates whipsaw potential. Use tight stops and scale positions.
+
+**Conservative Alternative:** Wait for break below {data_0dte['g_flip_nq']:.2f} Gamma Flip before establishing short positions."""
+        
+    elif not above_dn and not above_gf:
+        strategy = f"""**RECOMMENDED APPROACH:**
+
+**Range Trading — Buy Dips, Sell Rallies**
+- Buy Zone: {data_0dte['p_floor']:.2f} - {data_0dte['s_floor']:.2f}
+- Sell Zone: {data_0dte['p_wall']:.2f} - {data_0dte['s_wall']:.2f}
+- Neutral: {data_0dte['dn_nq']:.2f}
+
+**Advantage:** Positive gamma regime supports mean reversion. Dealers will stabilize price action.
+
+**Breakout Watch:** Sustained move outside {data_0dte['p_floor']:.2f}-{data_0dte['p_wall']:.2f} range requires re-evaluation."""
+        
+    else:
+        strategy = f"""**RECOMMENDED APPROACH:**
+
+**Wait for Confirmation — No Clear Edge**
+- Watch {data_0dte['g_flip_nq']:.2f} Gamma Flip for regime shift
+- Watch {data_0dte['dn_nq']:.2f} Delta Neutral for directional bias
+- Resistance: {data_0dte['p_wall']:.2f} | Support: {data_0dte['p_floor']:.2f}
+
+**Patience Required:** Let price action develop before committing capital."""
+    
+    report['strategy'] = strategy
+    
+    # TOMORROW'S WATCH LIST
+    watch_items = []
+    
+    if abs(dn_distance) > 200:
+        watch_items.append(f"• **Delta Neutral convergence:** Price {abs(dn_distance):.0f}pts extended — mean reversion likely")
+    
+    if above_gf:
+        watch_items.append(f"• **Gamma Flip breakdown:** Break below {data_0dte['g_flip_nq']:.2f} signals regime shift to stability")
+    
+    if data_weekly:
+        dn_spread = abs(data_0dte['dn_nq'] - data_weekly['dn_nq'])
+        if dn_spread > 100:
+            watch_items.append(f"• **Timeframe divergence:** {dn_spread:.0f}pt spread between 0DTE/Weekly DN suggests choppy action")
+    
+    watch_items.append("• **VIX expansion:** Spike above 18 signals vol regime change")
+    watch_items.append("• **Options expiration:** 0DTE levels reset tomorrow — gamma exposure shifts")
+    
+    report['watch_list'] = "\n".join(watch_items)
+    
+    return report
 # ─────────────────────────────────────────────
 # MAIN APP
 # ─────────────────────────────────────────────
