@@ -63,6 +63,7 @@ def _map_futures_symbol(futures_symbol):
         "YM=F": _get_secret("SCHWAB_SYMBOL_YM", ""),
         "RTY=F": _get_secret("SCHWAB_SYMBOL_RTY", ""),
         "DX=F": _get_secret("SCHWAB_SYMBOL_DX", ""),
+        "GC=F": _get_secret("SCHWAB_SYMBOL_GC", ""),
     }
     if overrides.get(futures_symbol):
         return overrides[futures_symbol]
@@ -72,6 +73,7 @@ def _map_futures_symbol(futures_symbol):
         "YM=F": "/YM",
         "RTY=F": "/RTY",
         "DX=F": "/DX",
+        "GC=F": "/GC",
     }
     return defaults.get(futures_symbol, futures_symbol)
 
@@ -225,6 +227,7 @@ def _validate_price_range(symbol, price):
         "YM=F": (10000, 100000),
         "RTY=F": (500, 5000),
         "DX=F": (50, 200),
+        "GC=F": (1000, 5000),
     }
     min_p, max_p = symbol_ranges.get(symbol, (0.01, 1e9))
     return min_p <= price <= max_p
@@ -437,6 +440,7 @@ def get_market_overview_yahoo():
         "es": "ES=F",
         "ym": "YM=F",
         "rty": "RTY=F",
+        "gc": "GC=F",
         "10y": "^TNX",
         "dxy": "DX=F",
     }
@@ -469,7 +473,13 @@ def get_market_overview_yahoo():
             data[key] = {"price": 0, "change": 0, "change_pct": 0, "source": "unavailable"}
 
     # Prefer Schwab real-time futures quotes when configured.
-    for key, symbol in {"es": "ES=F", "ym": "YM=F", "rty": "RTY=F", "dxy": "DX=F"}.items():
+    for key, symbol in {
+        "es": "ES=F",
+        "ym": "YM=F",
+        "rty": "RTY=F",
+        "dxy": "DX=F",
+        "gc": "GC=F",
+    }.items():
         schwab_price, source = _get_schwab_futures_price(symbol)
         if schwab_price:
             data[key]["price"] = float(schwab_price)

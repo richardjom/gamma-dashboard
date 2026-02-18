@@ -562,7 +562,7 @@ def run_full_app():
             with st.spinner("Loading market data..."):
                 if market_data:
                     st.markdown("### Futures & Indices")
-                    col1, col2, col3, col4 = st.columns(4)
+                    col1, col2, col3, col4, col5 = st.columns(5)
 
                     if "es" in market_data and market_data["es"]["price"]:
                         es = market_data["es"]
@@ -620,6 +620,17 @@ def run_full_app():
                         col4.caption(f"Source: {rty.get('source', 'unknown')}")
                     else:
                         col4.metric("Russell (RTY)", "N/A")
+
+                    if "gc" in market_data and market_data["gc"]["price"]:
+                        gc = market_data["gc"]
+                        col5.metric(
+                            "Gold (GC)",
+                            f"{gc['price']:.2f}",
+                            f"{gc.get('change', 0):+.2f} ({gc.get('change_pct', 0):+.2f}%)",
+                        )
+                        col5.caption(f"Source: {gc.get('source', 'unknown')}")
+                    else:
+                        col5.metric("Gold (GC)", "N/A")
 
                     st.markdown("---")
                     st.markdown("### Market Indicators")

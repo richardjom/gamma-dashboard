@@ -31,6 +31,7 @@ SCHWAB_REFRESH_TOKEN = "..."
 # Optional overrides if your Schwab symbols differ:
 # SCHWAB_SYMBOL_NQ = "/NQH26"
 # SCHWAB_SYMBOL_ES = "/ESH26"
+# SCHWAB_SYMBOL_GC = "/GCG26"
 ```
 
 4. Run the app:
