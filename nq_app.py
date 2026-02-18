@@ -595,7 +595,7 @@ tab_names = ["📈 Market Overview"]
 if data_0dte: tab_names.append("📊 0DTE Levels")
 if data_weekly: tab_names.append("📊 Weekly Levels")
 if data_monthly: tab_names.append("📊 Monthly Levels")
-tab_names.extend(["🍞 Daily Bread", "📈 GEX Charts", "⚖️ Delta Charts"])  # Changed AI Analysis to Daily Bread
+tab_names.extend(["🍞 Daily Bread", "📈 GEX Charts", "⚖️ Delta Charts"])
 
 if tab_names:
     tabs = st.tabs(tab_names)
@@ -613,7 +613,6 @@ if tab_names:
                 st.markdown("### Futures & Indices")
                 col1, col2, col3, col4 = st.columns(4)
                 
-                # ES - SAFE ACCESS
                 if 'es' in market_data and market_data['es']['price']:
                     es = market_data['es']
                     col1.metric(
@@ -642,7 +641,6 @@ if tab_names:
                 except:
                     col2.metric("Nasdaq (NQ)", f"{nq_now:.2f}", nq_source)
                 
-                # YM - SAFE ACCESS
                 if 'ym' in market_data and market_data['ym']['price']:
                     ym = market_data['ym']
                     col3.metric(
@@ -653,7 +651,6 @@ if tab_names:
                 else:
                     col3.metric("Dow (YM)", "N/A")
                 
-                # RTY - SAFE ACCESS
                 if 'rty' in market_data and market_data['rty']['price']:
                     rty = market_data['rty']
                     col4.metric(
@@ -668,7 +665,6 @@ if tab_names:
                 st.markdown("### Market Indicators")
                 col1, col2, col3 = st.columns(3)
                 
-                # VIX - SAFE ACCESS
                 if 'vix' in market_data and market_data['vix']['price']:
                     vix = market_data['vix']
                     col1.metric(
@@ -679,7 +675,6 @@ if tab_names:
                 else:
                     col1.metric("VIX (Volatility)", "N/A")
                 
-                # 10Y - SAFE ACCESS
                 if '10y' in market_data and market_data['10y']['price']:
                     tnx = market_data['10y']
                     col2.metric(
@@ -690,7 +685,6 @@ if tab_names:
                 else:
                     col2.metric("10Y Treasury", "N/A")
                 
-                # DXY - SAFE ACCESS
                 if 'dxy' in market_data and market_data['dxy']['price']:
                     dxy = market_data['dxy']
                     col3.metric(
@@ -921,7 +915,7 @@ if tab_names:
         
         tab_idx += 1
     
- # Daily Bread Tab
+    # Daily Bread Tab
     with tabs[tab_idx]:
         st.markdown("# 🍞 DAILY BREAD")
         st.markdown(f"**Your NQ Market Intelligence Report** • {datetime.now().strftime('%A, %B %d, %Y')}")
@@ -1178,190 +1172,6 @@ resistance or {data_0dte['p_floor']:.2f} support to establish directional bias."
         
         st.markdown("---")
         st.caption("⚠️ Daily Bread is generated from live options market data and should not be considered financial advice. Always manage risk appropriately.")
-    
-    tab_idx += 1
-
-#### ⚖️ Delta Positioning Analysis
-
-**Net Delta Exposure:** {data_0dte['net_delta']:,.0f} ({'Bullish' if data_0dte['net_delta'] > 0 else 'Bearish'})
-""")
-
-            if above_dn and abs(dn_distance) > 200:
-                st.warning(f"""
-**🚨 EXTENDED POSITIONING**
-
-Price is **{dn_distance:.0f} points above Delta Neutral** - this is significant.
-
-**What this means:**
-- Dealers have **massive net short delta** positioning
-- Market is positioned for **downside**
-- Price is **extended above** where options market is hedged
-- Delta Neutral ({data_0dte['dn_nq']:.2f}) acts as a **gravitational pull**
-
-**Expected behavior:**
-- High probability of **mean reversion** back toward DN
-- Rallies likely face **selling pressure**
-- Risk/reward favors **downside** scenarios
-""")
-            elif not above_dn and abs(dn_distance) > 200:
-                st.info(f"""
-**📍 BELOW DELTA NEUTRAL**
-
-Price is **{abs(dn_distance):.0f} points below Delta Neutral**.
-
-**What this means:**
-- Dealers have **net long delta** positioning
-- Market is positioned for **upside**
-- Price wants to **revert higher** toward DN ({data_0dte['dn_nq']:.2f})
-
-**Expected behavior:**
-- Dips likely get **bought**
-- Upside momentum has dealer **support**
-""")
-            else:
-                st.success(f"""
-**✅ NEAR DELTA NEUTRAL**
-
-Price is relatively **balanced** near Delta Neutral.
-
-**What this means:**
-- Options market is **fairly hedged** at current levels
-- No strong directional bias from dealer positioning
-""")
-
-            st.markdown("---")
-            
-            if above_gf:
-                st.error(f"""
-#### ⚡ NEGATIVE GAMMA ZONE
-
-Price is **above Gamma Flip ({data_0dte['g_flip_nq']:.2f})** - you are in the **danger zone**.
-
-**Dealer behavior in negative gamma:**
-- Dealers are **short gamma** = must hedge dynamically
-- **Sell into rallies** (when market goes up, dealers sell)
-- **Buy into dips** (when market drops, dealers buy)
-- This creates **unstable, choppy price action**
-- Moves tend to be **exaggerated** and **volatile**
-
-**Trading implications:**
-- Expect **whipsaw** and **stop hunts**
-- Breakouts can **accelerate** quickly
-- Mean reversion trades are **riskier**
-- If price breaks back below Gamma Flip → expect **stabilization**
-""")
-            else:
-                st.success(f"""
-#### ⚡ POSITIVE GAMMA ZONE
-
-Price is **below Gamma Flip ({data_0dte['g_flip_nq']:.2f})** - you are in the **stable zone**.
-
-**Dealer behavior in positive gamma:**
-- Dealers are **long gamma** = natural stabilizers
-- **Buy dips** (market drops → dealers buy)
-- **Sell rallies** (market rallies → dealers sell)
-- This creates **range-bound, stable price action**
-- Moves tend to be **contained** and **dampened**
-
-**Trading implications:**
-- Expect **range trading** and **mean reversion**
-- Dips get bought, rallies get sold
-- Breakouts are **less likely** to follow through
-- Primary Wall/Floor act as **strong boundaries**
-""")
-
-            st.markdown("---")
-            
-            st.markdown(f"""
-#### 🎯 Key Levels
-
-**Resistance Layers:**
-1. **Primary Wall:** {data_0dte['p_wall']:.2f} ({wall_distance:.2f} pts away)
-   - Highest call GEX concentration
-   - Expect heavy selling if price approaches
-2. **Secondary Wall:** {data_0dte['results'][5][1]:.2f}
-   - Additional resistance layer
-
-**Support Layers:**
-1. **Primary Floor:** {data_0dte['p_floor']:.2f} ({floor_distance:.2f} pts below)
-   - Highest put GEX concentration  
-   - Expect buying if price tests
-2. **Secondary Floor:** {data_0dte['results'][6][1]:.2f}
-   - Additional support layer
-
-**Expected Move:** ±{data_0dte['nq_em_full']:.0f} points
-""")
-
-            st.markdown("---")
-            st.markdown("#### 💡 Trade Setup Ideas")
-            
-            if above_dn and above_gf:
-                st.markdown(f"""
-**Short Bias Setups:**
-- 🎯 **Mean reversion short** from current levels targeting DN ({data_0dte['dn_nq']:.2f})
-- 🎯 **Fade rallies** into Primary Wall ({data_0dte['p_wall']:.2f})
-- ⚠️ **Risk:** Price is in negative gamma - stops can get run
-
-**Conservative approach:**
-- Wait for break below Gamma Flip ({data_0dte['g_flip_nq']:.2f}) before shorting
-- Use Primary Floor ({data_0dte['p_floor']:.2f}) as downside target
-""")
-            elif not above_dn and not above_gf:
-                st.markdown(f"""
-**Long Bias Setups:**
-- 🎯 **Buy dips** toward Primary Floor ({data_0dte['p_floor']:.2f})
-- 🎯 **Target** Delta Neutral ({data_0dte['dn_nq']:.2f}) on mean reversion
-- ✅ **Advantage:** Positive gamma regime supports longs
-
-**Aggressive:**
-- Long from current levels if price holds above Secondary Floor
-- Target Primary Wall ({data_0dte['p_wall']:.2f})
-""")
-            else:
-                st.markdown(f"""
-**Neutral/Range Trading:**
-- 🎯 **Sell rallies** near Primary Wall ({data_0dte['p_wall']:.2f})
-- 🎯 **Buy dips** near Primary Floor ({data_0dte['p_floor']:.2f})
-- 📊 Range: {data_0dte['p_floor']:.2f} - {data_0dte['p_wall']:.2f}
-""")
-
-        if data_weekly:
-            st.markdown("---")
-            st.markdown("### Weekly Context")
-            
-            weekly_dn_distance = nq_now - data_weekly['dn_nq']
-            
-            st.markdown(f"""
-**Weekly Positioning:**
-- Delta Neutral: **{data_weekly['dn_nq']:.2f}** ({weekly_dn_distance:+.2f} pts from current)
-- Gamma Flip: **{data_weekly['g_flip_nq']:.2f}**
-- Net Delta: **{data_weekly['net_delta']:,.0f}** ({'Bullish' if data_weekly['net_delta'] > 0 else 'Bearish'})
-
-**Primary Levels:**
-- Wall: **{data_weekly['p_wall']:.2f}**
-- Floor: **{data_weekly['p_floor']:.2f}**
-""")
-
-            if data_0dte:
-                if abs(data_0dte['dn_nq'] - data_weekly['dn_nq']) < 50:
-                    st.success("""
-**✅ ALIGNED TIMEFRAMES**
-
-0DTE and Weekly Delta Neutral are **closely aligned** - this creates a **strong gravitational pull**.
-""")
-                else:
-                    st.warning(f"""
-**⚠️ TIMEFRAME DIVERGENCE**
-
-0DTE DN: **{data_0dte['dn_nq']:.2f}**  
-Weekly DN: **{data_weekly['dn_nq']:.2f}**  
-Spread: **{abs(data_0dte['dn_nq'] - data_weekly['dn_nq']):.2f} points**
-
-Creates potential for **choppy, whipsaw action**
-""")
-
-        st.markdown("---")
-        st.caption("⚠️ This analysis is generated from options market data and should not be considered financial advice.")
     
     tab_idx += 1
     
