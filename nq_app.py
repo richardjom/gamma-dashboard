@@ -473,7 +473,92 @@ def calculate_sentiment_score(data_0dte, nq_now, vix_level, fg_score):
         score -= 10  # Extreme greed = contrarian sell
     
     return max(0, min(100, score))
+# ═══════════════════════════════════════════════════
+# MULTI-ASSET SUPPORT FUNCTIONS
+# ═══════════════════════════════════════════════════
 
+@st.cache_data(ttl=10)
+def get_futures_price(symbol):
+    """Get futures price for any symbol (ES, NQ, RTY, YM)"""
+    try:
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(url, headers=headers, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            price = data['chart']['result'][0]['meta']['regularMarketPrice']
+            if price and price > 100:
+                return float(price), "Yahoo Finance"
+    except:
+        pass
+    try:
+        ticker = yf.Ticker(symbol)
+        data = ticker.history(period="1d", interval="1m")
+        if not data.empty:
+            return float(data['Close'].iloc[-1]), "yfinance"
+    except:
+        pass
+    return None, "unavailable"
+
+@st.cache_data(ttl=14400)  # 4 hour cache
+def process_multi_asset():
+    """Process options data for SPY, QQQ, IWM, DIA"""
+    
+    assets_config = {
+        'SPY': {'ticker': 'SPY', 'futures': 'ES=F', 'name': 'S&P 500'},
+        'QQQ': {'ticker': 'QQQ', 'futures': 'NQ=F', 'name': 'Nasdaq'},
+        'IWM': {'ticker': 'IWM', 'futures': 'RTY=F', 'name': 'Russell 2000'},
+        'DIA': {'ticker': 'DIA', 'futures': 'YM=F', 'name': 'Dow Jones'}
+    }
+    
+    results = {}
+    
+    for asset_name, config in assets_config.items():
+        try:
+            # Get options data
+            df_raw, etf_price = get_cboe_options(config['ticker'])
+            if df_raw is None or etf_price is None:
+                continue
+            
+            # Get futures price
+            futures_price, source = get_futures_price(config['futures'])
+            if futures_price is None:
+                continue
+            
+            # Calculate ratio
+            ratio = futures_price / etf_price if etf_price > 0 else 0
+            
+            # Get expirations
+            exp_0dte, exp_weekly, exp_monthly = get_expirations_by_type(df_raw)
+            
+            # Process 0DTE
+            data_0dte = None
+            if exp_0dte:
+                data_0dte = process_expiration(df_raw, exp_0dte, etf_price, ratio, futures_price)
+            
+            # Process Weekly
+            data_weekly = None
+            if exp_weekly and exp_weekly != exp_0dte:
+                data_weekly = process_expiration(df_raw, exp_weekly, etf_price, ratio, futures_price)
+            
+            results[asset_name] = {
+                'name': config['name'],
+                'ticker': config['ticker'],
+                'futures_symbol': config['futures'],
+                'etf_price': etf_price,
+                'futures_price': futures_price,
+                'ratio': ratio,
+                'source': source,
+                'data_0dte': data_0dte,
+                'data_weekly': data_weekly
+            }
+            
+        except Exception as e:
+            st.warning(f"Could not process {asset_name}: {e}")
+            continue
+    
+    return results
+    
 @st.cache_data(ttl=14400)  # 4 hours - matches CBOE data refresh
 def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
     """Process single expiration and return all analysis - FIXED LEVEL LOGIC"""
