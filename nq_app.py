@@ -595,7 +595,7 @@ tab_names = ["📈 Market Overview"]
 if data_0dte: tab_names.append("📊 0DTE Levels")
 if data_weekly: tab_names.append("📊 Weekly Levels")
 if data_monthly: tab_names.append("📊 Monthly Levels")
-tab_names.extend(["🤖 AI Analysis", "📈 GEX Charts", "⚖️ Delta Charts"])
+tab_names.extend(["🍞 Daily Bread", "📈 GEX Charts", "⚖️ Delta Charts"])  # Changed AI Analysis to Daily Bread
 
 if tab_names:
     tabs = st.tabs(tab_names)
@@ -921,22 +921,277 @@ if tab_names:
         
         tab_idx += 1
     
-    # AI Analysis Tab
+ # Daily Bread Tab
     with tabs[tab_idx]:
-        st.subheader("🤖 AI Market Analysis")
+        st.markdown("# 🍞 DAILY BREAD")
+        st.markdown(f"**Your NQ Market Intelligence Report** • {datetime.now().strftime('%A, %B %d, %Y')}")
         
         if data_0dte:
-            st.markdown("### 0DTE Analysis")
-            
+            # Calculate key metrics
             dn_distance = nq_now - data_0dte['dn_nq']
             gf_distance = nq_now - data_0dte['g_flip_nq']
             wall_distance = data_0dte['p_wall'] - nq_now
             floor_distance = nq_now - data_0dte['p_floor']
-            
             above_dn = dn_distance > 0
             above_gf = gf_distance > 0
             
-            st.markdown(f"""
+            # Determine market tone
+            if above_dn and abs(dn_distance) > 200:
+                tone = "⚠️ EXTENDED UPSIDE"
+                tone_color = "🟡"
+            elif not above_dn and abs(dn_distance) > 200:
+                tone = "📉 OVERSOLD"
+                tone_color = "🟢"
+            else:
+                tone = "⚖️ BALANCED"
+                tone_color = "🟢"
+            
+            gamma_regime = "🔴 NEGATIVE GAMMA" if above_gf else "🟢 POSITIVE GAMMA"
+            dealer_stance = "🔴 NET SHORT DELTA" if data_0dte['net_delta'] < 0 else "🟢 NET LONG DELTA"
+            
+            # ═══════════════════════════════════════════════════
+            # EXECUTIVE SUMMARY
+            # ═══════════════════════════════════════════════════
+            st.markdown("---")
+            st.markdown("## 📊 EXECUTIVE SUMMARY")
+            
+            # Generate executive summary based on conditions
+            if above_dn and above_gf and abs(dn_distance) > 200:
+                summary = f"""
+NQ is trading **{dn_distance:.0f} points above Delta Neutral** at {data_0dte['dn_nq']:.2f}, indicating an 
+**overextended market** with dealers holding massive short delta positions. Price is operating in **negative gamma** 
+territory above {data_0dte['g_flip_nq']:.2f}, creating unstable conditions prone to whipsaws and exaggerated moves. 
+**Mean reversion back toward DN is the highest probability scenario**, with rallies likely facing heavy resistance 
+at the {data_0dte['p_wall']:.2f} primary wall.
+                """
+            elif not above_dn and not above_gf:
+                summary = f"""
+NQ is trading **{abs(dn_distance):.0f} points below Delta Neutral** at {data_0dte['dn_nq']:.2f} in **positive gamma** 
+territory, suggesting dealers will actively stabilize price action. The market is positioned for **range-bound trading** 
+between {data_0dte['p_floor']:.2f} floor and {data_0dte['p_wall']:.2f} wall, with dips likely finding support and rallies 
+facing resistance. Breakout attempts are less likely to follow through in this regime.
+                """
+            else:
+                summary = f"""
+NQ is trading near equilibrium around the {data_0dte['dn_nq']:.2f} Delta Neutral level with relatively **balanced dealer 
+positioning**. Current gamma regime is **{'negative' if above_gf else 'positive'}**, suggesting 
+**{'volatile' if above_gf else 'stable'}** price action ahead. Watch for a break of key levels at {data_0dte['p_wall']:.2f} 
+resistance or {data_0dte['p_floor']:.2f} support to establish directional bias.
+                """
+            
+            st.info(summary)
+            
+            # Market Snapshot Cards
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric(
+                    "Market Tone",
+                    tone,
+                    tone_color
+                )
+            
+            with col2:
+                st.metric(
+                    "Gamma Regime",
+                    "NEGATIVE" if above_gf else "POSITIVE",
+                    "⚠️ Unstable" if above_gf else "✅ Stable"
+                )
+            
+            with col3:
+                st.metric(
+                    "Dealer Positioning",
+                    "SHORT DELTA" if data_0dte['net_delta'] < 0 else "LONG DELTA",
+                    f"{data_0dte['net_delta']:,.0f}"
+                )
+            
+            with col4:
+                st.metric(
+                    "DN Distance",
+                    f"{abs(dn_distance):.0f} pts",
+                    "Above" if above_dn else "Below"
+                )
+            
+            # ═══════════════════════════════════════════════════
+            # KEY LEVELS TO WATCH
+            # ═══════════════════════════════════════════════════
+            st.markdown("---")
+            st.markdown("## 🎯 KEY LEVELS TO WATCH TODAY")
+            
+            # Determine top 3 most important levels
+            levels_priority = []
+            
+            # Always include DN and GF
+            levels_priority.append({
+                'level': 'Delta Neutral',
+                'price': data_0dte['dn_nq'],
+                'importance': '⭐⭐⭐',
+                'why': 'Primary gravitational pull - price tends to revert here',
+                'action': 'Watch for mean reversion' if abs(dn_distance) > 100 else 'Price is balanced here'
+            })
+            
+            levels_priority.append({
+                'level': 'Gamma Flip',
+                'price': data_0dte['g_flip_nq'],
+                'importance': '⭐⭐⭐',
+                'why': 'Regime change level - dealer hedging behavior shifts here',
+                'action': 'Break above = volatile / Break below = stable'
+            })
+            
+            # Add either wall or floor depending on where price is
+            if wall_distance < floor_distance:
+                levels_priority.append({
+                    'level': 'Primary Wall',
+                    'price': data_0dte['p_wall'],
+                    'importance': '⭐⭐',
+                    'why': 'Highest call GEX - heavy resistance zone',
+                    'action': f'Strong sell pressure if price reaches {data_0dte["p_wall"]:.2f}'
+                })
+            else:
+                levels_priority.append({
+                    'level': 'Primary Floor',
+                    'price': data_0dte['p_floor'],
+                    'importance': '⭐⭐',
+                    'why': 'Highest put GEX - strong support zone',
+                    'action': f'Expect buying if price tests {data_0dte["p_floor"]:.2f}'
+                })
+            
+            # Display as clean cards
+            for idx, level in enumerate(levels_priority):
+                with st.container():
+                    col1, col2, col3 = st.columns([2, 1, 3])
+                    
+                    with col1:
+                        st.markdown(f"**{idx + 1}. {level['level']}**")
+                        st.markdown(f"**{level['price']:.2f}**")
+                    
+                    with col2:
+                        st.markdown(f"{level['importance']}")
+                    
+                    with col3:
+                        st.markdown(f"*{level['why']}*")
+                        st.markdown(f"➜ {level['action']}")
+                    
+                    if idx < len(levels_priority) - 1:
+                        st.markdown("")
+            
+            # ═══════════════════════════════════════════════════
+            # TODAY'S CATALYST CALENDAR
+            # ═══════════════════════════════════════════════════
+            st.markdown("---")
+            st.markdown("## 📅 TODAY'S CATALYST CALENDAR")
+            
+            events = get_economic_calendar(FINNHUB_KEY)
+            
+            if events:
+                st.markdown("**Economic Events That Could Move Markets:**")
+                
+                high_impact = [e for e in events if e.get('impact') == 'high']
+                medium_impact = [e for e in events if e.get('impact') == 'medium']
+                
+                if high_impact:
+                    st.markdown("🔴 **HIGH IMPACT**")
+                    for event in high_impact[:3]:
+                        time_str = event.get('time', '')[:16] if event.get('time') else 'TBD'
+                        st.markdown(f"- **{event.get('event', 'Unknown')}** • {time_str}")
+                
+                if medium_impact:
+                    st.markdown("🟡 **MEDIUM IMPACT**")
+                    for event in medium_impact[:3]:
+                        time_str = event.get('time', '')[:16] if event.get('time') else 'TBD'
+                        st.markdown(f"- {event.get('event', 'Unknown')} • {time_str}")
+                
+                if not high_impact and not medium_impact:
+                    st.info("No major economic events scheduled today - technical levels dominate")
+            else:
+                st.info("📊 **Light calendar today** - Focus on technical levels and gamma positioning")
+            
+            # Add market-moving news
+            st.markdown("**📰 Market-Moving Headlines:**")
+            news = get_market_news(FINNHUB_KEY)
+            
+            if news:
+                for article in news[:3]:
+                    st.markdown(f"• **{article.get('headline', 'No title')}** - *{article.get('source', 'Unknown')}*")
+            else:
+                st.markdown("*No major headlines at this time*")
+            
+            # ═══════════════════════════════════════════════════
+            # TOMORROW'S PREVIEW
+            # ═══════════════════════════════════════════════════
+            st.markdown("---")
+            st.markdown("## 🔮 TOMORROW'S PREVIEW")
+            
+            st.markdown("**What To Watch:**")
+            
+            watch_list = []
+            
+            # Generate dynamic watch items based on current positioning
+            if above_gf:
+                watch_list.append(f"🔍 **Gamma Flip at {data_0dte['g_flip_nq']:.2f}** - Break below signals regime shift to stability")
+            
+            if abs(dn_distance) > 200:
+                watch_list.append(f"🔍 **Delta Neutral at {data_0dte['dn_nq']:.2f}** - Primary mean reversion target")
+            
+            # VIX watch
+            watch_list.append("🔍 **VIX levels** - Spike above 18 signals vol expansion")
+            
+            # Weekly levels alignment
+            if data_weekly:
+                dn_spread = abs(data_0dte['dn_nq'] - data_weekly['dn_nq'])
+                if dn_spread < 50:
+                    watch_list.append(f"🔍 **Timeframe alignment** - 0DTE/Weekly DN converging creates strong magnet")
+                else:
+                    watch_list.append(f"🔍 **Timeframe divergence** - {dn_spread:.0f} point spread between 0DTE/Weekly DN suggests chop")
+            
+            # Options expiration
+            watch_list.append("🔍 **0DTE expiration** - Levels reset tomorrow, gamma exposure shifts")
+            
+            for item in watch_list:
+                st.markdown(item)
+            
+            # Trading game plan
+            st.markdown("---")
+            st.markdown("### 💼 TRADING GAME PLAN")
+            
+            if above_dn and above_gf:
+                st.warning(f"""
+**SHORT BIAS SETUP**
+- **Entry:** Fade rallies into {data_0dte['p_wall']:.2f} resistance
+- **Target:** {data_0dte['dn_nq']:.2f} Delta Neutral
+- **Stop:** Above {data_0dte['results'][5][1]:.2f} (Secondary Wall)
+- **Risk:** Negative gamma = whipsaw potential
+
+*Conservative:* Wait for break below {data_0dte['g_flip_nq']:.2f} Gamma Flip before entering shorts
+                """)
+            elif not above_dn and not above_gf:
+                st.success(f"""
+**LONG BIAS SETUP**
+- **Entry:** Buy dips toward {data_0dte['p_floor']:.2f} support
+- **Target:** {data_0dte['dn_nq']:.2f} Delta Neutral
+- **Stop:** Below {data_0dte['results'][6][1]:.2f} (Secondary Floor)
+- **Edge:** Positive gamma supports mean reversion
+
+*Aggressive:* Long current levels if holding above floor
+                """)
+            else:
+                st.info(f"""
+**RANGE TRADING SETUP**
+- **Sell:** Rallies near {data_0dte['p_wall']:.2f} wall
+- **Buy:** Dips near {data_0dte['p_floor']:.2f} floor
+- **Range:** {data_0dte['p_floor']:.2f} - {data_0dte['p_wall']:.2f}
+- **Breakout:** Watch for sustained move outside range
+
+*Patience required* - Let price come to levels
+                """)
+        
+        else:
+            st.info("No 0DTE data available for Daily Bread analysis")
+        
+        st.markdown("---")
+        st.caption("⚠️ Daily Bread is generated from live options market data and should not be considered financial advice. Always manage risk appropriately.")
+    
+    tab_idx += 1
 #### 🎯 Current Positioning
 
 **Price Location:**
