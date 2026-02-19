@@ -641,12 +641,24 @@ def _fetch_forexfactory_calendar(start_date, end_date):
     for e in data:
         try:
             raw_date = str(e.get("date", "")).strip()
-            if not raw_date:
-                continue
-            parsed = pd.to_datetime(raw_date, errors="coerce", utc=True)
-            if pd.isna(parsed):
-                continue
-            event_dt = parsed.to_pydatetime().astimezone(et)
+            event_dt = None
+            if raw_date:
+                parsed = pd.to_datetime(raw_date, errors="coerce", utc=True)
+                if not pd.isna(parsed):
+                    event_dt = parsed.to_pydatetime().astimezone(et)
+
+            # Keep event even if time parsing fails; don't zero out the whole calendar.
+            if event_dt is None:
+                date_label = str(e.get("dateLabel", "")).strip()
+                if date_label:
+                    fallback_day = pd.to_datetime(date_label, errors="coerce")
+                    if not pd.isna(fallback_day):
+                        event_dt = datetime.combine(
+                            fallback_day.date(), datetime.min.time(), tzinfo=et
+                        )
+            if event_dt is None:
+                event_dt = datetime.combine(start_date, datetime.min.time(), tzinfo=et)
+
             if not (start_date <= event_dt.date() <= end_date):
                 continue
 
@@ -672,9 +684,10 @@ def _fetch_forexfactory_calendar(start_date, end_date):
                     "expected": expected_val,
                     "prior": prior_val,
                     "for_period": e.get("dateLabel") or e.get("reference") or "-",
-                    "time_et": event_dt.strftime("%I:%M %p").lstrip("0"),
+                    "time_et": event_dt.strftime("%I:%M %p").lstrip("0") if event_dt.time() != datetime.min.time() else "Time TBA",
                     "date_et": event_dt.date().isoformat(),
                     "event_dt_iso": event_dt.isoformat(),
+                    "source": "ForexFactory",
                 }
             )
         except Exception:
@@ -722,15 +735,17 @@ def get_economic_calendar_window(finnhub_key, days=3):
                 date_raw = str(e.get("date", "")).strip()
                 if date_raw:
                     parsed = pd.to_datetime(date_raw, errors="coerce")
-                    if pd.isna(parsed):
-                        continue
-                    event_dt = parsed.to_pydatetime()
-                    if event_dt.tzinfo is None:
-                        event_dt = event_dt.replace(tzinfo=et)
-                    else:
-                        event_dt = event_dt.astimezone(et)
+                    if not pd.isna(parsed):
+                        event_dt = parsed.to_pydatetime()
+                        if event_dt.tzinfo is None:
+                            event_dt = event_dt.replace(tzinfo=et)
+                        else:
+                            event_dt = event_dt.astimezone(et)
                 else:
-                    continue
+                    event_dt = None
+            if event_dt is None:
+                # Keep item with fallback date when provider omits or mangles time.
+                event_dt = datetime.combine(start, datetime.min.time(), tzinfo=et)
             if not (start <= event_dt.date() <= end):
                 continue
             actual_val = _pick_first_present(e, ["actual", "actualValue", "actual_value", "act"])
@@ -745,9 +760,10 @@ def get_economic_calendar_window(finnhub_key, days=3):
                     "expected": expected_val,
                     "prior": prior_val,
                     "for_period": e.get("period") if e.get("period") is not None else e.get("for"),
-                    "time_et": event_dt.strftime("%I:%M %p").lstrip("0"),
+                    "time_et": event_dt.strftime("%I:%M %p").lstrip("0") if event_dt.time() != datetime.min.time() else "Time TBA",
                     "date_et": event_dt.date().isoformat(),
                     "event_dt_iso": event_dt.isoformat(),
+                    "source": "Finnhub",
                 }
             )
         except Exception:
@@ -759,6 +775,43 @@ def get_economic_calendar_window(finnhub_key, days=3):
         items.extend(ff_items)
     except Exception:
         pass
+
+    # Rescue pass: if strict parsing/filtering produced no rows, keep raw Finnhub events
+    # as best-effort records so UI does not show an empty window.
+    if not items:
+        try:
+            raw_calendar = client.economic_calendar()
+            raw_events = []
+            if isinstance(raw_calendar, dict):
+                raw_events = (
+                    raw_calendar.get("economicCalendar")
+                    or raw_calendar.get("calendar")
+                    or raw_calendar.get("events")
+                    or []
+                )
+            elif isinstance(raw_calendar, list):
+                raw_events = raw_calendar
+            for e in raw_events[:250]:
+                event_name = e.get("event") or e.get("indicator") or e.get("name") or "Unknown"
+                if not event_name:
+                    continue
+                items.append(
+                    {
+                        "event": event_name,
+                        "country": e.get("country", "US"),
+                        "impact": _normalize_impact(e.get("impact")),
+                        "actual": _pick_first_present(e, ["actual", "actualValue", "actual_value", "act"]),
+                        "expected": _pick_first_present(e, ["estimate", "forecast", "consensus", "expected"]),
+                        "prior": _pick_first_present(e, ["prev", "previous", "prior"]),
+                        "for_period": e.get("period") if e.get("period") is not None else e.get("for"),
+                        "time_et": "Time TBA",
+                        "date_et": start.isoformat(),
+                        "event_dt_iso": datetime.combine(start, datetime.min.time(), tzinfo=et).isoformat(),
+                        "source": "Finnhub",
+                    }
+                )
+        except Exception:
+            pass
 
     df = pd.DataFrame(items)
     if df.empty:
@@ -779,7 +832,9 @@ def get_economic_calendar_window(finnhub_key, days=3):
 
     # Keep the best row per event key: prefer rows that have actual/expected/prior populated.
     source_rank = {"Finnhub": 0, "ForexFactory": 1}
-    df["source_rank"] = df.get("source", "Unknown").map(lambda s: source_rank.get(s, 99))
+    if "source" not in df.columns:
+        df["source"] = "Unknown"
+    df["source_rank"] = df["source"].map(lambda s: source_rank.get(s, 99))
     df["has_actual"] = df["actual"].map(lambda v: 0 if _is_missing_value(v) else 1)
     df["has_expected"] = df["expected"].map(lambda v: 0 if _is_missing_value(v) else 1)
     df["has_prior"] = df["prior"].map(lambda v: 0 if _is_missing_value(v) else 1)
