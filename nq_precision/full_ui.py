@@ -432,7 +432,7 @@ def _theme_css(bg_color, card_bg, text_color, accent_color, border_color, compac
     }}
     .econ-header, .econ-row {{
         display: grid;
-        grid-template-columns: 90px 1.8fr 90px 90px 100px 110px 100px 100px 70px;
+        grid-template-columns: 90px 1.9fr 90px 110px 110px 100px 100px 70px;
         gap: 8px;
         align-items: center;
         padding: 6px 8px;
@@ -1264,6 +1264,7 @@ def run_full_app():
         elif active_view == "🗓 Economic Calendar":
             st.subheader("🗓 Economic Calendar")
             st.caption("Week view (next 7 days, ET). High impact = red, medium = orange/yellow.")
+            _render_external_econ_widget()
 
             econ_df = get_economic_calendar_window(finnhub_key, days=7)
             raw_counts = st.session_state.get("econ_source_counts_raw", {})
@@ -1280,7 +1281,6 @@ def run_full_app():
                 st.caption("Sources (raw -> final): no events returned from provider APIs")
             if econ_df is None or econ_df.empty:
                 st.info("No economic events available for this window.")
-                _render_external_econ_widget()
             else:
                 et_now = datetime.now(ZoneInfo("America/New_York"))
                 week_dates = [et_now.date() + timedelta(days=i) for i in range(7)]
@@ -1290,14 +1290,14 @@ def run_full_app():
                     dt = datetime.strptime(day_key, "%Y-%m-%d")
                     st.markdown(f"**{dt.strftime('%a %b %d')} Release**")
                     st.markdown(
-                        '<div class="econ-header"><div></div><div>Release</div><div>Impact</div><div>For</div><div>Actual</div><div>Expected</div><div>Prior</div><div></div><div>Alerts</div></div>',
+                        '<div class="econ-header"><div></div><div>Release</div><div>Impact</div><div>Actual</div><div>Expected</div><div>Prior</div><div></div><div>Alerts</div></div>',
                         unsafe_allow_html=True,
                     )
 
                     day_df = econ_df[econ_df["date_et"] == day_key].copy()
                     if day_df.empty:
                         st.markdown(
-                            '<div class="econ-row low"><div>•</div><div>No major events</div><div><span class="impact-chip low">LOW</span></div><div>-</div><div>-</div><div>-</div><div>-</div><div></div><div>-</div></div>',
+                            '<div class="econ-row low"><div>•</div><div>No major events</div><div><span class="impact-chip low">LOW</span></div><div>-</div><div>-</div><div>-</div><div></div><div>-</div></div>',
                             unsafe_allow_html=True,
                         )
                         continue
@@ -1323,7 +1323,6 @@ def run_full_app():
                                 <div>›</div>
                                 <div>{r.get("time_et", "")}  {html.escape(str(r.get("event", "")))}</div>
                                 <div><span class="impact-chip {impact}">{impact_label}</span></div>
-                                <div>{html.escape(_fmt_econ_value(r.get("for_period", "-")))}</div>
                                 <div>{html.escape(_fmt_econ_value(r.get("actual", "-")))}</div>
                                 <div>{html.escape(_fmt_econ_value(r.get("expected", "-")))}</div>
                                 <div>{html.escape(_fmt_econ_value(r.get("prior", "-")))}</div>
@@ -1334,8 +1333,6 @@ def run_full_app():
                             unsafe_allow_html=True,
                         )
                     st.markdown("")
-                with st.expander("Live Backup Calendar"):
-                    _render_external_econ_widget()
 
         elif active_view == "📅 Earnings Calendar":
             st.subheader("📅 Earnings Calendar")
