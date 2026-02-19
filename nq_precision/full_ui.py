@@ -266,6 +266,19 @@ def _theme_css(bg_color, card_bg, text_color, accent_color, border_color):
         background: rgba(42, 136, 86, 0.25);
         border-color: #2f7d56;
     }}
+    .sentiment-wrap {{
+        min-height: 122px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+    }}
+    .sentiment-axis {{
+        display: flex;
+        justify-content: space-between;
+        margin-top: 6px;
+        font-size: 12px;
+        color: #8d98a9;
+    }}
     .quick-glance {{
         background: linear-gradient(180deg, #1a1f28 0%, #131821 100%);
         padding: 14px;
@@ -744,9 +757,9 @@ def run_full_app():
                     marker_left = max(1, min(99, sentiment_score))
                     st.markdown(
                         f"""
-                    <div style="position: relative;">
+                    <div class="sentiment-wrap">
                         <div class="sentiment-meter"><div class="sentiment-marker" style="left: {marker_left}%;"></div></div>
-                        <div style="display: flex; justify-content: space-between; margin-top: 5px; font-size: 12px; color: #888;">
+                        <div class="sentiment-axis">
                             <span>0 (Bearish)</span><span>50 (Neutral)</span><span>100 (Bullish)</span>
                         </div>
                     </div>

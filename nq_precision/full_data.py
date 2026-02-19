@@ -630,6 +630,7 @@ def get_nasdaq_heatmap_data():
     ]
     sector_map = {
         "AAPL": "Technology", "MSFT": "Technology", "NVDA": "Technology", "AMD": "Technology",
+        "AVGO": "Technology",
         "ADBE": "Technology", "CSCO": "Technology", "INTC": "Technology", "INTU": "Technology",
         "QCOM": "Technology", "AMAT": "Technology", "ADI": "Technology", "LRCX": "Technology",
         "MU": "Technology", "ADP": "Technology",
@@ -679,7 +680,7 @@ def get_nasdaq_heatmap_data():
             rows.append(
                 {
                     "symbol": sym,
-                    "sector": sector_map.get(sym, "Other"),
+                    "sector": sector_map.get(sym, "Misc"),
                     "price": last,
                     "change_pct": change_pct,
                     "size": size,
