@@ -1,6 +1,7 @@
 import time
 from datetime import datetime, timedelta
 import html
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import plotly.express as px
@@ -16,6 +17,7 @@ from nq_precision.full_data import (
     get_earnings_calendar_multi,
     get_earnings_detail,
     get_economic_calendar,
+    get_economic_calendar_window,
     get_expirations_by_type,
     get_fear_greed_index,
     get_market_overview_yahoo,
@@ -427,6 +429,53 @@ def _theme_css(bg_color, card_bg, text_color, accent_color, border_color, compac
         font-size: 11px;
         margin-top: 2px;
     }}
+    .econ-header, .econ-row {{
+        display: grid;
+        grid-template-columns: 90px 1.8fr 90px 90px 100px 110px 100px 100px 70px;
+        gap: 8px;
+        align-items: center;
+        padding: 6px 8px;
+    }}
+    .econ-header {{
+        font-size: 11px;
+        color: #9aa8bc;
+        text-transform: uppercase;
+        border-bottom: 1px solid #2f3947;
+        font-weight: 700;
+    }}
+    .econ-row {{
+        border-bottom: 1px solid #222a36;
+        font-size: 13px;
+        color: #dce6f3;
+    }}
+    .econ-row.high {{
+        background: rgba(150, 45, 45, 0.22);
+    }}
+    .econ-row.medium {{
+        background: rgba(141, 103, 29, 0.18);
+    }}
+    .econ-row.low {{
+        background: rgba(44, 63, 87, 0.12);
+    }}
+    .impact-chip {{
+        border-radius: 999px;
+        padding: 2px 8px;
+        font-size: 11px;
+        font-weight: 700;
+        display: inline-block;
+        text-align: center;
+    }}
+    .impact-chip.high {{ background: #7b2d2d; color: #ffd8d8; }}
+    .impact-chip.medium {{ background: #7a5d2a; color: #ffe7b3; }}
+    .impact-chip.low {{ background: #27405f; color: #cde4ff; }}
+    .count-chip {{
+        border-radius: 999px;
+        padding: 2px 8px;
+        font-size: 11px;
+        font-weight: 700;
+        background: #2f7d56;
+        color: #b6ffd8;
+    }}
     .skeleton-box {{
         border: 1px solid #2f3947;
         border-radius: 10px;
@@ -750,6 +799,7 @@ def run_full_app():
             ("🏠 Overview", "📈 Market Overview"),
             ("🌐 Multi-Asset", "🌐 Multi-Asset"),
             ("📅 Earnings Calendar", "📅 Earnings Calendar"),
+            ("🗓 Economic Calendar", "🗓 Economic Calendar"),
         ],
         "Resources": [],
         "Analytics": [
@@ -1174,6 +1224,59 @@ def run_full_app():
                     st.caption("Waiting for next refresh to compute level changes.")
             else:
                 st.info("No data available for this timeframe.")
+
+        elif active_view == "🗓 Economic Calendar":
+            st.subheader("🗓 Economic Calendar")
+            ec1, ec2 = st.columns([1, 5])
+            with ec1:
+                cal_days = st.selectbox("Days", [1, 2, 3, 5], index=2, key="econ_days")
+            with ec2:
+                st.caption("Events in ET. High impact = red, medium = orange/yellow.")
+
+            econ_df = get_economic_calendar_window(finnhub_key, days=cal_days)
+            if econ_df is None or econ_df.empty:
+                st.info("No economic events available for this window.")
+            else:
+                now_et = datetime.now(ZoneInfo("America/New_York"))
+                for date_key, day_df in econ_df.groupby("date_et"):
+                    dt = datetime.strptime(date_key, "%Y-%m-%d")
+                    st.markdown(f"**{dt.strftime('%a %b %d')}**")
+                    st.markdown(
+                        '<div class="econ-header"><div>Time</div><div>Release</div><div>Impact</div><div>Country</div><div>For</div><div>Actual</div><div>Expected</div><div>Prior</div><div>Alert</div></div>',
+                        unsafe_allow_html=True,
+                    )
+                    for _, r in day_df.iterrows():
+                        impact = str(r.get("impact", "medium")).lower()
+                        impact_label = "HIGH" if impact == "high" else "MED" if impact == "medium" else "LOW"
+                        event_iso = r.get("event_dt_iso")
+                        countdown_html = ""
+                        try:
+                            event_dt = datetime.fromisoformat(str(event_iso))
+                            if event_dt.tzinfo is None:
+                                event_dt = event_dt.replace(tzinfo=ZoneInfo("America/New_York"))
+                            secs = int((event_dt - now_et).total_seconds())
+                            if 0 <= secs <= 60:
+                                countdown_html = f'<span class="count-chip">T-{secs}s</span>'
+                        except Exception:
+                            countdown_html = ""
+
+                        st.markdown(
+                            f"""
+                            <div class="econ-row {impact}">
+                                <div>{r.get("time_et", "")}</div>
+                                <div>{html.escape(str(r.get("event", "")))}</div>
+                                <div><span class="impact-chip {impact}">{impact_label}</span></div>
+                                <div>{html.escape(str(r.get("country", "US")))}</div>
+                                <div>{html.escape(str(r.get("for_period", "-")))}</div>
+                                <div>{html.escape(str(r.get("actual", "-")))}</div>
+                                <div>{html.escape(str(r.get("expected", "-")))}</div>
+                                <div>{html.escape(str(r.get("prior", "-")))}</div>
+                                <div>{countdown_html}</div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+                    st.markdown("")
 
         elif active_view == "📅 Earnings Calendar":
             st.subheader("📅 Earnings Calendar")

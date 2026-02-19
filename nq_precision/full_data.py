@@ -1,6 +1,6 @@
 import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import math
 from zoneinfo import ZoneInfo
 
@@ -546,22 +546,116 @@ def get_market_overview_yahoo():
 
 @st.cache_data(ttl=3600)
 def get_economic_calendar(finnhub_key):
+    events = get_economic_calendar_window(finnhub_key, days=1)
+    if events.empty:
+        return []
+    return events.to_dict(orient="records")[:10]
+
+
+def _parse_event_dt_et(raw_value):
+    if not raw_value:
+        return None
+    s = str(raw_value).strip()
+    if not s:
+        return None
+    et = ZoneInfo("America/New_York")
+    dt = None
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except Exception:
+        pass
+    if dt is None:
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+            try:
+                dt = datetime.strptime(s, fmt)
+                break
+            except Exception:
+                continue
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(et)
+
+
+def _normalize_impact(impact_raw):
+    v = str(impact_raw or "").strip().lower()
+    if v in {"high", "3", "h"}:
+        return "high"
+    if v in {"medium", "med", "2", "m"}:
+        return "medium"
+    if v in {"low", "1", "l"}:
+        return "low"
+    return "medium"
+
+
+@st.cache_data(ttl=30)
+def get_economic_calendar_window(finnhub_key, days=3):
     client = finnhub.Client(api_key=finnhub_key)
-    today = datetime.now().date()
+    et = ZoneInfo("America/New_York")
+    start = datetime.now(et).date()
+    end = start + timedelta(days=max(1, int(days)))
+    items = []
 
     try:
-        calendar = client.economic_calendar()
-
-        today_events = [
-            event
-            for event in calendar.get("economicCalendar", [])
-            if event.get("time", "").startswith(str(today))
-        ]
-
-        today_events.sort(key=lambda x: x.get("time", ""))
-        return today_events[:10]
+        try:
+            calendar = client.economic_calendar(_from=str(start), to=str(end))
+        except Exception:
+            calendar = client.economic_calendar()
+        events = calendar.get("economicCalendar", [])
     except Exception:
-        return []
+        events = []
+
+    for e in events:
+        try:
+            event_dt = _parse_event_dt_et(e.get("time"))
+            if event_dt is None:
+                date_raw = str(e.get("date", "")).strip()
+                if date_raw:
+                    try:
+                        event_dt = datetime.strptime(date_raw, "%Y-%m-%d").replace(tzinfo=et)
+                    except Exception:
+                        continue
+                else:
+                    continue
+            if not (start <= event_dt.date() <= end):
+                continue
+            items.append(
+                {
+                    "event": e.get("event", "Unknown"),
+                    "country": e.get("country", "US"),
+                    "impact": _normalize_impact(e.get("impact")),
+                    "actual": e.get("actual"),
+                    "expected": e.get("estimate") if e.get("estimate") is not None else e.get("forecast"),
+                    "prior": e.get("prev"),
+                    "for_period": e.get("period"),
+                    "time_et": event_dt.strftime("%I:%M %p").lstrip("0"),
+                    "date_et": event_dt.date().isoformat(),
+                    "event_dt_iso": event_dt.isoformat(),
+                }
+            )
+        except Exception:
+            continue
+
+    df = pd.DataFrame(items)
+    if df.empty:
+        return pd.DataFrame(
+            columns=[
+                "event",
+                "country",
+                "impact",
+                "actual",
+                "expected",
+                "prior",
+                "for_period",
+                "time_et",
+                "date_et",
+                "event_dt_iso",
+            ]
+        )
+
+    df = df.sort_values(["date_et", "event_dt_iso", "event"])
+    return df.reset_index(drop=True)
 
 
 @st.cache_data(ttl=600)
