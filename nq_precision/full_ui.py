@@ -7,6 +7,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 import yfinance as yf
 
 from nq_precision.full_data import (
@@ -587,6 +588,30 @@ def _fmt_econ_value(v):
     if s.lower() in {"", "none", "nan", "null"}:
         return "-"
     return s
+
+
+def _render_external_econ_widget():
+    widget_html = """
+    <div style="border:1px solid #2f3540;border-radius:8px;overflow:hidden;background:#111722;">
+      <div style="padding:8px 10px;border-bottom:1px solid #313946;color:#d6dbe4;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.2px;">
+        🌐 Live Economic Calendar (Fallback Feed)
+      </div>
+      <div class="tradingview-widget-container">
+        <div id="tradingview-widget-container__widget"></div>
+        <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-events.js" async>
+        {
+          "colorTheme": "dark",
+          "isTransparent": true,
+          "width": "100%",
+          "height": 700,
+          "locale": "en",
+          "importanceFilter": "-1,0,1"
+        }
+        </script>
+      </div>
+    </div>
+    """
+    components.html(widget_html, height=760, scrolling=True)
 
 
 def run_full_app():
@@ -1251,8 +1276,11 @@ def run_full_app():
                         for k in sorted(raw_counts.keys())
                     )
                 )
+            else:
+                st.caption("Sources (raw -> final): no events returned from provider APIs")
             if econ_df is None or econ_df.empty:
                 st.info("No economic events available for this window.")
+                _render_external_econ_widget()
             else:
                 et_now = datetime.now(ZoneInfo("America/New_York"))
                 week_dates = [et_now.date() + timedelta(days=i) for i in range(7)]
@@ -1306,6 +1334,8 @@ def run_full_app():
                             unsafe_allow_html=True,
                         )
                     st.markdown("")
+                with st.expander("Live Backup Calendar"):
+                    _render_external_econ_widget()
 
         elif active_view == "📅 Earnings Calendar":
             st.subheader("📅 Earnings Calendar")
