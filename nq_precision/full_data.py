@@ -1092,6 +1092,54 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
         min_idx = gex_by_strike["GEX"].abs().idxmin()
         g_flip_strike = float(gex_by_strike.loc[min_idx, "strike"])
 
+    # Confidence scoring for actionable levels based on nearby liquidity and gamma strength.
+    strike_liq = df.groupby("strike")["liquidity"].sum()
+    strike_oi = df.groupby("strike")["open_interest"].sum()
+    max_liq = max(1.0, float(strike_liq.max())) if not strike_liq.empty else 1.0
+    max_oi = max(1.0, float(strike_oi.max())) if not strike_oi.empty else 1.0
+    max_abs_gex = max(1.0, float(gex_by_strike["GEX"].abs().max())) if not gex_by_strike.empty else 1.0
+
+    def _nearest_idx(values, x):
+        if len(values) == 0:
+            return None
+        return min(range(len(values)), key=lambda i: abs(values[i] - x))
+
+    gex_strikes = gex_by_strike["strike"].tolist()
+    gex_values = gex_by_strike["GEX"].tolist()
+    liq_strikes = strike_liq.index.tolist()
+    oi_strikes = strike_oi.index.tolist()
+
+    def _level_confidence(strike_val):
+        g_i = _nearest_idx(gex_strikes, strike_val)
+        l_i = _nearest_idx(liq_strikes, strike_val)
+        o_i = _nearest_idx(oi_strikes, strike_val)
+        if g_i is None or l_i is None or o_i is None:
+            return {"score": 0, "label": "Low"}
+
+        gex_strength = abs(float(gex_values[g_i])) / max_abs_gex
+        liq_strength = float(strike_liq.iloc[l_i]) / max_liq
+        oi_strength = float(strike_oi.iloc[o_i]) / max_oi
+
+        score = int(round(100 * ((0.45 * liq_strength) + (0.30 * gex_strength) + (0.25 * oi_strength))))
+        score = max(0, min(100, score))
+        label = "High" if score >= 70 else "Medium" if score >= 45 else "Low"
+        return {"score": score, "label": label}
+
+    level_confidence = {
+        "Delta Neutral": _level_confidence(dn_strike),
+        "Primary Wall": _level_confidence(p_wall_strike),
+        "Primary Floor": _level_confidence(p_floor_strike),
+        "Secondary Wall": _level_confidence(s_wall_strike),
+        "Secondary Floor": _level_confidence(s_floor_strike),
+        "Gamma Flip": _level_confidence(g_flip_strike),
+    }
+    level_confidence["Target Resistance"] = dict(level_confidence["Primary Wall"])
+    level_confidence["Target Support"] = dict(level_confidence["Primary Floor"])
+    level_confidence["Upper 0.50σ"] = {"score": 40, "label": "Low"}
+    level_confidence["Upper 0.25σ"] = {"score": 45, "label": "Medium"}
+    level_confidence["Lower 0.25σ"] = {"score": 45, "label": "Medium"}
+    level_confidence["Lower 0.50σ"] = {"score": 40, "label": "Low"}
+
     results = [
         ("Delta Neutral", dn_nq, 5.0, "⚖️"),
         ("Target Resistance", (p_wall_strike * ratio) + 35, 3.0, "🎯"),
@@ -1122,6 +1170,7 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
         "puts": puts,
         "strike_delta": strike_delta,
         "results": results,
+        "level_confidence": level_confidence,
         "straddle": straddle,
         "nq_em_full": nq_em_full,
         "atm_strike": atm_strike,

@@ -467,6 +467,36 @@ def _render_left_nav(nav_sections):
     return st.session_state.main_left_nav
 
 
+def _track_level_changes(tracker_key, current_levels):
+    now_ts = datetime.now().strftime("%H:%M:%S")
+    previous = st.session_state.get(tracker_key)
+    changes_df = None
+    prev_ts = None
+
+    if previous and isinstance(previous, dict) and previous.get("levels"):
+        prev_ts = previous.get("ts")
+        rows = []
+        prev_levels = previous["levels"]
+        for name, current_value in current_levels.items():
+            prev_value = prev_levels.get(name)
+            if prev_value is None:
+                continue
+            delta = float(current_value) - float(prev_value)
+            rows.append(
+                {
+                    "Level": name,
+                    "Current": float(current_value),
+                    "Prev": float(prev_value),
+                    "Change (pts)": float(delta),
+                }
+            )
+        if rows:
+            changes_df = pd.DataFrame(rows)
+
+    st.session_state[tracker_key] = {"ts": now_ts, "levels": dict(current_levels)}
+    return changes_df, prev_ts
+
+
 def run_full_app():
     st.set_page_config(
         page_title="NQ Precision Map", layout="wide", initial_sidebar_state="expanded"
@@ -1076,13 +1106,37 @@ def run_full_app():
                 d3.metric("Net Delta", f"{selected_data['net_delta']:,.0f}")
                 d4.metric("Expected Move", f"±{selected_data['nq_em_full']:.0f}")
                 results_df = pd.DataFrame(selected_data["results"], columns=["Level", "Price", "Width", "Icon"])
+                conf_map = selected_data.get("level_confidence", {})
+                results_df["Confidence"] = results_df["Level"].map(
+                    lambda lvl: conf_map.get(lvl, {}).get("label", "-")
+                )
                 table_height = max(300, min(650, 52 + (len(results_df) + 1) * 35))
                 st.dataframe(
-                    results_df[["Icon", "Level", "Price", "Width"]],
+                    results_df[["Icon", "Level", "Price", "Width", "Confidence"]],
                     width="stretch",
                     hide_index=True,
                     height=table_height,
                 )
+
+                current_levels = {
+                    "Delta Neutral": selected_data["dn_nq"],
+                    "Gamma Flip": selected_data["g_flip_nq"],
+                    "Primary Wall": selected_data["p_wall"],
+                    "Primary Floor": selected_data["p_floor"],
+                    "Secondary Wall": selected_data["s_wall"],
+                    "Secondary Floor": selected_data["s_floor"],
+                }
+                tracker_key = f"level_tracker::{label}::{selected_exp.strftime('%Y-%m-%d')}"
+                changes_df, prev_ts = _track_level_changes(tracker_key, current_levels)
+                st.markdown("**Level Change Tracker**")
+                if changes_df is not None and not changes_df.empty:
+                    changes_df["Current"] = changes_df["Current"].map(lambda v: round(v, 2))
+                    changes_df["Prev"] = changes_df["Prev"].map(lambda v: round(v, 2))
+                    changes_df["Change (pts)"] = changes_df["Change (pts)"].map(lambda v: round(v, 2))
+                    st.caption(f"Compared with previous snapshot at {prev_ts}")
+                    st.dataframe(changes_df, width="stretch", hide_index=True)
+                else:
+                    st.caption("Waiting for next refresh to compute level changes.")
             else:
                 st.info("No data available for this timeframe.")
 
