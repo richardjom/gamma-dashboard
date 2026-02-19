@@ -578,6 +578,17 @@ def _track_level_changes(tracker_key, current_levels):
     return changes_df, prev_ts
 
 
+def _fmt_econ_value(v):
+    if v is None:
+        return "-"
+    if isinstance(v, float) and pd.isna(v):
+        return "-"
+    s = str(v).strip()
+    if s.lower() in {"", "none", "nan", "null"}:
+        return "-"
+    return s
+
+
 def run_full_app():
     st.set_page_config(
         page_title="NQ Precision Map", layout="wide", initial_sidebar_state="expanded"
@@ -1274,10 +1285,10 @@ def run_full_app():
                                 <div>›</div>
                                 <div>{r.get("time_et", "")}  {html.escape(str(r.get("event", "")))}</div>
                                 <div><span class="impact-chip {impact}">{impact_label}</span></div>
-                                <div>{html.escape(str(r.get("for_period", "-")))}</div>
-                                <div>{html.escape(str(r.get("actual", "-")))}</div>
-                                <div>{html.escape(str(r.get("expected", "-")))}</div>
-                                <div>{html.escape(str(r.get("prior", "-")))}</div>
+                                <div>{html.escape(_fmt_econ_value(r.get("for_period", "-")))}</div>
+                                <div>{html.escape(_fmt_econ_value(r.get("actual", "-")))}</div>
+                                <div>{html.escape(_fmt_econ_value(r.get("expected", "-")))}</div>
+                                <div>{html.escape(_fmt_econ_value(r.get("prior", "-")))}</div>
                                 <div>{countdown_html}</div>
                                 <div>🔔</div>
                             </div>
