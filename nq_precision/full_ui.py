@@ -1206,7 +1206,7 @@ def run_full_app():
         st.markdown('<div class="news-rail-title">Headlines</div>', unsafe_allow_html=True)
         st.markdown('<div class="news-rail">', unsafe_allow_html=True)
         if rss_news:
-            for article in rss_news[:18]:
+            for article in rss_news[:32]:
                 headline = html.escape(article.get("headline", "No title"))
                 source = html.escape(article.get("source", "Unknown"))
                 link = article.get("link", "#")

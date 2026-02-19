@@ -2,6 +2,7 @@ import re
 import time
 from datetime import datetime, timezone
 import math
+from zoneinfo import ZoneInfo
 
 import feedparser
 import finnhub
@@ -939,28 +940,62 @@ def process_multi_asset():
 
 @st.cache_data(ttl=30)
 def get_rss_news():
+    et_tz = ZoneInfo("America/New_York")
     feeds = {
         "Reuters Business": "http://feeds.reuters.com/reuters/businessNews",
+        "Reuters World": "http://feeds.reuters.com/reuters/worldNews",
+        "Reuters Markets": "http://feeds.reuters.com/news/wealth",
         "MarketWatch Top Stories": "http://feeds.marketwatch.com/marketwatch/topstories",
+        "MarketWatch Market Pulse": "http://feeds.marketwatch.com/marketwatch/marketpulse/",
         "CNBC Top News": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664",
+        "CNBC Finance": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114",
         "WSJ Markets": "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
     }
 
     all_news = []
+    seen = set()
 
     for source_name, feed_url in feeds.items():
         try:
             feed = feedparser.parse(feed_url)
 
-            for entry in feed.entries[:5]:
+            for entry in feed.entries[:12]:
                 try:
-                    pub_date = entry.get("published", "")
+                    headline = entry.get("title", "No title").strip()
+                    link = entry.get("link", "#")
+                    dedupe_key = (source_name, headline)
+                    if dedupe_key in seen:
+                        continue
+                    seen.add(dedupe_key)
+
+                    published_struct = entry.get("published_parsed") or entry.get("updated_parsed")
+                    published_dt = None
+                    if published_struct:
+                        try:
+                            published_dt = datetime(
+                                published_struct.tm_year,
+                                published_struct.tm_mon,
+                                published_struct.tm_mday,
+                                published_struct.tm_hour,
+                                published_struct.tm_min,
+                                published_struct.tm_sec,
+                                tzinfo=timezone.utc,
+                            ).astimezone(et_tz)
+                        except Exception:
+                            published_dt = None
+
+                    pub_date = (
+                        published_dt.strftime("%a, %b %d %Y %I:%M %p ET")
+                        if published_dt
+                        else "Time unavailable (ET)"
+                    )
                     all_news.append(
                         {
-                            "headline": entry.get("title", "No title"),
+                            "headline": headline,
                             "source": source_name,
-                            "link": entry.get("link", "#"),
+                            "link": link,
                             "published": pub_date,
+                            "published_ts": int(published_dt.timestamp()) if published_dt else 0,
                             "summary": entry.get("summary", "")[:200],
                         }
                     )
@@ -970,7 +1005,8 @@ def get_rss_news():
         except Exception:
             continue
 
-    return all_news[:20]
+    all_news.sort(key=lambda x: x.get("published_ts", 0), reverse=True)
+    return all_news[:60]
 
 
 @st.cache_data(ttl=14400)
