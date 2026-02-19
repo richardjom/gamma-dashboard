@@ -621,6 +621,79 @@ def get_top_movers(finnhub_key):
         return {"gainers": [], "losers": []}
 
 
+@st.cache_data(ttl=120)
+def get_nasdaq_heatmap_data():
+    symbols = [
+        "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AVGO", "COST", "NFLX",
+        "AMD", "ADBE", "PEP", "CSCO", "INTC", "INTU", "QCOM", "AMGN", "TXN", "CMCSA",
+        "AMAT", "BKNG", "SBUX", "GILD", "ISRG", "ADP", "ADI", "LRCX", "PYPL", "MU",
+    ]
+    sector_map = {
+        "AAPL": "Technology", "MSFT": "Technology", "NVDA": "Technology", "AMD": "Technology",
+        "ADBE": "Technology", "CSCO": "Technology", "INTC": "Technology", "INTU": "Technology",
+        "QCOM": "Technology", "AMAT": "Technology", "ADI": "Technology", "LRCX": "Technology",
+        "MU": "Technology", "ADP": "Technology",
+        "AMZN": "Consumer", "TSLA": "Consumer", "COST": "Consumer", "BKNG": "Consumer",
+        "SBUX": "Consumer", "PYPL": "Financials",
+        "GOOGL": "Communication", "META": "Communication", "NFLX": "Communication", "CMCSA": "Communication",
+        "PEP": "Consumer Staples",
+        "AMGN": "Healthcare", "GILD": "Healthcare", "ISRG": "Healthcare",
+        "TXN": "Technology",
+    }
+
+    try:
+        raw = yf.download(
+            tickers=symbols,
+            period="5d",
+            interval="1d",
+            auto_adjust=False,
+            progress=False,
+            group_by="ticker",
+            threads=True,
+        )
+    except Exception:
+        return pd.DataFrame(columns=["symbol", "sector", "price", "change_pct", "size"])
+
+    rows = []
+    for sym in symbols:
+        try:
+            if not isinstance(raw.columns, pd.MultiIndex):
+                continue
+            if sym not in raw.columns.get_level_values(0):
+                continue
+            sdata = raw[sym].dropna(how="all")
+            if sdata.empty or "Close" not in sdata:
+                continue
+            close = sdata["Close"].dropna()
+            if len(close) < 2:
+                continue
+            last = float(close.iloc[-1])
+            prev = float(close.iloc[-2])
+            if prev == 0:
+                continue
+            change_pct = ((last - prev) / prev) * 100.0
+            volume = 1.0
+            if "Volume" in sdata and not sdata["Volume"].dropna().empty:
+                volume = float(max(1.0, sdata["Volume"].dropna().iloc[-1]))
+            size = max(1.0, (last * volume) / 1_000_000.0)
+            rows.append(
+                {
+                    "symbol": sym,
+                    "sector": sector_map.get(sym, "Other"),
+                    "price": last,
+                    "change_pct": change_pct,
+                    "size": size,
+                }
+            )
+        except Exception:
+            continue
+
+    if not rows:
+        return pd.DataFrame(columns=["symbol", "sector", "price", "change_pct", "size"])
+
+    return pd.DataFrame(rows)
+
+
 def get_expirations_by_type(df):
     today = datetime.now().date()
     expirations = sorted(df["expiration"].dropna().unique())

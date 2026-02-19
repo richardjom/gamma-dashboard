@@ -3,6 +3,7 @@ from datetime import datetime
 import html
 
 import pandas as pd
+import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 import yfinance as yf
@@ -16,6 +17,7 @@ from nq_precision.full_data import (
     get_expirations_by_type,
     get_fear_greed_index,
     get_market_overview_yahoo,
+    get_nasdaq_heatmap_data,
     get_nq_intraday_data,
     get_nq_price_auto,
     get_quote_age_label,
@@ -723,49 +725,42 @@ def run_full_app():
                         st.markdown('<span class="metric-chip">↓ Bearish</span>', unsafe_allow_html=True)
                 st.markdown("</div></div>", unsafe_allow_html=True)
 
-                if nq_data is not None and not nq_data.empty:
-                    st.markdown(
-                        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📈 NQ Price Action with Key Levels</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
-                        unsafe_allow_html=True,
+                st.markdown(
+                    '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧩 Nasdaq Stocks Heat Map</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+                    unsafe_allow_html=True,
+                )
+                heatmap_df = get_nasdaq_heatmap_data()
+                if heatmap_df is not None and not heatmap_df.empty:
+                    fig = px.treemap(
+                        heatmap_df,
+                        path=["sector", "symbol"],
+                        values="size",
+                        color="change_pct",
+                        color_continuous_scale=[
+                            [0.0, "#7a1f2b"],
+                            [0.25, "#b33d4b"],
+                            [0.5, "#2b3038"],
+                            [0.75, "#2f7d4f"],
+                            [1.0, "#2dc46c"],
+                        ],
+                        color_continuous_midpoint=0,
+                        custom_data=["price", "change_pct"],
                     )
-                    fig = go.Figure()
-                    fig.add_trace(
-                        go.Candlestick(
-                            x=nq_data.index,
-                            open=nq_data["Open"],
-                            high=nq_data["High"],
-                            low=nq_data["Low"],
-                            close=nq_data["Close"],
-                            name="NQ",
-                            increasing_line_color="#44FF44",
-                            decreasing_line_color="#FF4444",
-                        )
+                    fig.update_traces(
+                        texttemplate="<b>%{label}</b><br>%{customdata[1]:+.2f}%",
+                        hovertemplate="<b>%{label}</b><br>Price: %{customdata[0]:,.2f}<br>Change: %{customdata[1]:+.2f}%<extra></extra>",
+                        marker_line=dict(width=1, color="#1f2630"),
                     )
-                    for level_price, level_name, color, dash in [
-                        (data_0dte["dn_nq"], "Delta Neutral", "#FFD700", "dot"),
-                        (data_0dte["g_flip_nq"], "Gamma Flip", "#FF00FF", "dash"),
-                        (data_0dte["p_wall"], "Primary Wall", "#FF4444", "solid"),
-                        (data_0dte["p_floor"], "Primary Floor", "#44FF44", "solid"),
-                    ]:
-                        fig.add_hline(
-                            y=level_price,
-                            line_dash=dash,
-                            line_color=color,
-                            annotation_text=f"{level_name}: {level_price:.2f}",
-                            annotation_position="right",
-                        )
                     fig.update_layout(
                         template="plotly_dark" if st.session_state.theme == "dark" else "plotly_white",
                         height=390,
-                        xaxis_title="Time (5-min candles)",
-                        yaxis_title="NQ Price",
-                        showlegend=False,
-                        hovermode="x unified",
-                        margin=dict(l=10, r=8, t=10, b=8),
+                        margin=dict(l=8, r=8, t=8, b=8),
+                        coloraxis_showscale=False,
                     )
-                    fig.update_xaxes(rangeslider_visible=False)
                     st.plotly_chart(fig, use_container_width=True)
-                    st.markdown("</div></div>", unsafe_allow_html=True)
+                else:
+                    st.info("Heat map data is temporarily unavailable.")
+                st.markdown("</div></div>", unsafe_allow_html=True)
 
                 hd1, hd2, hd3 = st.columns(3)
                 hd1.metric("NQ Price", f"{nq_now:.2f}", f"↑ {nq_source}")
