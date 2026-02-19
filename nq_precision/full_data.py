@@ -815,6 +815,108 @@ def _fetch_marketwatch_economic_calendar(start_date, end_date):
     return items
 
 
+def _fetch_finviz_economic_calendar(start_date, end_date):
+    items = []
+    et = ZoneInfo("America/New_York")
+    url = "https://finviz.com/calendar.ashx"
+    try:
+        res = requests.get(
+            url,
+            timeout=12,
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Referer": "https://finviz.com/",
+            },
+        )
+        if res.status_code != 200 or not res.text:
+            return items
+        soup = BeautifulSoup(res.text, "html.parser")
+    except Exception:
+        return items
+
+    # Finviz calendar rows include date marker rows and event rows.
+    rows = soup.find_all("tr")
+    current_day = None
+
+    for tr in rows:
+        tds = tr.find_all("td")
+        if not tds:
+            continue
+        cols = [" ".join((td.get_text(" ", strip=True) or "").split()) for td in tds]
+        if not any(cols):
+            continue
+
+        # Date marker rows often like "Wednesday February 19, 2026"
+        first_text = cols[0]
+        if len(cols) <= 3:
+            parsed_day = pd.to_datetime(first_text, errors="coerce")
+            if not pd.isna(parsed_day):
+                current_day = parsed_day.date()
+                continue
+
+        if current_day is None:
+            # Try detecting day from any leading date cell
+            maybe_date = pd.to_datetime(first_text, errors="coerce")
+            if not pd.isna(maybe_date):
+                current_day = maybe_date.date()
+
+        if current_day is None:
+            continue
+        if current_day < start_date or current_day > end_date:
+            continue
+
+        # Heuristic mapping for typical Finviz columns:
+        # Time | Country | Impact | Event | Actual | Forecast | Previous
+        # Some layouts omit country and/or reorder slightly.
+        time_raw = cols[0] if len(cols) > 0 else "Time TBA"
+        country = cols[1] if len(cols) > 1 else "US"
+        impact_raw = cols[2] if len(cols) > 2 else ""
+        event_name = cols[3] if len(cols) > 3 else (cols[2] if len(cols) > 2 else "Unknown")
+        actual = cols[4] if len(cols) > 4 else "-"
+        expected = cols[5] if len(cols) > 5 else "-"
+        prior = cols[6] if len(cols) > 6 else "-"
+
+        if not event_name or event_name.lower() in {"event", "release", "calendar"}:
+            continue
+
+        impact = "medium"
+        impact_check = impact_raw.lower()
+        if "high" in impact_check or impact_check.count("bull") >= 3:
+            impact = "high"
+        elif "low" in impact_check or impact_check.count("bull") == 1:
+            impact = "low"
+
+        event_dt = datetime.combine(current_day, datetime.min.time(), tzinfo=et)
+        time_et = "Time TBA"
+        try:
+            parsed_t = pd.to_datetime(time_raw, errors="coerce")
+            if not pd.isna(parsed_t):
+                tt = parsed_t.to_pydatetime().time()
+                event_dt = datetime.combine(current_day, tt, tzinfo=et)
+                time_et = event_dt.strftime("%I:%M %p").lstrip("0")
+        except Exception:
+            pass
+
+        items.append(
+            {
+                "event": event_name,
+                "country": country if country else "US",
+                "impact": impact,
+                "actual": actual,
+                "expected": expected,
+                "prior": prior,
+                "for_period": "-",
+                "time_et": time_et,
+                "date_et": current_day.isoformat(),
+                "event_dt_iso": event_dt.isoformat(),
+                "source": "Finviz",
+            }
+        )
+
+    return items
+
+
 def _fetch_tradingeconomics_calendar(start_date, end_date):
     items = []
     et = ZoneInfo("America/New_York")
@@ -1026,6 +1128,11 @@ def get_economic_calendar_window(finnhub_key, days=3):
         items.extend(mw_items)
     except Exception:
         pass
+    try:
+        fv_items = _fetch_finviz_economic_calendar(start, end)
+        items.extend(fv_items)
+    except Exception:
+        pass
 
     # Rescue pass: if strict parsing/filtering produced no rows, keep raw Finnhub events
     # as best-effort records so UI does not show an empty window.
@@ -1089,7 +1196,14 @@ def get_economic_calendar_window(finnhub_key, days=3):
         )
 
     # Keep the best row per event key: prefer rows that have actual/expected/prior populated.
-    source_rank = {"TradingEconomics": 0, "FMP": 1, "Finnhub": 2, "ForexFactory": 3, "MarketWatch": 4}
+    source_rank = {
+        "Finviz": 0,
+        "TradingEconomics": 1,
+        "FMP": 2,
+        "Finnhub": 3,
+        "ForexFactory": 4,
+        "MarketWatch": 5,
+    }
     if "source" not in df.columns:
         df["source"] = "Unknown"
     df["source_rank"] = df["source"].map(lambda s: source_rank.get(s, 99))
