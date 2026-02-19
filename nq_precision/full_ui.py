@@ -1422,20 +1422,82 @@ def run_full_app():
                 st.info("No 0DTE data available for Daily Bread analysis")
 
         elif active_view == "📈 GEX Charts":
-            st.subheader("📈 GEX by Strike")
-            for name, selected_data in [("0DTE", data_0dte), ("Weekly", data_weekly), ("Monthly", data_monthly)]:
-                if not selected_data:
-                    continue
-                st.markdown(f"**{name}**")
-                gex_by_strike = selected_data["df"].groupby("strike")["GEX"].sum().reset_index()
-                fig = go.Figure()
-                pos_gex = gex_by_strike[gex_by_strike["GEX"] > 0]
-                neg_gex = gex_by_strike[gex_by_strike["GEX"] < 0]
-                fig.add_trace(go.Bar(x=pos_gex["strike"], y=pos_gex["GEX"], name="Calls", marker_color="#FF4444"))
-                fig.add_trace(go.Bar(x=neg_gex["strike"], y=neg_gex["GEX"], name="Puts", marker_color="#44FF44"))
-                fig.add_vline(x=qqq_price, line_dash="dash", line_color="#00D9FF", annotation_text="Current")
-                fig.update_layout(template="plotly_dark" if st.session_state.theme == "dark" else "plotly_white", height=360)
+            st.subheader("📈 Trinity-Style Dealer Exposure")
+            st.caption("Two-panel horizontal GEX map for SPY and QQQ (0DTE). Monthly view removed.")
+
+            multi_asset_data = process_multi_asset()
+
+            def _render_gex_heatmap(asset_label, asset_payload):
+                if not asset_payload:
+                    st.info(f"{asset_label}: no data")
+                    return
+                d0 = asset_payload.get("data_0dte")
+                if not d0 or "df" not in d0 or d0["df"] is None or d0["df"].empty:
+                    st.info(f"{asset_label}: no 0DTE data")
+                    return
+
+                gex_by_strike = (
+                    d0["df"].groupby("strike", as_index=False)["GEX"].sum().sort_values("strike", ascending=False)
+                )
+                if gex_by_strike.empty:
+                    st.info(f"{asset_label}: empty strike map")
+                    return
+
+                # Keep a focused strike window around spot so the map looks dense and readable.
+                spot = float(asset_payload.get("etf_price", 0) or 0)
+                if spot > 0:
+                    low = spot * 0.94
+                    high = spot * 1.06
+                    gex_by_strike = gex_by_strike[
+                        (gex_by_strike["strike"] >= low) & (gex_by_strike["strike"] <= high)
+                    ].copy()
+                if gex_by_strike.empty:
+                    st.info(f"{asset_label}: no strikes in display window")
+                    return
+
+                z = gex_by_strike["GEX"].to_numpy().reshape(-1, 1)
+                y = [f"{s:.2f}" for s in gex_by_strike["strike"].to_list()]
+                x = [asset_label]
+
+                fig = go.Figure(
+                    data=go.Heatmap(
+                        z=z,
+                        x=x,
+                        y=y,
+                        colorscale="Viridis",
+                        reversescale=False,
+                        showscale=False,
+                        hovertemplate="Strike %{y}<br>GEX %{z:,.0f}<extra></extra>",
+                    )
+                )
+
+                # Mark nearest strike to spot.
+                if spot > 0:
+                    nearest_idx = (gex_by_strike["strike"] - spot).abs().idxmin()
+                    nearest_strike = float(gex_by_strike.loc[nearest_idx, "strike"])
+                    fig.add_hline(
+                        y=f"{nearest_strike:.2f}",
+                        line_dash="dot",
+                        line_color="#ffffff",
+                        opacity=0.8,
+                    )
+
+                fig.update_layout(
+                    template="plotly_dark" if st.session_state.theme == "dark" else "plotly_white",
+                    height=640,
+                    margin=dict(l=10, r=10, t=30, b=10),
+                    xaxis_title="",
+                    yaxis_title="Strike",
+                )
                 st.plotly_chart(fig, use_container_width=True)
+
+            c_spy, c_qqq = st.columns(2)
+            with c_spy:
+                st.markdown("**SPY**")
+                _render_gex_heatmap("SPY", multi_asset_data.get("SPY") if multi_asset_data else None)
+            with c_qqq:
+                st.markdown("**QQQ**")
+                _render_gex_heatmap("QQQ", multi_asset_data.get("QQQ") if multi_asset_data else None)
 
         elif active_view == "⚖️ Delta Charts":
             st.subheader("⚖️ Cumulative Delta")
