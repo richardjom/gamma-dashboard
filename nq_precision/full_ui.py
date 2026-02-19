@@ -31,7 +31,18 @@ from nq_precision.full_data import (
 )
 
 
-def _theme_css(bg_color, card_bg, text_color, accent_color, border_color):
+def _theme_css(bg_color, card_bg, text_color, accent_color, border_color, compact_mode=False):
+    compact_css = ""
+    if compact_mode:
+        compact_css = """
+    .terminal-body { padding: 8px !important; }
+    .future-card { min-height: 92px !important; padding: 10px 12px !important; }
+    .future-value { font-size: 33px !important; margin: 5px 0 7px 0 !important; }
+    .score-panel { min-height: 104px !important; padding: 10px !important; }
+    .quick-glance { padding: 10px !important; margin-bottom: 8px !important; }
+    .stMetric { min-height: 74px !important; }
+    .news-item { padding: 7px !important; margin-bottom: 6px !important; }
+        """
     st.markdown(
         f"""
 <style>
@@ -384,6 +395,19 @@ def _theme_css(bg_color, card_bg, text_color, accent_color, border_color):
         gap: 8px;
         margin-top: 8px;
     }}
+    .skeleton-box {{
+        border: 1px solid #2f3947;
+        border-radius: 10px;
+        height: 390px;
+        background: linear-gradient(90deg, #151d2a 25%, #1e2837 37%, #151d2a 63%);
+        background-size: 400% 100%;
+        animation: shimmer 1.3s ease-in-out infinite;
+    }}
+    @keyframes shimmer {{
+        0% {{ background-position: 100% 0; }}
+        100% {{ background-position: 0 0; }}
+    }}
+    {compact_css}
 </style>
 """,
         unsafe_allow_html=True,
@@ -467,7 +491,25 @@ def run_full_app():
         accent_color = "#0066CC"
         border_color = "#DDD"
 
-    _theme_css(bg_color, card_bg, text_color, accent_color, border_color)
+    if "compact_mode" not in st.session_state:
+        st.session_state.compact_mode = False
+    if "heatmap_universe" not in st.session_state:
+        st.session_state.heatmap_universe = "Nasdaq 100"
+    if "heatmap_size_mode" not in st.session_state:
+        st.session_state.heatmap_size_mode = "Market Cap"
+    if "heatmap_timeframe" not in st.session_state:
+        st.session_state.heatmap_timeframe = "5D"
+    if "heatmap_custom_symbols" not in st.session_state:
+        st.session_state.heatmap_custom_symbols = "AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA"
+
+    _theme_css(
+        bg_color,
+        card_bg,
+        text_color,
+        accent_color,
+        border_color,
+        compact_mode=st.session_state.compact_mode,
+    )
 
     st.markdown(
         """
@@ -534,6 +576,7 @@ def run_full_app():
         toggle_theme()
         st.rerun()
 
+    st.sidebar.checkbox("🗜 Compact Mode", key="compact_mode")
     manual_override = st.sidebar.checkbox("✏️ Manual NQ Override")
     auto_refresh = st.sidebar.checkbox("🔄 Auto-Refresh (60s)", value=True)
     if auto_refresh:
@@ -802,7 +845,42 @@ def run_full_app():
                     '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧩 Nasdaq Stocks Heat Map</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
                     unsafe_allow_html=True,
                 )
-                heatmap_df = get_nasdaq_heatmap_data()
+                hc1, hc2, hc3 = st.columns([1.2, 1, 1])
+                with hc1:
+                    st.selectbox(
+                        "Universe",
+                        ["Nasdaq 100", "Magnificent 7", "Custom Watchlist"],
+                        key="heatmap_universe",
+                    )
+                with hc2:
+                    st.selectbox(
+                        "Sizing",
+                        ["Market Cap", "Volume", "Equal Weight"],
+                        key="heatmap_size_mode",
+                    )
+                with hc3:
+                    st.selectbox(
+                        "Timeframe",
+                        ["1D", "5D", "1M"],
+                        key="heatmap_timeframe",
+                    )
+
+                if st.session_state.heatmap_universe == "Custom Watchlist":
+                    st.text_input(
+                        "Custom Symbols (comma-separated)",
+                        key="heatmap_custom_symbols",
+                        help="Example: AAPL,MSFT,NVDA,AMZN",
+                    )
+
+                skeleton = st.empty()
+                skeleton.markdown('<div class="skeleton-box"></div>', unsafe_allow_html=True)
+                heatmap_df = get_nasdaq_heatmap_data(
+                    universe=st.session_state.heatmap_universe,
+                    size_mode=st.session_state.heatmap_size_mode,
+                    timeframe=st.session_state.heatmap_timeframe,
+                    custom_symbols=st.session_state.heatmap_custom_symbols,
+                )
+                skeleton.empty()
                 if heatmap_df is not None and not heatmap_df.empty:
                     heatmap_df = heatmap_df.copy()
                     size_cut = heatmap_df["size"].quantile(0.18)
@@ -862,7 +940,11 @@ def run_full_app():
                         coloraxis=dict(cmin=-4, cmax=4),
                     )
                     st.plotly_chart(fig, use_container_width=True)
-                    st.caption("Tile color scale clipped to +/-4% for readability.")
+                    st.caption(
+                        f"Mode: {st.session_state.heatmap_universe} • "
+                        f"Sizing: {st.session_state.heatmap_size_mode} • "
+                        f"Timeframe: {st.session_state.heatmap_timeframe}"
+                    )
                 else:
                     st.info("Heat map data is temporarily unavailable.")
                 st.markdown("</div></div>", unsafe_allow_html=True)

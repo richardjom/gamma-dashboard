@@ -621,13 +621,43 @@ def get_top_movers(finnhub_key):
         return {"gainers": [], "losers": []}
 
 
+NASDAQ_100_CORE = [
+    "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AVGO", "COST", "NFLX",
+    "AMD", "ADBE", "PEP", "CSCO", "INTC", "INTU", "QCOM", "AMGN", "TXN", "CMCSA",
+    "AMAT", "BKNG", "SBUX", "GILD", "ISRG", "ADP", "ADI", "LRCX", "PYPL", "MU",
+    "PANW", "MELI", "ASML", "SNPS", "KLAC", "CDNS", "MAR", "ORLY", "CSX", "AEP",
+    "MRVL", "FTNT", "ADI", "KDP", "MNST", "WDAY", "NXPI", "TEAM", "CRWD", "ABNB",
+]
+MAG_7 = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA"]
+
+
+@st.cache_data(ttl=3600)
+def _get_market_caps(symbols):
+    market_caps = {}
+    for sym in symbols:
+        try:
+            fi = yf.Ticker(sym).fast_info
+            cap = fi.get("market_cap")
+            if cap and cap > 0:
+                market_caps[sym] = float(cap)
+        except Exception:
+            continue
+    return market_caps
+
+
 @st.cache_data(ttl=120)
-def get_nasdaq_heatmap_data():
-    symbols = [
-        "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AVGO", "COST", "NFLX",
-        "AMD", "ADBE", "PEP", "CSCO", "INTC", "INTU", "QCOM", "AMGN", "TXN", "CMCSA",
-        "AMAT", "BKNG", "SBUX", "GILD", "ISRG", "ADP", "ADI", "LRCX", "PYPL", "MU",
-    ]
+def get_nasdaq_heatmap_data(universe="Nasdaq 100", size_mode="Market Cap", timeframe="5D", custom_symbols=""):
+    custom = [s.strip().upper() for s in custom_symbols.split(",") if s.strip()]
+    if universe == "Magnificent 7":
+        symbols = MAG_7
+    elif universe == "Custom Watchlist":
+        symbols = custom
+    else:
+        symbols = NASDAQ_100_CORE
+
+    if not symbols:
+        return pd.DataFrame(columns=["symbol", "sector", "price", "change_pct", "size"])
+
     sector_map = {
         "AAPL": "Technology", "MSFT": "Technology", "NVDA": "Technology", "AMD": "Technology",
         "AVGO": "Technology",
@@ -641,11 +671,13 @@ def get_nasdaq_heatmap_data():
         "AMGN": "Healthcare", "GILD": "Healthcare", "ISRG": "Healthcare",
         "TXN": "Technology",
     }
+    period_map = {"1D": "2d", "5D": "7d", "1M": "1mo"}
+    period = period_map.get(timeframe, "7d")
 
     try:
         raw = yf.download(
             tickers=symbols,
-            period="5d",
+            period=period,
             interval="1d",
             auto_adjust=False,
             progress=False,
@@ -655,6 +687,7 @@ def get_nasdaq_heatmap_data():
     except Exception:
         return pd.DataFrame(columns=["symbol", "sector", "price", "change_pct", "size"])
 
+    market_caps = _get_market_caps(tuple(symbols)) if size_mode == "Market Cap" else {}
     rows = []
     for sym in symbols:
         try:
@@ -676,7 +709,14 @@ def get_nasdaq_heatmap_data():
             volume = 1.0
             if "Volume" in sdata and not sdata["Volume"].dropna().empty:
                 volume = float(max(1.0, sdata["Volume"].dropna().iloc[-1]))
-            size = max(1.0, (last * volume) / 1_000_000.0)
+            liquidity_size = max(1.0, (last * volume) / 1_000_000.0)
+            if size_mode == "Equal Weight":
+                size = 1.0
+            elif size_mode == "Volume":
+                size = liquidity_size
+            else:
+                cap = market_caps.get(sym, 0.0)
+                size = max(1.0, cap / 1_000_000_000.0) if cap > 0 else liquidity_size
             rows.append(
                 {
                     "symbol": sym,
