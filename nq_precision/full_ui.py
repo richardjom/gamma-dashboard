@@ -671,262 +671,275 @@ def run_full_app():
         with tabs[tab_idx]:
             st.subheader("📈 Market Overview")
             with st.spinner("Loading market data..."):
-                if market_data:
-                    st.markdown("### Futures & Indices")
-                    col1, col2, col3, col4, col5 = st.columns(5)
+                left_col, center_col, right_col = st.columns([1.1, 4.2, 1.7], gap="medium")
 
-                    if "es" in market_data and market_data["es"]["price"]:
-                        es = market_data["es"]
-                        col1.metric(
-                            "S&P 500 (ES)",
-                            f"{es['price']:.2f}",
-                            f"{es.get('change', 0):+.2f} ({es.get('change_pct', 0):+.2f}%)",
-                        )
-                        col1.caption(
-                            f"Source: {es.get('source', 'unknown')} | Age: {get_quote_age_label('ES=F')}"
-                        )
-                    else:
-                        col1.metric("S&P 500 (ES)", "N/A")
-
-                    nq_change = nq_now * (nq_day_change_pct / 100)
-                    col2.metric(
-                        "Nasdaq (NQ)",
-                        f"{nq_now:.2f}",
-                        f"{nq_change:+.2f} ({nq_day_change_pct:+.2f}%)",
-                    )
-                    col2.caption(f"Source: {nq_source} | Age: {get_quote_age_label('NQ=F')}")
-
-                    if "ym" in market_data and market_data["ym"]["price"]:
-                        ym = market_data["ym"]
-                        col3.metric(
-                            "Dow (YM)",
-                            f"{ym['price']:.2f}",
-                            f"{ym.get('change', 0):+.2f} ({ym.get('change_pct', 0):+.2f}%)",
-                        )
-                        col3.caption(
-                            f"Source: {ym.get('source', 'unknown')} | Age: {get_quote_age_label('YM=F')}"
-                        )
-                    else:
-                        col3.metric("Dow (YM)", "N/A")
-
-                    if "rty" in market_data and market_data["rty"]["price"]:
-                        rty = market_data["rty"]
-                        col4.metric(
-                            "Russell (RTY)",
-                            f"{rty['price']:.2f}",
-                            f"{rty.get('change', 0):+.2f} ({rty.get('change_pct', 0):+.2f}%)",
-                        )
-                        col4.caption(
-                            f"Source: {rty.get('source', 'unknown')} | Age: {get_quote_age_label('RTY=F')}"
-                        )
-                    else:
-                        col4.metric("Russell (RTY)", "N/A")
-
-                    if "gc" in market_data and market_data["gc"]["price"]:
-                        gc = market_data["gc"]
-                        col5.metric(
-                            "Gold (GC)",
-                            f"{gc['price']:.2f}",
-                            f"{gc.get('change', 0):+.2f} ({gc.get('change_pct', 0):+.2f}%)",
-                        )
-                        col5.caption(
-                            f"Source: {gc.get('source', 'unknown')} | Age: {get_quote_age_label('GC=F')}"
-                        )
-                    else:
-                        col5.metric("Gold (GC)", "N/A")
-
-                    st.markdown("---")
-                    st.markdown("### Market Indicators")
-                    col1, col2, col3 = st.columns(3)
-
-                    if "vix" in market_data and market_data["vix"]["price"]:
-                        vix = market_data["vix"]
-                        col1.metric(
-                            "VIX (Volatility)",
-                            f"{vix['price']:.2f}",
-                            f"{vix.get('change', 0):+.2f} ({vix.get('change_pct', 0):+.2f}%)",
-                        )
-                    else:
-                        col1.metric("VIX (Volatility)", "N/A")
-
-                    if "10y" in market_data and market_data["10y"]["price"]:
-                        tnx = market_data["10y"]
-                        col2.metric(
-                            "10Y Treasury",
-                            f"{tnx['price']:.2f}%",
-                            f"{tnx.get('change', 0):+.2f}",
-                        )
-                    else:
-                        col2.metric("10Y Treasury", "N/A")
-
-                    if "dxy" in market_data and market_data["dxy"]["price"]:
-                        dxy = market_data["dxy"]
-                        col3.metric(
-                            "Dollar Index",
-                            f"{dxy['price']:.2f}",
-                            f"{dxy.get('change', 0):+.2f} ({dxy.get('change_pct', 0):+.2f}%)",
-                        )
-                        col3.caption(
-                            f"Source: {dxy.get('source', 'unknown')} | Age: {get_quote_age_label('DX=F')}"
-                        )
-                    else:
-                        col3.metric("Dollar Index", "N/A")
-                else:
-                    st.warning("Market data temporarily unavailable")
-
-            st.markdown("---")
-            st.markdown("### Market Sentiment")
-
-            col1, col2 = st.columns([1, 3])
-            with col1:
-                st.metric("Fear & Greed Index", f"{fg['score']:.0f}", fg["rating"])
-
-            with col2:
-                if data_0dte:
-                    gf_distance = nq_now - data_0dte["g_flip_nq"]
-                    dn_distance = nq_now - data_0dte["dn_nq"]
-                    gamma_state = "Negative Gamma" if gf_distance > 0 else "Positive Gamma"
-                    regime_text = (
-                        f"Regime: **{gamma_state}** | "
-                        f"NQ vs Gamma Flip: {gf_distance:+.0f} pts | "
-                        f"NQ vs Delta Neutral: {dn_distance:+.0f} pts"
-                    )
-                    if gf_distance > 0:
-                        st.warning(regime_text)
-                    else:
-                        st.success(regime_text)
-                else:
-                    st.info("Regime: unavailable (no 0DTE data)")
-
-                vix = market_data.get("vix", {}).get("price", 0)
-                dxy_chg = market_data.get("dxy", {}).get("change_pct", 0)
-                tnx_chg = market_data.get("10y", {}).get("change", 0)
-                risk_score = 0
-                if vix >= 20:
-                    risk_score += 2
-                elif vix >= 16:
-                    risk_score += 1
-                if dxy_chg > 0.3:
-                    risk_score += 1
-                if tnx_chg > 0.05:
-                    risk_score += 1
-                risk_label = "High Risk" if risk_score >= 3 else "Moderate Risk" if risk_score >= 2 else "Low Risk"
-                risk_text = (
-                    f"Risk Meter: **{risk_label}** | "
-                    f"VIX {vix:.2f} | DXY {dxy_chg:+.2f}% | 10Y {tnx_chg:+.2f}"
-                )
-                if risk_score >= 3:
-                    st.error(risk_text)
-                elif risk_score >= 2:
-                    st.warning(risk_text)
-                else:
-                    st.info(risk_text)
-
-                es_chg = market_data.get("es", {}).get("change_pct", 0)
-                ym_chg = market_data.get("ym", {}).get("change_pct", 0)
-                rty_chg = market_data.get("rty", {}).get("change_pct", 0)
-                divergence_score = (
-                    abs(nq_day_change_pct - es_chg)
-                    + abs(nq_day_change_pct - ym_chg)
-                    + abs(nq_day_change_pct - rty_chg)
-                ) / 3
-                divergence_text = (
-                    f"Cross-Asset Divergence: **{divergence_score:.2f}%** | "
-                    f"NQ {nq_day_change_pct:+.2f}% vs ES {es_chg:+.2f}% / YM {ym_chg:+.2f}% / RTY {rty_chg:+.2f}%"
-                )
-                if divergence_score >= 1.0:
-                    st.warning(divergence_text)
-                else:
-                    st.info(divergence_text)
-
-                if data_0dte:
-                    long_trigger = data_0dte["p_floor"]
-                    short_trigger = data_0dte["p_wall"]
-                    trigger_text = (
-                        f"Action Triggers: Long reaction zone near **{long_trigger:.2f}** | "
-                        f"Short reaction zone near **{short_trigger:.2f}** | "
-                        f"Regime pivot at **{data_0dte['g_flip_nq']:.2f}**"
-                    )
-                    st.info(trigger_text)
-                else:
-                    st.info("Action Triggers: unavailable (waiting for options levels)")
-
-            st.markdown("---")
-            st.markdown("### 🧭 Level Interaction Panel")
-            if level_interactions_df is not None and not level_interactions_df.empty:
-                st.dataframe(level_interactions_df, width="stretch", hide_index=True)
-            else:
-                st.info("Level interaction data unavailable (requires intraday candles).")
-
-            st.markdown("---")
-            st.markdown("### Top Movers")
-            movers = get_top_movers(finnhub_key)
-
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("**🟢 Top Gainers**")
-                if movers["gainers"]:
-                    gainers_df = pd.DataFrame(movers["gainers"])
-                    st.dataframe(
-                        gainers_df[["symbol", "price", "change_pct"]].style.format(
-                            {"price": "${:.2f}", "change_pct": "{:+.2f}%"}
-                        ),
-                        width="stretch",
-                        hide_index=True,
-                    )
-                else:
-                    st.info("No data available")
-
-            with col2:
-                st.markdown("**🔴 Top Losers**")
-                if movers["losers"]:
-                    losers_df = pd.DataFrame(movers["losers"])
-                    st.dataframe(
-                        losers_df[["symbol", "price", "change_pct"]].style.format(
-                            {"price": "${:.2f}", "change_pct": "{:+.2f}%"}
-                        ),
-                        width="stretch",
-                        hide_index=True,
-                    )
-                else:
-                    st.info("No data available")
-
-            st.markdown("---")
-            st.markdown("### 📅 Today's Economic Events")
-            events = get_economic_calendar(finnhub_key)
-
-            if events:
-                events_data = []
-                for event in events:
-                    time_str = event.get("time", "")[:10] if event.get("time") else "N/A"
-                    events_data.append(
-                        {
-                            "Time": time_str,
-                            "Event": event.get("event", "Unknown"),
-                            "Impact": event.get("impact", "N/A"),
-                            "Country": event.get("country", "US"),
-                        }
+                with left_col:
+                    st.markdown("### Sections")
+                    section = st.radio(
+                        "Market Overview Sections",
+                        [
+                            "Futures Board",
+                            "Sentiment Signals",
+                            "Level Interaction",
+                            "Top Movers",
+                            "Economic Calendar",
+                        ],
+                        label_visibility="collapsed",
+                        key="market_overview_section",
                     )
 
-                events_df = pd.DataFrame(events_data)
-                st.dataframe(events_df, width="stretch", hide_index=True)
-            else:
-                st.info("No major economic events today")
+                with center_col:
+                    if section == "Futures Board":
+                        if market_data:
+                            st.markdown("### Futures & Indices")
+                            col1, col2, col3, col4, col5 = st.columns(5)
 
-            st.markdown("---")
-            st.markdown("### 📰 Latest Market News (Live RSS)")
-            rss_news = get_rss_news()
+                            if "es" in market_data and market_data["es"]["price"]:
+                                es = market_data["es"]
+                                col1.metric(
+                                    "S&P 500 (ES)",
+                                    f"{es['price']:.2f}",
+                                    f"{es.get('change', 0):+.2f} ({es.get('change_pct', 0):+.2f}%)",
+                                )
+                                col1.caption(
+                                    f"Source: {es.get('source', 'unknown')} | Age: {get_quote_age_label('ES=F')}"
+                                )
+                            else:
+                                col1.metric("S&P 500 (ES)", "N/A")
 
-            if rss_news:
-                for article in rss_news[:8]:
-                    with st.expander(f"**{article['headline']}** - {article['source']}"):
-                        if article.get("summary"):
-                            st.markdown(f"*{article['summary']}...*")
-                        st.markdown(f"[Read full article]({article['link']})")
-                        if article.get("published"):
-                            st.caption(f"Published: {article['published']}")
-            else:
-                st.info("News feed temporarily unavailable")
+                            nq_change = nq_now * (nq_day_change_pct / 100)
+                            col2.metric(
+                                "Nasdaq (NQ)",
+                                f"{nq_now:.2f}",
+                                f"{nq_change:+.2f} ({nq_day_change_pct:+.2f}%)",
+                            )
+                            col2.caption(f"Source: {nq_source} | Age: {get_quote_age_label('NQ=F')}")
+
+                            if "ym" in market_data and market_data["ym"]["price"]:
+                                ym = market_data["ym"]
+                                col3.metric(
+                                    "Dow (YM)",
+                                    f"{ym['price']:.2f}",
+                                    f"{ym.get('change', 0):+.2f} ({ym.get('change_pct', 0):+.2f}%)",
+                                )
+                                col3.caption(
+                                    f"Source: {ym.get('source', 'unknown')} | Age: {get_quote_age_label('YM=F')}"
+                                )
+                            else:
+                                col3.metric("Dow (YM)", "N/A")
+
+                            if "rty" in market_data and market_data["rty"]["price"]:
+                                rty = market_data["rty"]
+                                col4.metric(
+                                    "Russell (RTY)",
+                                    f"{rty['price']:.2f}",
+                                    f"{rty.get('change', 0):+.2f} ({rty.get('change_pct', 0):+.2f}%)",
+                                )
+                                col4.caption(
+                                    f"Source: {rty.get('source', 'unknown')} | Age: {get_quote_age_label('RTY=F')}"
+                                )
+                            else:
+                                col4.metric("Russell (RTY)", "N/A")
+
+                            if "gc" in market_data and market_data["gc"]["price"]:
+                                gc = market_data["gc"]
+                                col5.metric(
+                                    "Gold (GC)",
+                                    f"{gc['price']:.2f}",
+                                    f"{gc.get('change', 0):+.2f} ({gc.get('change_pct', 0):+.2f}%)",
+                                )
+                                col5.caption(
+                                    f"Source: {gc.get('source', 'unknown')} | Age: {get_quote_age_label('GC=F')}"
+                                )
+                            else:
+                                col5.metric("Gold (GC)", "N/A")
+
+                            st.markdown("---")
+                            st.markdown("### Market Indicators")
+                            ic1, ic2, ic3 = st.columns(3)
+                            if "vix" in market_data and market_data["vix"]["price"]:
+                                vix = market_data["vix"]
+                                ic1.metric(
+                                    "VIX (Volatility)",
+                                    f"{vix['price']:.2f}",
+                                    f"{vix.get('change', 0):+.2f} ({vix.get('change_pct', 0):+.2f}%)",
+                                )
+                            else:
+                                ic1.metric("VIX (Volatility)", "N/A")
+                            if "10y" in market_data and market_data["10y"]["price"]:
+                                tnx = market_data["10y"]
+                                ic2.metric(
+                                    "10Y Treasury",
+                                    f"{tnx['price']:.2f}%",
+                                    f"{tnx.get('change', 0):+.2f}",
+                                )
+                            else:
+                                ic2.metric("10Y Treasury", "N/A")
+                            if "dxy" in market_data and market_data["dxy"]["price"]:
+                                dxy = market_data["dxy"]
+                                ic3.metric(
+                                    "Dollar Index",
+                                    f"{dxy['price']:.2f}",
+                                    f"{dxy.get('change', 0):+.2f} ({dxy.get('change_pct', 0):+.2f}%)",
+                                )
+                                ic3.caption(
+                                    f"Source: {dxy.get('source', 'unknown')} | Age: {get_quote_age_label('DX=F')}"
+                                )
+                            else:
+                                ic3.metric("Dollar Index", "N/A")
+                        else:
+                            st.warning("Market data temporarily unavailable")
+
+                    if section == "Sentiment Signals":
+                        st.markdown("### Market Sentiment")
+                        s1, s2 = st.columns([1, 3])
+                        with s1:
+                            st.metric("Fear & Greed Index", f"{fg['score']:.0f}", fg["rating"])
+                        with s2:
+                            if data_0dte:
+                                gf_distance = nq_now - data_0dte["g_flip_nq"]
+                                dn_distance = nq_now - data_0dte["dn_nq"]
+                                gamma_state = "Negative Gamma" if gf_distance > 0 else "Positive Gamma"
+                                regime_text = (
+                                    f"Regime: **{gamma_state}** | "
+                                    f"NQ vs Gamma Flip: {gf_distance:+.0f} pts | "
+                                    f"NQ vs Delta Neutral: {dn_distance:+.0f} pts"
+                                )
+                                if gf_distance > 0:
+                                    st.warning(regime_text)
+                                else:
+                                    st.success(regime_text)
+                            else:
+                                st.info("Regime: unavailable (no 0DTE data)")
+
+                            vix = market_data.get("vix", {}).get("price", 0)
+                            dxy_chg = market_data.get("dxy", {}).get("change_pct", 0)
+                            tnx_chg = market_data.get("10y", {}).get("change", 0)
+                            risk_score = 0
+                            if vix >= 20:
+                                risk_score += 2
+                            elif vix >= 16:
+                                risk_score += 1
+                            if dxy_chg > 0.3:
+                                risk_score += 1
+                            if tnx_chg > 0.05:
+                                risk_score += 1
+                            risk_label = (
+                                "High Risk" if risk_score >= 3 else "Moderate Risk" if risk_score >= 2 else "Low Risk"
+                            )
+                            risk_text = (
+                                f"Risk Meter: **{risk_label}** | "
+                                f"VIX {vix:.2f} | DXY {dxy_chg:+.2f}% | 10Y {tnx_chg:+.2f}"
+                            )
+                            if risk_score >= 3:
+                                st.error(risk_text)
+                            elif risk_score >= 2:
+                                st.warning(risk_text)
+                            else:
+                                st.info(risk_text)
+
+                            es_chg = market_data.get("es", {}).get("change_pct", 0)
+                            ym_chg = market_data.get("ym", {}).get("change_pct", 0)
+                            rty_chg = market_data.get("rty", {}).get("change_pct", 0)
+                            divergence_score = (
+                                abs(nq_day_change_pct - es_chg)
+                                + abs(nq_day_change_pct - ym_chg)
+                                + abs(nq_day_change_pct - rty_chg)
+                            ) / 3
+                            divergence_text = (
+                                f"Cross-Asset Divergence: **{divergence_score:.2f}%** | "
+                                f"NQ {nq_day_change_pct:+.2f}% vs ES {es_chg:+.2f}% / YM {ym_chg:+.2f}% / RTY {rty_chg:+.2f}%"
+                            )
+                            if divergence_score >= 1.0:
+                                st.warning(divergence_text)
+                            else:
+                                st.info(divergence_text)
+
+                            if data_0dte:
+                                long_trigger = data_0dte["p_floor"]
+                                short_trigger = data_0dte["p_wall"]
+                                trigger_text = (
+                                    f"Action Triggers: Long reaction zone near **{long_trigger:.2f}** | "
+                                    f"Short reaction zone near **{short_trigger:.2f}** | "
+                                    f"Regime pivot at **{data_0dte['g_flip_nq']:.2f}**"
+                                )
+                                st.info(trigger_text)
+                            else:
+                                st.info("Action Triggers: unavailable (waiting for options levels)")
+
+                    if section == "Level Interaction":
+                        st.markdown("### 🧭 Level Interaction Panel")
+                        if level_interactions_df is not None and not level_interactions_df.empty:
+                            st.dataframe(level_interactions_df, width="stretch", hide_index=True)
+                        else:
+                            st.info("Level interaction data unavailable (requires intraday candles).")
+
+                    if section == "Top Movers":
+                        st.markdown("### Top Movers")
+                        movers = get_top_movers(finnhub_key)
+                        m1, m2 = st.columns(2)
+                        with m1:
+                            st.markdown("**🟢 Top Gainers**")
+                            if movers["gainers"]:
+                                gainers_df = pd.DataFrame(movers["gainers"])
+                                st.dataframe(
+                                    gainers_df[["symbol", "price", "change_pct"]].style.format(
+                                        {"price": "${:.2f}", "change_pct": "{:+.2f}%"}
+                                    ),
+                                    width="stretch",
+                                    hide_index=True,
+                                )
+                            else:
+                                st.info("No data available")
+                        with m2:
+                            st.markdown("**🔴 Top Losers**")
+                            if movers["losers"]:
+                                losers_df = pd.DataFrame(movers["losers"])
+                                st.dataframe(
+                                    losers_df[["symbol", "price", "change_pct"]].style.format(
+                                        {"price": "${:.2f}", "change_pct": "{:+.2f}%"}
+                                    ),
+                                    width="stretch",
+                                    hide_index=True,
+                                )
+                            else:
+                                st.info("No data available")
+
+                    if section == "Economic Calendar":
+                        st.markdown("### 📅 Today's Economic Events")
+                        events = get_economic_calendar(finnhub_key)
+                        if events:
+                            events_data = []
+                            for event in events:
+                                time_str = event.get("time", "")[:10] if event.get("time") else "N/A"
+                                events_data.append(
+                                    {
+                                        "Time": time_str,
+                                        "Event": event.get("event", "Unknown"),
+                                        "Impact": event.get("impact", "N/A"),
+                                        "Country": event.get("country", "US"),
+                                    }
+                                )
+                            events_df = pd.DataFrame(events_data)
+                            st.dataframe(events_df, width="stretch", hide_index=True)
+                        else:
+                            st.info("No major economic events today")
+
+                with right_col:
+                    st.markdown("### 📰 Live News")
+                    rss_news = get_rss_news()
+                    if rss_news:
+                        for article in rss_news[:14]:
+                            headline = article.get("headline", "No title")
+                            source = article.get("source", "Unknown")
+                            link = article.get("link", "#")
+                            published = article.get("published", "")
+                            st.markdown(f"**{headline}**")
+                            st.caption(f"{source} • {published}")
+                            st.markdown(f"[Open]({link})")
+                            st.markdown("---")
+                    else:
+                        st.info("News feed temporarily unavailable")
 
         tab_idx += 1
 
