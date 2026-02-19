@@ -741,7 +741,7 @@ def run_full_app():
                             .apply(
                                 lambda g: pd.Series(
                                     {
-                                        "symbol": "OTHER",
+                                        "symbol": "Basket",
                                         "price": 0.0,
                                         "change_pct": (
                                             (g["change_pct"] * g["size"]).sum() / g["size"].sum()
