@@ -1,5 +1,6 @@
 import time
 from datetime import datetime
+import html
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -963,15 +964,20 @@ def run_full_app():
         st.markdown('<div class="news-rail">', unsafe_allow_html=True)
         if rss_news:
             for article in rss_news[:18]:
-                headline = article.get("headline", "No title")
-                source = article.get("source", "Unknown")
+                headline = html.escape(article.get("headline", "No title"))
+                source = html.escape(article.get("source", "Unknown"))
                 link = article.get("link", "#")
-                published = article.get("published", "")
-                st.markdown('<div class="news-item">', unsafe_allow_html=True)
-                st.markdown(f"**{headline}**")
-                st.caption(f"{source} • {published}")
-                st.markdown(f"[Open]({link})")
-                st.markdown("</div>", unsafe_allow_html=True)
+                published = html.escape(article.get("published", ""))
+                st.markdown(
+                    f"""
+                    <div class="news-item">
+                        <div style="font-weight:700;color:#e9eef7;font-size:15px;line-height:1.35;">{headline}</div>
+                        <div style="color:#9da8ba;font-size:12px;margin-top:6px;">{source} • {published}</div>
+                        <div style="margin-top:8px;"><a href="{link}" target="_blank">Open</a></div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
         else:
             st.info("News feed temporarily unavailable")
         st.markdown("</div>", unsafe_allow_html=True)
