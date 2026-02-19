@@ -1431,47 +1431,69 @@ def run_full_app():
                 if not asset_payload:
                     st.info(f"{asset_label}: no data")
                     return
-                d0 = asset_payload.get("data_0dte")
-                if not d0 or "df" not in d0 or d0["df"] is None or d0["df"].empty:
-                    st.info(f"{asset_label}: no 0DTE data")
+                ticker = asset_payload.get("ticker", asset_label)
+                df_raw, etf_price = get_cboe_options(ticker)
+                if df_raw is None or df_raw.empty or not etf_price:
+                    st.info(f"{asset_label}: no options chain")
                     return
 
-                gex_by_strike = (
-                    d0["df"].groupby("strike", as_index=False)["GEX"].sum().sort_values("strike", ascending=False)
+                # Build chart from a wider, display-only strike universe.
+                df_plot = df_raw.copy()
+                df_plot = df_plot[df_plot["open_interest"] > 0].copy()
+                df_plot = df_plot[df_plot["iv"] > 0].copy()
+                low = etf_price * 0.90
+                high = etf_price * 1.10
+                df_plot = df_plot[(df_plot["strike"] >= low) & (df_plot["strike"] <= high)].copy()
+                if df_plot.empty:
+                    st.info(f"{asset_label}: no strikes in display window")
+                    return
+
+                df_plot["GEX"] = df_plot.apply(
+                    lambda x: x["open_interest"] * x["gamma"] * (etf_price ** 2) * 0.01 * (1 if x["type"] == "call" else -1),
+                    axis=1,
                 )
+                gex_by_strike = df_plot.groupby("strike", as_index=False)["GEX"].sum().sort_values("strike", ascending=False)
                 if gex_by_strike.empty:
                     st.info(f"{asset_label}: empty strike map")
                     return
 
-                # Keep a focused strike window around spot so the map looks dense and readable.
-                spot = float(asset_payload.get("etf_price", 0) or 0)
-                if spot > 0:
-                    low = spot * 0.94
-                    high = spot * 1.06
-                    gex_by_strike = gex_by_strike[
-                        (gex_by_strike["strike"] >= low) & (gex_by_strike["strike"] <= high)
-                    ].copy()
-                if gex_by_strike.empty:
-                    st.info(f"{asset_label}: no strikes in display window")
-                    return
+                # Keep the strongest ladders while preserving sorted strike order.
+                if len(gex_by_strike) > 70:
+                    keep_idx = (
+                        gex_by_strike.assign(abs_gex=gex_by_strike["GEX"].abs())
+                        .nlargest(70, "abs_gex")
+                        .index
+                    )
+                    gex_by_strike = gex_by_strike.loc[keep_idx].sort_values("strike", ascending=False)
 
                 z = gex_by_strike["GEX"].to_numpy().reshape(-1, 1)
                 y = [f"{s:.2f}" for s in gex_by_strike["strike"].to_list()]
                 x = [asset_label]
+                max_abs = float(max(1.0, gex_by_strike["GEX"].abs().max()))
 
                 fig = go.Figure(
                     data=go.Heatmap(
                         z=z,
                         x=x,
                         y=y,
-                        colorscale="Viridis",
+                        colorscale=[
+                            [0.00, "#4a1234"],
+                            [0.25, "#2f4f7f"],
+                            [0.50, "#1f2a3a"],
+                            [0.75, "#2fa66f"],
+                            [1.00, "#e8d61a"],
+                        ],
                         reversescale=False,
                         showscale=False,
+                        zmid=0,
+                        zmin=-max_abs,
+                        zmax=max_abs,
                         hovertemplate="Strike %{y}<br>GEX %{z:,.0f}<extra></extra>",
                     )
                 )
 
                 # Mark nearest strike to spot.
+                spot = float(asset_payload.get("etf_price", 0) or etf_price or 0)
                 if spot > 0:
                     nearest_idx = (gex_by_strike["strike"] - spot).abs().idxmin()
                     nearest_strike = float(gex_by_strike.loc[nearest_idx, "strike"])
@@ -1484,7 +1506,7 @@ def run_full_app():
 
                 fig.update_layout(
                     template="plotly_dark" if st.session_state.theme == "dark" else "plotly_white",
-                    height=640,
+                    height=700,
                     margin=dict(l=10, r=10, t=30, b=10),
                     xaxis_title="",
                     yaxis_title="Strike",
