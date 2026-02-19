@@ -845,6 +845,7 @@ def run_full_app():
                     '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧩 Nasdaq Stocks Heat Map</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
                     unsafe_allow_html=True,
                 )
+                st.markdown("**Heatmap Controls**")
                 hc1, hc2, hc3 = st.columns([1.2, 1, 1])
                 with hc1:
                     st.selectbox(
@@ -922,10 +923,17 @@ def run_full_app():
                         ],
                         color_continuous_midpoint=0,
                         custom_data=["price", "change_pct", "pct_label"],
+                        hover_data={
+                            "price": ":,.2f",
+                            "change_pct": ":+.2f",
+                            "size": False,
+                            "sector": False,
+                            "symbol": False,
+                            "pct_label": False,
+                        },
                     )
                     fig.update_traces(
                         texttemplate="<b>%{label}</b><br>%{customdata[2]}",
-                        hovertemplate="<b>%{label}</b><br>Price: %{customdata[0]:,.2f}<br>Change: %{customdata[1]:+.2f}%<extra></extra>",
                         marker_line=dict(width=1, color="#1f2630"),
                         textfont=dict(size=18, color="#e8eef8"),
                         insidetextfont=dict(size=18, color="#e8eef8"),
