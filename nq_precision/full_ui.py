@@ -140,6 +140,18 @@ def _theme_css(bg_color, card_bg, text_color, accent_color, border_color):
         color: #888;
         border: 1px solid {border_color};
     }}
+    .news-rail {{
+        position: sticky;
+        top: 12px;
+        max-height: calc(100vh - 140px);
+        overflow-y: auto;
+        padding-right: 6px;
+    }}
+    .news-item {{
+        border-bottom: 1px solid {border_color};
+        padding-bottom: 10px;
+        margin-bottom: 10px;
+    }}
 </style>
 """,
         unsafe_allow_html=True,
@@ -654,856 +666,192 @@ def run_full_app():
 
     st.markdown("---")
 
-    tab_names = ["📈 Market Overview"]
+    nav_items = ["📈 Market Overview", "🌐 Multi-Asset"]
     if data_0dte:
-        tab_names.append("📊 0DTE Levels")
+        nav_items.append("📊 0DTE Levels")
     if data_weekly:
-        tab_names.append("📊 Weekly Levels")
+        nav_items.append("📊 Weekly Levels")
     if data_monthly:
-        tab_names.append("📊 Monthly Levels")
-    tab_names.extend(["🍞 Daily Bread", "📈 GEX Charts", "⚖️ Delta Charts"])
-    tab_names.insert(1, "🌐 Multi-Asset")
+        nav_items.append("📊 Monthly Levels")
+    nav_items.extend(["🍞 Daily Bread", "📈 GEX Charts", "⚖️ Delta Charts"])
 
-    if tab_names:
-        tabs = st.tabs(tab_names)
-        tab_idx = 0
+    nav_col, center_col, right_col = st.columns([1.1, 5.0, 1.2], gap="small")
 
-        with tabs[tab_idx]:
-            st.subheader("📈 Market Overview")
-            with st.spinner("Loading market data..."):
-                left_col, center_col, right_col = st.columns([1.1, 4.2, 1.7], gap="medium")
+    with nav_col:
+        st.markdown("### Navigation")
+        active_view = st.radio(
+            "Main Views",
+            nav_items,
+            label_visibility="collapsed",
+            key="main_left_nav",
+        )
 
-                with left_col:
-                    st.markdown("### Sections")
-                    section = st.radio(
-                        "Market Overview Sections",
-                        [
-                            "Futures Board",
-                            "Sentiment Signals",
-                            "Level Interaction",
-                            "Top Movers",
-                            "Economic Calendar",
-                        ],
-                        label_visibility="collapsed",
-                        key="market_overview_section",
+    with center_col:
+        st.markdown("### 🎯 Session Quick Glance")
+        q1, q2, q3, q4 = st.columns(4)
+        q1.metric("NQ", f"{nq_now:.2f}", nq_source)
+        if data_0dte:
+            q2.metric("Delta Neutral", f"{data_0dte['dn_nq']:.2f}", f"{(nq_now - data_0dte['dn_nq']):+.0f} pts")
+            q3.metric("Gamma Flip", f"{data_0dte['g_flip_nq']:.2f}", f"{(nq_now - data_0dte['g_flip_nq']):+.0f} pts")
+            q4.metric("Expected Move", f"±{data_0dte['nq_em_full']:.0f}")
+        else:
+            q2.metric("Delta Neutral", "N/A")
+            q3.metric("Gamma Flip", "N/A")
+            q4.metric("Expected Move", "N/A")
+        st.markdown("---")
+
+        if active_view == "📈 Market Overview":
+            st.subheader("Market Overview")
+            if market_data:
+                st.markdown("### Futures & Indices")
+                c1, c2, c3, c4, c5 = st.columns(5)
+                es = market_data.get("es", {})
+                ym = market_data.get("ym", {})
+                rty = market_data.get("rty", {})
+                gc = market_data.get("gc", {})
+                c1.metric("S&P 500 (ES)", f"{es.get('price', 0):.2f}" if es.get("price") else "N/A", f"{es.get('change', 0):+.2f} ({es.get('change_pct', 0):+.2f}%)")
+                c1.caption(f"Source: {es.get('source', 'unknown')} | Age: {get_quote_age_label('ES=F')}")
+                nq_change = nq_now * (nq_day_change_pct / 100)
+                c2.metric("Nasdaq (NQ)", f"{nq_now:.2f}", f"{nq_change:+.2f} ({nq_day_change_pct:+.2f}%)")
+                c2.caption(f"Source: {nq_source} | Age: {get_quote_age_label('NQ=F')}")
+                c3.metric("Dow (YM)", f"{ym.get('price', 0):.2f}" if ym.get("price") else "N/A", f"{ym.get('change', 0):+.2f} ({ym.get('change_pct', 0):+.2f}%)")
+                c3.caption(f"Source: {ym.get('source', 'unknown')} | Age: {get_quote_age_label('YM=F')}")
+                c4.metric("Russell (RTY)", f"{rty.get('price', 0):.2f}" if rty.get("price") else "N/A", f"{rty.get('change', 0):+.2f} ({rty.get('change_pct', 0):+.2f}%)")
+                c4.caption(f"Source: {rty.get('source', 'unknown')} | Age: {get_quote_age_label('RTY=F')}")
+                c5.metric("Gold (GC)", f"{gc.get('price', 0):.2f}" if gc.get("price") else "N/A", f"{gc.get('change', 0):+.2f} ({gc.get('change_pct', 0):+.2f}%)")
+                c5.caption(f"Source: {gc.get('source', 'unknown')} | Age: {get_quote_age_label('GC=F')}")
+                st.markdown("---")
+                st.markdown("### Market Signals")
+                if data_0dte:
+                    st.info(
+                        f"NQ vs Gamma Flip: {nq_now - data_0dte['g_flip_nq']:+.0f} pts | "
+                        f"NQ vs Delta Neutral: {nq_now - data_0dte['dn_nq']:+.0f} pts | "
+                        f"Net Delta: {data_0dte['net_delta']:,.0f}"
                     )
+                if level_interactions_df is not None and not level_interactions_df.empty:
+                    st.dataframe(level_interactions_df, width="stretch", hide_index=True)
 
-                with center_col:
-                    if section == "Futures Board":
-                        if market_data:
-                            st.markdown("### Futures & Indices")
-                            col1, col2, col3, col4, col5 = st.columns(5)
-
-                            if "es" in market_data and market_data["es"]["price"]:
-                                es = market_data["es"]
-                                col1.metric(
-                                    "S&P 500 (ES)",
-                                    f"{es['price']:.2f}",
-                                    f"{es.get('change', 0):+.2f} ({es.get('change_pct', 0):+.2f}%)",
-                                )
-                                col1.caption(
-                                    f"Source: {es.get('source', 'unknown')} | Age: {get_quote_age_label('ES=F')}"
-                                )
-                            else:
-                                col1.metric("S&P 500 (ES)", "N/A")
-
-                            nq_change = nq_now * (nq_day_change_pct / 100)
-                            col2.metric(
-                                "Nasdaq (NQ)",
-                                f"{nq_now:.2f}",
-                                f"{nq_change:+.2f} ({nq_day_change_pct:+.2f}%)",
-                            )
-                            col2.caption(f"Source: {nq_source} | Age: {get_quote_age_label('NQ=F')}")
-
-                            if "ym" in market_data and market_data["ym"]["price"]:
-                                ym = market_data["ym"]
-                                col3.metric(
-                                    "Dow (YM)",
-                                    f"{ym['price']:.2f}",
-                                    f"{ym.get('change', 0):+.2f} ({ym.get('change_pct', 0):+.2f}%)",
-                                )
-                                col3.caption(
-                                    f"Source: {ym.get('source', 'unknown')} | Age: {get_quote_age_label('YM=F')}"
-                                )
-                            else:
-                                col3.metric("Dow (YM)", "N/A")
-
-                            if "rty" in market_data and market_data["rty"]["price"]:
-                                rty = market_data["rty"]
-                                col4.metric(
-                                    "Russell (RTY)",
-                                    f"{rty['price']:.2f}",
-                                    f"{rty.get('change', 0):+.2f} ({rty.get('change_pct', 0):+.2f}%)",
-                                )
-                                col4.caption(
-                                    f"Source: {rty.get('source', 'unknown')} | Age: {get_quote_age_label('RTY=F')}"
-                                )
-                            else:
-                                col4.metric("Russell (RTY)", "N/A")
-
-                            if "gc" in market_data and market_data["gc"]["price"]:
-                                gc = market_data["gc"]
-                                col5.metric(
-                                    "Gold (GC)",
-                                    f"{gc['price']:.2f}",
-                                    f"{gc.get('change', 0):+.2f} ({gc.get('change_pct', 0):+.2f}%)",
-                                )
-                                col5.caption(
-                                    f"Source: {gc.get('source', 'unknown')} | Age: {get_quote_age_label('GC=F')}"
-                                )
-                            else:
-                                col5.metric("Gold (GC)", "N/A")
-
-                            st.markdown("---")
-                            st.markdown("### Market Indicators")
-                            ic1, ic2, ic3 = st.columns(3)
-                            if "vix" in market_data and market_data["vix"]["price"]:
-                                vix = market_data["vix"]
-                                ic1.metric(
-                                    "VIX (Volatility)",
-                                    f"{vix['price']:.2f}",
-                                    f"{vix.get('change', 0):+.2f} ({vix.get('change_pct', 0):+.2f}%)",
-                                )
-                            else:
-                                ic1.metric("VIX (Volatility)", "N/A")
-                            if "10y" in market_data and market_data["10y"]["price"]:
-                                tnx = market_data["10y"]
-                                ic2.metric(
-                                    "10Y Treasury",
-                                    f"{tnx['price']:.2f}%",
-                                    f"{tnx.get('change', 0):+.2f}",
-                                )
-                            else:
-                                ic2.metric("10Y Treasury", "N/A")
-                            if "dxy" in market_data and market_data["dxy"]["price"]:
-                                dxy = market_data["dxy"]
-                                ic3.metric(
-                                    "Dollar Index",
-                                    f"{dxy['price']:.2f}",
-                                    f"{dxy.get('change', 0):+.2f} ({dxy.get('change_pct', 0):+.2f}%)",
-                                )
-                                ic3.caption(
-                                    f"Source: {dxy.get('source', 'unknown')} | Age: {get_quote_age_label('DX=F')}"
-                                )
-                            else:
-                                ic3.metric("Dollar Index", "N/A")
-                        else:
-                            st.warning("Market data temporarily unavailable")
-
-                    if section == "Sentiment Signals":
-                        st.markdown("### Market Sentiment")
-                        s1, s2 = st.columns([1, 3])
-                        with s1:
-                            st.metric("Fear & Greed Index", f"{fg['score']:.0f}", fg["rating"])
-                        with s2:
-                            if data_0dte:
-                                gf_distance = nq_now - data_0dte["g_flip_nq"]
-                                dn_distance = nq_now - data_0dte["dn_nq"]
-                                gamma_state = "Negative Gamma" if gf_distance > 0 else "Positive Gamma"
-                                regime_text = (
-                                    f"Regime: **{gamma_state}** | "
-                                    f"NQ vs Gamma Flip: {gf_distance:+.0f} pts | "
-                                    f"NQ vs Delta Neutral: {dn_distance:+.0f} pts"
-                                )
-                                if gf_distance > 0:
-                                    st.warning(regime_text)
-                                else:
-                                    st.success(regime_text)
-                            else:
-                                st.info("Regime: unavailable (no 0DTE data)")
-
-                            vix = market_data.get("vix", {}).get("price", 0)
-                            dxy_chg = market_data.get("dxy", {}).get("change_pct", 0)
-                            tnx_chg = market_data.get("10y", {}).get("change", 0)
-                            risk_score = 0
-                            if vix >= 20:
-                                risk_score += 2
-                            elif vix >= 16:
-                                risk_score += 1
-                            if dxy_chg > 0.3:
-                                risk_score += 1
-                            if tnx_chg > 0.05:
-                                risk_score += 1
-                            risk_label = (
-                                "High Risk" if risk_score >= 3 else "Moderate Risk" if risk_score >= 2 else "Low Risk"
-                            )
-                            risk_text = (
-                                f"Risk Meter: **{risk_label}** | "
-                                f"VIX {vix:.2f} | DXY {dxy_chg:+.2f}% | 10Y {tnx_chg:+.2f}"
-                            )
-                            if risk_score >= 3:
-                                st.error(risk_text)
-                            elif risk_score >= 2:
-                                st.warning(risk_text)
-                            else:
-                                st.info(risk_text)
-
-                            es_chg = market_data.get("es", {}).get("change_pct", 0)
-                            ym_chg = market_data.get("ym", {}).get("change_pct", 0)
-                            rty_chg = market_data.get("rty", {}).get("change_pct", 0)
-                            divergence_score = (
-                                abs(nq_day_change_pct - es_chg)
-                                + abs(nq_day_change_pct - ym_chg)
-                                + abs(nq_day_change_pct - rty_chg)
-                            ) / 3
-                            divergence_text = (
-                                f"Cross-Asset Divergence: **{divergence_score:.2f}%** | "
-                                f"NQ {nq_day_change_pct:+.2f}% vs ES {es_chg:+.2f}% / YM {ym_chg:+.2f}% / RTY {rty_chg:+.2f}%"
-                            )
-                            if divergence_score >= 1.0:
-                                st.warning(divergence_text)
-                            else:
-                                st.info(divergence_text)
-
-                            if data_0dte:
-                                long_trigger = data_0dte["p_floor"]
-                                short_trigger = data_0dte["p_wall"]
-                                trigger_text = (
-                                    f"Action Triggers: Long reaction zone near **{long_trigger:.2f}** | "
-                                    f"Short reaction zone near **{short_trigger:.2f}** | "
-                                    f"Regime pivot at **{data_0dte['g_flip_nq']:.2f}**"
-                                )
-                                st.info(trigger_text)
-                            else:
-                                st.info("Action Triggers: unavailable (waiting for options levels)")
-
-                    if section == "Level Interaction":
-                        st.markdown("### 🧭 Level Interaction Panel")
-                        if level_interactions_df is not None and not level_interactions_df.empty:
-                            st.dataframe(level_interactions_df, width="stretch", hide_index=True)
-                        else:
-                            st.info("Level interaction data unavailable (requires intraday candles).")
-
-                    if section == "Top Movers":
-                        st.markdown("### Top Movers")
-                        movers = get_top_movers(finnhub_key)
-                        m1, m2 = st.columns(2)
-                        with m1:
-                            st.markdown("**🟢 Top Gainers**")
-                            if movers["gainers"]:
-                                gainers_df = pd.DataFrame(movers["gainers"])
-                                st.dataframe(
-                                    gainers_df[["symbol", "price", "change_pct"]].style.format(
-                                        {"price": "${:.2f}", "change_pct": "{:+.2f}%"}
-                                    ),
-                                    width="stretch",
-                                    hide_index=True,
-                                )
-                            else:
-                                st.info("No data available")
-                        with m2:
-                            st.markdown("**🔴 Top Losers**")
-                            if movers["losers"]:
-                                losers_df = pd.DataFrame(movers["losers"])
-                                st.dataframe(
-                                    losers_df[["symbol", "price", "change_pct"]].style.format(
-                                        {"price": "${:.2f}", "change_pct": "{:+.2f}%"}
-                                    ),
-                                    width="stretch",
-                                    hide_index=True,
-                                )
-                            else:
-                                st.info("No data available")
-
-                    if section == "Economic Calendar":
-                        st.markdown("### 📅 Today's Economic Events")
-                        events = get_economic_calendar(finnhub_key)
-                        if events:
-                            events_data = []
-                            for event in events:
-                                time_str = event.get("time", "")[:10] if event.get("time") else "N/A"
-                                events_data.append(
-                                    {
-                                        "Time": time_str,
-                                        "Event": event.get("event", "Unknown"),
-                                        "Impact": event.get("impact", "N/A"),
-                                        "Country": event.get("country", "US"),
-                                    }
-                                )
-                            events_df = pd.DataFrame(events_data)
-                            st.dataframe(events_df, width="stretch", hide_index=True)
-                        else:
-                            st.info("No major economic events today")
-
-                with right_col:
-                    st.markdown("### 📰 Live News")
-                    rss_news = get_rss_news()
-                    if rss_news:
-                        for article in rss_news[:14]:
-                            headline = article.get("headline", "No title")
-                            source = article.get("source", "Unknown")
-                            link = article.get("link", "#")
-                            published = article.get("published", "")
-                            st.markdown(f"**{headline}**")
-                            st.caption(f"{source} • {published}")
-                            st.markdown(f"[Open]({link})")
-                            st.markdown("---")
-                    else:
-                        st.info("News feed temporarily unavailable")
-
-        tab_idx += 1
-
-        with tabs[tab_idx]:
+        elif active_view == "🌐 Multi-Asset":
             st.subheader("🌐 Multi-Asset Comparison Dashboard")
-            st.caption("Compare GEX levels across all major indices")
-
-            with st.spinner("Loading multi-asset data..."):
-                multi_asset_data = process_multi_asset()
-
+            multi_asset_data = process_multi_asset()
             if multi_asset_data:
-                st.markdown("### 📊 Cross-Asset Key Levels Comparison")
                 comparison_data = []
-
                 for asset_name in ["SPY", "QQQ", "IWM", "DIA"]:
                     if asset_name not in multi_asset_data:
                         continue
-
                     asset = multi_asset_data[asset_name]
                     data_0 = asset.get("data_0dte")
-
-                    if data_0:
-                        futures_price = asset["futures_price"]
-                        dn_distance = futures_price - data_0["dn_nq"]
-                        gf_distance = futures_price - data_0["g_flip_nq"]
-
-                        regime = "🔴 Negative" if gf_distance > 0 else "🟢 Positive"
-
-                        if abs(dn_distance) > (futures_price * 0.008):
-                            bias = "⬇️ Short" if dn_distance > 0 else "⬆️ Long"
-                        else:
-                            bias = "⚖️ Neutral"
-
-                        comparison_data.append(
-                            {
-                                "Index": f"{asset['name']} ({asset_name})",
-                                "Futures Price": f"{futures_price:,.2f}",
-                                "Delta Neutral": f"{data_0['dn_nq']:,.2f}",
-                                "DN Distance": f"{dn_distance:+.0f}",
-                                "Gamma Flip": f"{data_0['g_flip_nq']:,.2f}",
-                                "Regime": regime,
-                                "Bias": bias,
-                                "Net Delta": f"{data_0['net_delta']:,.0f}",
-                            }
-                        )
-
-                if comparison_data:
-                    st.dataframe(
-                        pd.DataFrame(comparison_data), width="stretch", hide_index=True
-                    )
-
-                st.markdown("---")
-                st.markdown("### 📈 Individual Asset Details")
-                cols = st.columns(2)
-
-                for idx, asset_name in enumerate(["SPY", "QQQ", "IWM", "DIA"]):
-                    if asset_name not in multi_asset_data:
+                    if not data_0:
                         continue
-
-                    asset = multi_asset_data[asset_name]
-                    data_0 = asset.get("data_0dte")
-
-                    with cols[idx % 2]:
-                        st.markdown(f"#### {asset['name']} ({asset_name})")
-
-                        if data_0:
-                            c1, c2, c3 = st.columns(3)
-
-                            c1.metric(
-                                "Futures Price",
-                                f"{asset['futures_price']:,.2f}",
-                                f"Ratio: {asset['ratio']:.4f}",
-                            )
-                            c2.metric(
-                                "Delta Neutral",
-                                f"{data_0['dn_nq']:,.2f}",
-                                f"{asset['futures_price'] - data_0['dn_nq']:+.0f} pts",
-                            )
-                            c3.metric(
-                                "Gamma Flip",
-                                f"{data_0['g_flip_nq']:,.2f}",
-                                "🟢 Pos"
-                                if asset["futures_price"] < data_0["g_flip_nq"]
-                                else "🔴 Neg",
-                            )
-
-                            levels_data = {
-                                "Level": [
-                                    "Primary Wall",
-                                    "Primary Floor",
-                                    "Expected Move",
-                                ],
-                                "Price": [
-                                    f"{data_0['p_wall']:,.2f}",
-                                    f"{data_0['p_floor']:,.2f}",
-                                    f"±{data_0['nq_em_full']:,.0f}",
-                                ],
-                            }
-
-                            st.dataframe(
-                                pd.DataFrame(levels_data), hide_index=True, width="stretch"
-                            )
-                        else:
-                            st.info(f"No 0DTE data available for {asset_name}")
-
+                    futures_price = asset["futures_price"]
+                    comparison_data.append(
+                        {
+                            "Index": f"{asset['name']} ({asset_name})",
+                            "Futures Price": f"{futures_price:,.2f}",
+                            "Delta Neutral": f"{data_0['dn_nq']:,.2f}",
+                            "Gamma Flip": f"{data_0['g_flip_nq']:,.2f}",
+                            "Net Delta": f"{data_0['net_delta']:,.0f}",
+                        }
+                    )
+                if comparison_data:
+                    st.dataframe(pd.DataFrame(comparison_data), width="stretch", hide_index=True)
             else:
                 st.error("Could not load multi-asset data")
 
-        tab_idx += 1
+        elif active_view in {"📊 0DTE Levels", "📊 Weekly Levels", "📊 Monthly Levels"}:
+            view_map = {
+                "📊 0DTE Levels": ("0DTE", data_0dte, exp_0dte),
+                "📊 Weekly Levels": ("Weekly", data_weekly, exp_weekly),
+                "📊 Monthly Levels": ("Monthly", data_monthly, exp_monthly),
+            }
+            label, selected_data, selected_exp = view_map[active_view]
+            if selected_data and selected_exp:
+                st.subheader(f"{label} Analysis - {selected_exp.strftime('%Y-%m-%d')}")
+                d1, d2, d3, d4 = st.columns(4)
+                d1.metric("Delta Neutral", f"{selected_data['dn_nq']:.2f}")
+                d2.metric("Gamma Flip", f"{selected_data['g_flip_nq']:.2f}")
+                d3.metric("Net Delta", f"{selected_data['net_delta']:,.0f}")
+                d4.metric("Expected Move", f"±{selected_data['nq_em_full']:.0f}")
+                results_df = pd.DataFrame(selected_data["results"], columns=["Level", "Price", "Width", "Icon"])
+                st.dataframe(results_df[["Icon", "Level", "Price", "Width"]], width="stretch", hide_index=True)
+            else:
+                st.info("No data available for this timeframe.")
 
-        if data_0dte:
-            with tabs[tab_idx]:
-                st.subheader(f"0DTE Analysis - {exp_0dte.strftime('%Y-%m-%d')}")
-
-                col1, col2, col3, col4 = st.columns(4)
-                col1.metric("Delta Neutral", f"{data_0dte['dn_nq']:.2f}")
-                col2.metric("Gamma Flip", f"{data_0dte['g_flip_nq']:.2f}")
-                col3.metric(
-                    "Net Delta",
-                    f"{data_0dte['net_delta']:,.0f}",
-                    "🟢 Bull" if data_0dte["net_delta"] > 0 else "🔴 Bear",
-                )
-                col4.metric("Expected Move", f"±{data_0dte['nq_em_full']:.0f}")
-
-                results_df = pd.DataFrame(
-                    data_0dte["results"], columns=["Level", "Price", "Width", "Icon"]
-                )
-                results_df["Price"] = results_df["Price"].round(2)
-                st.dataframe(
-                    results_df[["Icon", "Level", "Price", "Width"]].style.format(
-                        {"Price": "{:.2f}", "Width": "{:.1f}"}
-                    ),
-                    width="stretch",
-                    height=500,
-                    hide_index=True,
-                )
-
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown("**🔴 Top Call Strikes**")
-                    st.dataframe(
-                        data_0dte["calls"][
-                            ["strike", "GEX", "delta", "open_interest", "volume"]
-                        ].head(5),
-                        width="stretch",
-                        hide_index=True,
-                    )
-                with col2:
-                    st.markdown("**🟢 Top Put Strikes**")
-                    st.dataframe(
-                        data_0dte["puts"][
-                            ["strike", "GEX", "delta", "open_interest", "volume"]
-                        ].head(5),
-                        width="stretch",
-                        hide_index=True,
-                    )
-            tab_idx += 1
-
-        if data_weekly:
-            with tabs[tab_idx]:
-                st.subheader(f"Weekly Analysis - {exp_weekly.strftime('%Y-%m-%d')}")
-
-                col1, col2, col3, col4 = st.columns(4)
-                col1.metric("Delta Neutral", f"{data_weekly['dn_nq']:.2f}")
-                col2.metric("Gamma Flip", f"{data_weekly['g_flip_nq']:.2f}")
-                col3.metric(
-                    "Net Delta",
-                    f"{data_weekly['net_delta']:,.0f}",
-                    "🟢 Bull" if data_weekly["net_delta"] > 0 else "🔴 Bear",
-                )
-                col4.metric("Expected Move", f"±{data_weekly['nq_em_full']:.0f}")
-
-                results_df = pd.DataFrame(
-                    data_weekly["results"], columns=["Level", "Price", "Width", "Icon"]
-                )
-                results_df["Price"] = results_df["Price"].round(2)
-                st.dataframe(
-                    results_df[["Icon", "Level", "Price", "Width"]].style.format(
-                        {"Price": "{:.2f}", "Width": "{:.1f}"}
-                    ),
-                    width="stretch",
-                    height=500,
-                    hide_index=True,
-                )
-
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown("**🔴 Top Call Strikes**")
-                    st.dataframe(
-                        data_weekly["calls"][
-                            ["strike", "GEX", "delta", "open_interest", "volume"]
-                        ].head(5),
-                        width="stretch",
-                        hide_index=True,
-                    )
-                with col2:
-                    st.markdown("**🟢 Top Put Strikes**")
-                    st.dataframe(
-                        data_weekly["puts"][
-                            ["strike", "GEX", "delta", "open_interest", "volume"]
-                        ].head(5),
-                        width="stretch",
-                        hide_index=True,
-                    )
-            tab_idx += 1
-
-        if data_monthly:
-            with tabs[tab_idx]:
-                st.subheader(f"Monthly Analysis - {exp_monthly.strftime('%Y-%m-%d')}")
-
-                col1, col2, col3, col4 = st.columns(4)
-                col1.metric("Delta Neutral", f"{data_monthly['dn_nq']:.2f}")
-                col2.metric("Gamma Flip", f"{data_monthly['g_flip_nq']:.2f}")
-                col3.metric(
-                    "Net Delta",
-                    f"{data_monthly['net_delta']:,.0f}",
-                    "🟢 Bull" if data_monthly["net_delta"] > 0 else "🔴 Bear",
-                )
-                col4.metric("Expected Move", f"±{data_monthly['nq_em_full']:.0f}")
-
-                results_df = pd.DataFrame(
-                    data_monthly["results"], columns=["Level", "Price", "Width", "Icon"]
-                )
-                results_df["Price"] = results_df["Price"].round(2)
-                st.dataframe(
-                    results_df[["Icon", "Level", "Price", "Width"]].style.format(
-                        {"Price": "{:.2f}", "Width": "{:.1f}"}
-                    ),
-                    width="stretch",
-                    height=500,
-                    hide_index=True,
-                )
-
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown("**🔴 Top Call Strikes**")
-                    st.dataframe(
-                        data_monthly["calls"][
-                            ["strike", "GEX", "delta", "open_interest", "volume"]
-                        ].head(5),
-                        width="stretch",
-                        hide_index=True,
-                    )
-                with col2:
-                    st.markdown("**🟢 Top Put Strikes**")
-                    st.dataframe(
-                        data_monthly["puts"][
-                            ["strike", "GEX", "delta", "open_interest", "volume"]
-                        ].head(5),
-                        width="stretch",
-                        hide_index=True,
-                    )
-            tab_idx += 1
-
-        with tabs[tab_idx]:
-            st.markdown("# 🍞 DAILY BREAD")
-            st.markdown(
-                f"**Your NQ Market Intelligence Report** • {datetime.now().strftime('%A, %B %d, %Y')}"
-            )
-
+        elif active_view == "🍞 Daily Bread":
+            st.subheader("🍞 Daily Bread")
             if data_0dte:
                 events = get_economic_calendar(finnhub_key)
                 news = get_rss_news()
-                daily_bread = generate_daily_bread(
-                    data_0dte,
-                    data_weekly,
-                    nq_now,
-                    market_data,
-                    fg,
-                    events,
-                    news,
-                )
-
+                daily_bread = generate_daily_bread(data_0dte, data_weekly, nq_now, market_data, fg, events, news)
                 st.markdown(f"**{daily_bread.get('session', '')}**")
                 st.caption(daily_bread.get("timestamp", ""))
-                st.markdown("---")
-
-                tone = daily_bread.get("tone", "NEUTRAL")
-                if tone == "BEARISH":
-                    st.error(daily_bread.get("summary", ""))
-                elif tone == "RANGE-BOUND":
-                    st.success(daily_bread.get("summary", ""))
-                else:
-                    st.info(daily_bread.get("summary", ""))
-
-                with st.expander("📊 Key Levels", expanded=False):
+                st.markdown(daily_bread.get("summary", ""))
+                with st.expander("Key Levels"):
                     st.markdown(daily_bread.get("levels", ""))
-
-                with st.expander("📈 Market Drivers", expanded=False):
+                with st.expander("Market Drivers"):
                     st.markdown(daily_bread.get("drivers", ""))
-
-                with st.expander("💼 Trading Strategy", expanded=False):
+                with st.expander("Trading Strategy"):
                     st.markdown(daily_bread.get("strategy", ""))
-
-                with st.expander("🔮 Tomorrow's Watch List", expanded=False):
+                with st.expander("Tomorrow Watch List"):
                     st.markdown(daily_bread.get("watch_list", ""))
             else:
                 st.info("No 0DTE data available for Daily Bread analysis")
 
-            st.markdown("---")
-            st.caption(
-                "⚠️ Daily Bread is generated from live options market data and should not be considered financial advice. Always manage risk appropriately."
-            )
-
-        tab_idx += 1
-
-        with tabs[tab_idx]:
-            st.subheader("📈 GEX by Strike - All Timeframes")
-
-            if data_0dte:
-                st.markdown("**0DTE**")
-                gex_by_strike = data_0dte["df"].groupby("strike")["GEX"].sum().reset_index()
+        elif active_view == "📈 GEX Charts":
+            st.subheader("📈 GEX by Strike")
+            for name, selected_data in [("0DTE", data_0dte), ("Weekly", data_weekly), ("Monthly", data_monthly)]:
+                if not selected_data:
+                    continue
+                st.markdown(f"**{name}**")
+                gex_by_strike = selected_data["df"].groupby("strike")["GEX"].sum().reset_index()
                 fig = go.Figure()
                 pos_gex = gex_by_strike[gex_by_strike["GEX"] > 0]
                 neg_gex = gex_by_strike[gex_by_strike["GEX"] < 0]
-                fig.add_trace(
-                    go.Bar(
-                        x=pos_gex["strike"],
-                        y=pos_gex["GEX"],
-                        name="Calls",
-                        marker_color="#FF4444",
-                    )
-                )
-                fig.add_trace(
-                    go.Bar(
-                        x=neg_gex["strike"],
-                        y=neg_gex["GEX"],
-                        name="Puts",
-                        marker_color="#44FF44",
-                    )
-                )
-                fig.add_vline(
-                    x=qqq_price,
-                    line_dash="dash",
-                    line_color="#00D9FF",
-                    annotation_text="Current",
-                )
-                fig.update_layout(
-                    template="plotly_dark"
-                    if st.session_state.theme == "dark"
-                    else "plotly_white",
-                    plot_bgcolor="#0E1117"
-                    if st.session_state.theme == "dark"
-                    else "#FFFFFF",
-                    paper_bgcolor="#0E1117"
-                    if st.session_state.theme == "dark"
-                    else "#FFFFFF",
-                    height=400,
-                    showlegend=True,
-                )
+                fig.add_trace(go.Bar(x=pos_gex["strike"], y=pos_gex["GEX"], name="Calls", marker_color="#FF4444"))
+                fig.add_trace(go.Bar(x=neg_gex["strike"], y=neg_gex["GEX"], name="Puts", marker_color="#44FF44"))
+                fig.add_vline(x=qqq_price, line_dash="dash", line_color="#00D9FF", annotation_text="Current")
+                fig.update_layout(template="plotly_dark" if st.session_state.theme == "dark" else "plotly_white", height=360)
                 st.plotly_chart(fig, use_container_width=True)
 
-            if data_weekly:
-                st.markdown("**Weekly**")
-                gex_by_strike = data_weekly["df"].groupby("strike")["GEX"].sum().reset_index()
-                fig = go.Figure()
-                pos_gex = gex_by_strike[gex_by_strike["GEX"] > 0]
-                neg_gex = gex_by_strike[gex_by_strike["GEX"] < 0]
-                fig.add_trace(
-                    go.Bar(
-                        x=pos_gex["strike"],
-                        y=pos_gex["GEX"],
-                        name="Calls",
-                        marker_color="#FF4444",
-                    )
-                )
-                fig.add_trace(
-                    go.Bar(
-                        x=neg_gex["strike"],
-                        y=neg_gex["GEX"],
-                        name="Puts",
-                        marker_color="#44FF44",
-                    )
-                )
-                fig.add_vline(
-                    x=qqq_price,
-                    line_dash="dash",
-                    line_color="#00D9FF",
-                    annotation_text="Current",
-                )
-                fig.update_layout(
-                    template="plotly_dark"
-                    if st.session_state.theme == "dark"
-                    else "plotly_white",
-                    plot_bgcolor="#0E1117"
-                    if st.session_state.theme == "dark"
-                    else "#FFFFFF",
-                    paper_bgcolor="#0E1117"
-                    if st.session_state.theme == "dark"
-                    else "#FFFFFF",
-                    height=400,
-                    showlegend=True,
-                )
-                st.plotly_chart(fig, use_container_width=True)
-
-            if data_monthly:
-                st.markdown("**Monthly**")
-                gex_by_strike = (
-                    data_monthly["df"].groupby("strike")["GEX"].sum().reset_index()
-                )
-                fig = go.Figure()
-                pos_gex = gex_by_strike[gex_by_strike["GEX"] > 0]
-                neg_gex = gex_by_strike[gex_by_strike["GEX"] < 0]
-                fig.add_trace(
-                    go.Bar(
-                        x=pos_gex["strike"],
-                        y=pos_gex["GEX"],
-                        name="Calls",
-                        marker_color="#FF4444",
-                    )
-                )
-                fig.add_trace(
-                    go.Bar(
-                        x=neg_gex["strike"],
-                        y=neg_gex["GEX"],
-                        name="Puts",
-                        marker_color="#44FF44",
-                    )
-                )
-                fig.add_vline(
-                    x=qqq_price,
-                    line_dash="dash",
-                    line_color="#00D9FF",
-                    annotation_text="Current",
-                )
-                fig.update_layout(
-                    template="plotly_dark"
-                    if st.session_state.theme == "dark"
-                    else "plotly_white",
-                    plot_bgcolor="#0E1117"
-                    if st.session_state.theme == "dark"
-                    else "#FFFFFF",
-                    paper_bgcolor="#0E1117"
-                    if st.session_state.theme == "dark"
-                    else "#FFFFFF",
-                    height=400,
-                    showlegend=True,
-                )
-                st.plotly_chart(fig, use_container_width=True)
-
-        tab_idx += 1
-
-        with tabs[tab_idx]:
-            st.subheader("⚖️ Cumulative Delta - All Timeframes")
-
-            if data_0dte:
-                st.markdown("**0DTE**")
+        elif active_view == "⚖️ Delta Charts":
+            st.subheader("⚖️ Cumulative Delta")
+            for name, selected_data in [("0DTE", data_0dte), ("Weekly", data_weekly), ("Monthly", data_monthly)]:
+                if not selected_data:
+                    continue
+                st.markdown(f"**{name}**")
                 fig = go.Figure()
                 fig.add_trace(
                     go.Scatter(
-                        x=data_0dte["strike_delta"]["strike"],
-                        y=data_0dte["strike_delta"]["cumulative_delta"],
+                        x=selected_data["strike_delta"]["strike"],
+                        y=selected_data["strike_delta"]["cumulative_delta"],
                         mode="lines",
-                        name="Cumulative Delta",
                         line=dict(color="#00D9FF", width=3),
                         fill="tozeroy",
                     )
                 )
                 fig.add_hline(y=0, line_dash="dash", line_color="white")
-                fig.add_vline(
-                    x=data_0dte["dn_strike"],
-                    line_dash="dot",
-                    line_color="#FFD700",
-                    annotation_text="Delta Neutral",
-                )
-                fig.add_vline(
-                    x=qqq_price,
-                    line_dash="dash",
-                    line_color="#FF4444",
-                    annotation_text="Current",
-                )
-                fig.update_layout(
-                    template="plotly_dark"
-                    if st.session_state.theme == "dark"
-                    else "plotly_white",
-                    plot_bgcolor="#0E1117"
-                    if st.session_state.theme == "dark"
-                    else "#FFFFFF",
-                    paper_bgcolor="#0E1117"
-                    if st.session_state.theme == "dark"
-                    else "#FFFFFF",
-                    height=400,
-                )
+                fig.add_vline(x=selected_data["dn_strike"], line_dash="dot", line_color="#FFD700", annotation_text="Delta Neutral")
+                fig.update_layout(template="plotly_dark" if st.session_state.theme == "dark" else "plotly_white", height=360)
                 st.plotly_chart(fig, use_container_width=True)
 
-            if data_weekly:
-                st.markdown("**Weekly**")
-                fig = go.Figure()
-                fig.add_trace(
-                    go.Scatter(
-                        x=data_weekly["strike_delta"]["strike"],
-                        y=data_weekly["strike_delta"]["cumulative_delta"],
-                        mode="lines",
-                        name="Cumulative Delta",
-                        line=dict(color="#00D9FF", width=3),
-                        fill="tozeroy",
-                    )
-                )
-                fig.add_hline(y=0, line_dash="dash", line_color="white")
-                fig.add_vline(
-                    x=data_weekly["dn_strike"],
-                    line_dash="dot",
-                    line_color="#FFD700",
-                    annotation_text="Delta Neutral",
-                )
-                fig.add_vline(
-                    x=qqq_price,
-                    line_dash="dash",
-                    line_color="#FF4444",
-                    annotation_text="Current",
-                )
-                fig.update_layout(
-                    template="plotly_dark"
-                    if st.session_state.theme == "dark"
-                    else "plotly_white",
-                    plot_bgcolor="#0E1117"
-                    if st.session_state.theme == "dark"
-                    else "#FFFFFF",
-                    paper_bgcolor="#0E1117"
-                    if st.session_state.theme == "dark"
-                    else "#FFFFFF",
-                    height=400,
-                )
-                st.plotly_chart(fig, use_container_width=True)
-
-            if data_monthly:
-                st.markdown("**Monthly**")
-                fig = go.Figure()
-                fig.add_trace(
-                    go.Scatter(
-                        x=data_monthly["strike_delta"]["strike"],
-                        y=data_monthly["strike_delta"]["cumulative_delta"],
-                        mode="lines",
-                        name="Cumulative Delta",
-                        line=dict(color="#00D9FF", width=3),
-                        fill="tozeroy",
-                    )
-                )
-                fig.add_hline(y=0, line_dash="dash", line_color="white")
-                fig.add_vline(
-                    x=data_monthly["dn_strike"],
-                    line_dash="dot",
-                    line_color="#FFD700",
-                    annotation_text="Delta Neutral",
-                )
-                fig.add_vline(
-                    x=qqq_price,
-                    line_dash="dash",
-                    line_color="#FF4444",
-                    annotation_text="Current",
-                )
-                fig.update_layout(
-                    template="plotly_dark"
-                    if st.session_state.theme == "dark"
-                    else "plotly_white",
-                    plot_bgcolor="#0E1117"
-                    if st.session_state.theme == "dark"
-                    else "#FFFFFF",
-                    paper_bgcolor="#0E1117"
-                    if st.session_state.theme == "dark"
-                    else "#FFFFFF",
-                    height=400,
-                )
-                st.plotly_chart(fig, use_container_width=True)
+    with right_col:
+        st.markdown("### Top News")
+        rss_news = get_rss_news()
+        st.markdown('<div class="news-rail">', unsafe_allow_html=True)
+        if rss_news:
+            for article in rss_news[:20]:
+                headline = article.get("headline", "No title")
+                source = article.get("source", "Unknown")
+                link = article.get("link", "#")
+                published = article.get("published", "")
+                st.markdown('<div class="news-item">', unsafe_allow_html=True)
+                st.markdown(f"**{headline}**")
+                st.caption(f"{source} • {published}")
+                st.markdown(f"[Open]({link})")
+                st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            st.info("News feed temporarily unavailable")
+        st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("---")
     st.caption(f"Updated: {datetime.now().strftime('%H:%M:%S')} | CBOE • {nq_source}")
