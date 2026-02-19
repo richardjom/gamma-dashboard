@@ -1521,7 +1521,6 @@ def run_full_app():
                 y = gex_by_strike["strike"].astype(float).to_list()
                 x = [asset_label]
                 max_abs = float(max(1.0, gex_by_strike["GEX"].abs().max()))
-                cell_text = [[_fmt_notional(v)] for v in gex_by_strike["GEX"].to_list()]
 
                 fig = go.Figure(
                     data=go.Heatmap(
@@ -1540,9 +1539,6 @@ def run_full_app():
                         zmid=0,
                         zmin=-max_abs,
                         zmax=max_abs,
-                        text=cell_text,
-                        texttemplate="%{text}",
-                        textfont={"size": 12, "color": "#eaf1ff"},
                         hovertemplate="Strike %{y:.2f}<br>GEX %{z:,.0f}<extra></extra>",
                     )
                 )
@@ -1566,6 +1562,36 @@ def run_full_app():
                         yanchor="bottom",
                         font=dict(size=10, color="#dfe6f3"),
                         bgcolor="rgba(12,18,28,0.65)",
+                    )
+
+                # Right-side value ladder text, with adaptive density to avoid overlap.
+                label_df = gex_by_strike.copy()
+                if len(label_df) > 42:
+                    key_abs = (
+                        label_df.assign(abs_gex=label_df["GEX"].abs())
+                        .nlargest(24, "abs_gex")[["strike", "GEX"]]
+                    )
+                    if spot > 0:
+                        key_spot = (
+                            label_df.assign(spot_dist=(label_df["strike"] - spot).abs())
+                            .nsmallest(14, "spot_dist")[["strike", "GEX"]]
+                        )
+                        label_df = pd.concat([key_abs, key_spot], ignore_index=True).drop_duplicates(subset=["strike"])
+                    else:
+                        label_df = key_abs
+                    label_df = label_df.sort_values("strike", ascending=False)
+
+                for _, row in label_df.iterrows():
+                    fig.add_annotation(
+                        x=0.985,
+                        xref="paper",
+                        y=float(row["strike"]),
+                        yref="y",
+                        text=_fmt_notional(row["GEX"]),
+                        showarrow=False,
+                        xanchor="right",
+                        yanchor="middle",
+                        font=dict(size=10, color="#dbe6f7"),
                     )
 
                 fig.update_layout(
