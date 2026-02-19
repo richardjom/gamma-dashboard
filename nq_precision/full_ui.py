@@ -87,48 +87,50 @@ def _theme_css(bg_color, card_bg, text_color, accent_color, border_color):
     .terminal-body {{
         padding: 10px;
     }}
-    .ticker-strip {{
+    .futures-strip {{
         display: grid;
-        grid-template-columns: repeat(8, minmax(88px, 1fr));
-        gap: 6px;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 10px;
+        margin-bottom: 10px;
     }}
-    .ticker-box {{
-        border: 1px solid #3c2f2b;
-        border-radius: 4px;
-        padding: 6px;
-        background: linear-gradient(180deg, #291f20 0%, #1a1619 100%);
+    .future-card {{
+        border: 1px solid #2f3d53;
+        border-radius: 12px;
+        padding: 12px 14px;
+        background: linear-gradient(100deg, #1a212d 0%, #121a24 100%);
+        min-height: 112px;
     }}
-    .ticker-box.green {{
-        border-color: #275c3b;
-        background: linear-gradient(180deg, #1f2a20 0%, #171d18 100%);
-    }}
-    .ticker-symbol {{
-        font-size: 11px;
-        color: #f0f3f8;
-        font-weight: 700;
+    .future-title {{
+        color: #9aa8bc;
+        font-size: 13px;
+        line-height: 1.1;
         margin: 0;
-    }}
-    .ticker-change {{
-        font-size: 11px;
-        margin-top: 3px;
-    }}
-    .heat-strip {{
-        display: grid;
-        grid-template-columns: repeat(8, minmax(88px, 1fr));
-        gap: 6px;
-        margin-top: 8px;
-    }}
-    .heat-cell {{
-        border-radius: 4px;
-        padding: 6px;
-        border: 1px solid #2d3641;
-        font-size: 10px;
-        color: #e8edf6;
         font-weight: 700;
-        text-align: center;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+    }}
+    .future-value {{
+        color: #3ad7ff;
+        font-size: 40px;
+        line-height: 1.15;
+        margin: 7px 0 9px 0;
+        font-weight: 800;
+        letter-spacing: 0.2px;
+    }}
+    .future-badge {{
+        display: inline-block;
+        border-radius: 999px;
+        padding: 4px 10px;
+        font-size: 14px;
+        font-weight: 700;
+    }}
+    .future-badge.pos {{
+        background: rgba(33, 166, 95, 0.25);
+        color: #54f09b;
+        border: 1px solid #2b8b5b;
+    }}
+    .future-badge.neg {{
+        background: rgba(191, 61, 61, 0.25);
+        color: #ff7676;
+        border: 1px solid #8b3e3e;
     }}
     .left-nav-shell {{
         background: linear-gradient(180deg, #161c25 0%, #10161f 100%);
@@ -599,36 +601,34 @@ def run_full_app():
         active_view = _render_left_nav(nav_sections)
 
     with center_col:
-        tape_rows = [
-            ("NQ", nq_day_change_pct),
-            ("ES", market_data.get("es", {}).get("change_pct", 0)),
-            ("YM", market_data.get("ym", {}).get("change_pct", 0)),
-            ("RTY", market_data.get("rty", {}).get("change_pct", 0)),
-            ("GC", market_data.get("gc", {}).get("change_pct", 0)),
-            ("VIX", market_data.get("vix", {}).get("change_pct", 0)),
-            ("DXY", market_data.get("dxy", {}).get("change_pct", 0)),
-            ("10Y", market_data.get("10y", {}).get("change_pct", 0)),
+        es = market_data.get("es", {})
+        ym = market_data.get("ym", {})
+        rty = market_data.get("rty", {})
+        gc = market_data.get("gc", {})
+
+        futures_cards = [
+            ("S&P 500 (ES)", es.get("price", 0), es.get("change", 0), es.get("change_pct", 0)),
+            ("NASDAQ (NQ)", nq_now, nq_now * (nq_day_change_pct / 100), nq_day_change_pct),
+            ("DOW (YM)", ym.get("price", 0), ym.get("change", 0), ym.get("change_pct", 0)),
+            ("RUSSELL (RTY)", rty.get("price", 0), rty.get("change", 0), rty.get("change_pct", 0)),
+            ("GOLD (GC)", gc.get("price", 0), gc.get("change", 0), gc.get("change_pct", 0)),
         ]
-        tape_html = [
-            '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📡 Market Tape</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body"><div class="ticker-strip">'
-        ]
-        for sym, chg in tape_rows:
-            cls = "green" if chg >= 0 else ""
-            color = "#58f5a1" if chg >= 0 else "#ff6969"
-            tape_html.append(
-                f'<div class="ticker-box {cls}"><p class="ticker-symbol">{sym}</p><p class="ticker-change" style="color:{color};">{chg:+.2f}%</p></div>'
+        strip_html = ['<div class="futures-strip">']
+        for name, px, chg, pct in futures_cards:
+            is_pos = (chg or 0) >= 0
+            badge_cls = "pos" if is_pos else "neg"
+            arrow = "↑" if is_pos else "↓"
+            strip_html.append(
+                f"""
+                <div class="future-card">
+                    <p class="future-title">{name}</p>
+                    <p class="future-value">{px:,.2f}</p>
+                    <span class="future-badge {badge_cls}">{arrow} {chg:+.2f} ({pct:+.2f}%)</span>
+                </div>
+                """
             )
-        tape_html.append("</div><div class=\"heat-strip\">")
-        for sym, chg in tape_rows:
-            strength = min(abs(chg) / 2.0, 1.0)
-            alpha = 0.16 + 0.40 * strength
-            bg = f"rgba(67, 245, 162, {alpha:.2f})" if chg >= 0 else f"rgba(255, 77, 77, {alpha:.2f})"
-            border = "#2d6e45" if chg >= 0 else "#6e2d2d"
-            tape_html.append(
-                f'<div class="heat-cell" style="background:{bg}; border-color:{border};">{sym} {chg:+.2f}%</div>'
-            )
-        tape_html.append("</div></div></div>")
-        st.markdown("".join(tape_html), unsafe_allow_html=True)
+        strip_html.append("</div>")
+        st.markdown("".join(strip_html), unsafe_allow_html=True)
 
         if active_view == "📈 Market Overview":
             if data_0dte:
