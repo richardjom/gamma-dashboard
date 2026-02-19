@@ -1076,7 +1076,13 @@ def run_full_app():
                 d3.metric("Net Delta", f"{selected_data['net_delta']:,.0f}")
                 d4.metric("Expected Move", f"±{selected_data['nq_em_full']:.0f}")
                 results_df = pd.DataFrame(selected_data["results"], columns=["Level", "Price", "Width", "Icon"])
-                st.dataframe(results_df[["Icon", "Level", "Price", "Width"]], width="stretch", hide_index=True)
+                table_height = max(300, min(650, 52 + (len(results_df) + 1) * 35))
+                st.dataframe(
+                    results_df[["Icon", "Level", "Price", "Width"]],
+                    width="stretch",
+                    hide_index=True,
+                    height=table_height,
+                )
             else:
                 st.info("No data available for this timeframe.")
 
