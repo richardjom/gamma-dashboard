@@ -1300,10 +1300,10 @@ def run_full_app():
                 detail = get_earnings_detail(symbol, finnhub_key)
                 st.markdown(f"### {detail.get('name', symbol)} ({symbol})")
                 c1, c2 = st.columns(2)
-                px = detail.get("price")
+                price_val = detail.get("price")
                 chg = detail.get("change")
                 dp = detail.get("change_pct")
-                c1.metric("Price", f"${px:,.2f}" if px not in (None, "") else "N/A")
+                c1.metric("Price", f"${price_val:,.2f}" if price_val not in (None, "") else "N/A")
                 c2.metric(
                     "Change",
                     f"{chg:+.2f}" if chg not in (None, "") else "N/A",
