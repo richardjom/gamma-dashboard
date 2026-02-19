@@ -560,12 +560,31 @@ def _parse_event_dt_et(raw_value):
         return None
     et = ZoneInfo("America/New_York")
     dt = None
+    # Unix timestamp support.
     try:
-        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if s.isdigit():
+            ts = int(s)
+            if ts > 10**12:
+                ts = ts / 1000.0
+            dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+    except Exception:
+        dt = None
+    try:
+        if dt is None:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
     except Exception:
         pass
     if dt is None:
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        for fmt in (
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%Y-%m-%d",
+            "%Y-%m-%dT%H:%M:%S",
+            "%Y-%m-%dT%H:%M",
+            "%m/%d/%Y %H:%M:%S",
+            "%m/%d/%Y %H:%M",
+            "%m/%d/%Y",
+        ):
             try:
                 dt = datetime.strptime(s, fmt)
                 break
@@ -602,33 +621,58 @@ def get_economic_calendar_window(finnhub_key, days=3):
             calendar = client.economic_calendar(_from=str(start), to=str(end))
         except Exception:
             calendar = client.economic_calendar()
-        events = calendar.get("economicCalendar", [])
+        if isinstance(calendar, dict):
+            events = (
+                calendar.get("economicCalendar")
+                or calendar.get("calendar")
+                or calendar.get("events")
+                or []
+            )
+        elif isinstance(calendar, list):
+            events = calendar
+        else:
+            events = []
     except Exception:
         events = []
 
     for e in events:
         try:
-            event_dt = _parse_event_dt_et(e.get("time"))
+            # Try multiple potential fields from different providers/shapes.
+            event_dt = (
+                _parse_event_dt_et(e.get("time"))
+                or _parse_event_dt_et(e.get("datetime"))
+                or _parse_event_dt_et(e.get("dateTime"))
+                or _parse_event_dt_et(e.get("releaseDate"))
+            )
             if event_dt is None:
                 date_raw = str(e.get("date", "")).strip()
                 if date_raw:
-                    try:
-                        event_dt = datetime.strptime(date_raw, "%Y-%m-%d").replace(tzinfo=et)
-                    except Exception:
+                    parsed = pd.to_datetime(date_raw, errors="coerce")
+                    if pd.isna(parsed):
                         continue
+                    event_dt = parsed.to_pydatetime()
+                    if event_dt.tzinfo is None:
+                        event_dt = event_dt.replace(tzinfo=et)
+                    else:
+                        event_dt = event_dt.astimezone(et)
                 else:
                     continue
             if not (start <= event_dt.date() <= end):
                 continue
+            expected_val = e.get("estimate")
+            if expected_val is None:
+                expected_val = e.get("forecast")
+            if expected_val is None:
+                expected_val = e.get("consensus")
             items.append(
                 {
-                    "event": e.get("event", "Unknown"),
+                    "event": e.get("event") or e.get("indicator") or e.get("name") or "Unknown",
                     "country": e.get("country", "US"),
                     "impact": _normalize_impact(e.get("impact")),
                     "actual": e.get("actual"),
-                    "expected": e.get("estimate") if e.get("estimate") is not None else e.get("forecast"),
-                    "prior": e.get("prev"),
-                    "for_period": e.get("period"),
+                    "expected": expected_val,
+                    "prior": e.get("prev") if e.get("prev") is not None else e.get("previous"),
+                    "for_period": e.get("period") if e.get("period") is not None else e.get("for"),
                     "time_et": event_dt.strftime("%I:%M %p").lstrip("0"),
                     "date_et": event_dt.date().isoformat(),
                     "event_dt_iso": event_dt.isoformat(),
