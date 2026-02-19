@@ -1457,6 +1457,17 @@ def run_full_app():
             multi_asset_data = process_multi_asset()
 
             def _render_gex_heatmap(asset_label, asset_payload):
+                def _fmt_notional(v):
+                    av = abs(float(v))
+                    sign = "-" if float(v) < 0 else ""
+                    if av >= 1_000_000_000:
+                        return f"{sign}${av/1_000_000_000:.1f}B"
+                    if av >= 1_000_000:
+                        return f"{sign}${av/1_000_000:.1f}M"
+                    if av >= 1_000:
+                        return f"{sign}${av/1_000:.1f}K"
+                    return f"{sign}${av:,.0f}"
+
                 if not asset_payload:
                     st.info(f"{asset_label}: no data")
                     return
@@ -1510,6 +1521,7 @@ def run_full_app():
                 y = gex_by_strike["strike"].astype(float).to_list()
                 x = [asset_label]
                 max_abs = float(max(1.0, gex_by_strike["GEX"].abs().max()))
+                cell_text = [[_fmt_notional(v)] for v in gex_by_strike["GEX"].to_list()]
 
                 fig = go.Figure(
                     data=go.Heatmap(
@@ -1517,17 +1529,20 @@ def run_full_app():
                         x=x,
                         y=y,
                         colorscale=[
-                            [0.00, "#4a1234"],
-                            [0.25, "#2f4f7f"],
-                            [0.50, "#1f2a3a"],
-                            [0.75, "#2fa66f"],
-                            [1.00, "#e8d61a"],
+                            [0.00, "#4c1049"],
+                            [0.18, "#283c66"],
+                            [0.50, "#1a2432"],
+                            [0.78, "#2fae74"],
+                            [1.00, "#f0dc1f"],
                         ],
                         reversescale=False,
                         showscale=False,
                         zmid=0,
                         zmin=-max_abs,
                         zmax=max_abs,
+                        text=cell_text,
+                        texttemplate="%{text}",
+                        textfont={"size": 12, "color": "#eaf1ff"},
                         hovertemplate="Strike %{y:.2f}<br>GEX %{z:,.0f}<extra></extra>",
                     )
                 )
