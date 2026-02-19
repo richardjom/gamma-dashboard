@@ -624,6 +624,64 @@ def _pick_first_present(row, keys):
     return None
 
 
+def _normalize_event_key(event_name):
+    s = re.sub(r"[^a-z0-9 ]+", " ", str(event_name or "").lower())
+    tokens = [t for t in s.split() if t]
+    stop = {
+        "mom",
+        "yoy",
+        "qoq",
+        "mm",
+        "yy",
+        "index",
+        "rate",
+        "final",
+        "prel",
+        "preliminary",
+        "adv",
+        "nsa",
+        "sa",
+    }
+    filtered = [t for t in tokens if t not in stop]
+    if not filtered:
+        filtered = tokens
+    return " ".join(filtered[:6]).strip()
+
+
+def _time_bucket_key(time_et):
+    s = str(time_et or "").strip()
+    if not s or s.lower() == "time tba":
+        return "TBA"
+    try:
+        dt = datetime.strptime(s, "%I:%M %p")
+        mins = dt.hour * 60 + dt.minute
+        bucket = (mins // 15) * 15
+        return str(bucket)
+    except Exception:
+        return "TBA"
+
+
+def _coalesce_economic_rows(df):
+    if df is None or df.empty:
+        return df
+    rows = []
+    for _, g in df.groupby(["date_et", "country", "event_key", "time_bucket"], dropna=False):
+        g = g.sort_values(
+            ["quality_score", "has_actual", "has_expected", "has_prior", "source_rank"],
+            ascending=[False, False, False, False, True],
+        )
+        base = g.iloc[0].to_dict()
+        for field in ["actual", "expected", "prior", "for_period"]:
+            if _is_missing_value(base.get(field)):
+                for _, row in g.iterrows():
+                    v = row.get(field)
+                    if not _is_missing_value(v):
+                        base[field] = v
+                        break
+        rows.append(base)
+    return pd.DataFrame(rows)
+
+
 def _fetch_forexfactory_calendar(start_date, end_date):
     items = []
     et = ZoneInfo("America/New_York")
@@ -1211,7 +1269,14 @@ def get_economic_calendar_window(finnhub_key, days=3):
     df["has_expected"] = df["expected"].map(lambda v: 0 if _is_missing_value(v) else 1)
     df["has_prior"] = df["prior"].map(lambda v: 0 if _is_missing_value(v) else 1)
     df["quality_score"] = (df["has_actual"] * 4) + (df["has_expected"] * 2) + df["has_prior"]
+    df["event_key"] = df["event"].map(_normalize_event_key)
+    df["time_bucket"] = df["time_et"].map(_time_bucket_key)
 
+    df = df.sort_values(
+        ["date_et", "event_dt_iso", "event", "country", "quality_score", "source_rank"],
+        ascending=[True, True, True, True, False, True],
+    )
+    df = _coalesce_economic_rows(df)
     df = df.sort_values(
         ["date_et", "event_dt_iso", "event", "country", "quality_score", "source_rank"],
         ascending=[True, True, True, True, False, True],

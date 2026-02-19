@@ -1264,7 +1264,6 @@ def run_full_app():
         elif active_view == "🗓 Economic Calendar":
             st.subheader("🗓 Economic Calendar")
             st.caption("Week view (next 7 days, ET). High impact = red, medium = orange/yellow.")
-            _render_external_econ_widget()
 
             econ_df = get_economic_calendar_window(finnhub_key, days=7)
             raw_counts = st.session_state.get("econ_source_counts_raw", {})
