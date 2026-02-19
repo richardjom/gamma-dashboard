@@ -10,6 +10,7 @@ import pandas as pd
 import requests
 import streamlit as st
 import yfinance as yf
+from bs4 import BeautifulSoup
 
 
 SCHWAB_TOKEN_URL = "https://api.schwabapi.com/v1/oauth/token"
@@ -1007,6 +1008,215 @@ def get_rss_news():
 
     all_news.sort(key=lambda x: x.get("published_ts", 0), reverse=True)
     return all_news[:60]
+
+
+def _earnings_time_bucket(value):
+    if value is None:
+        return "Time TBA"
+    s = str(value).strip().lower()
+    if s in {"bmo", "before", "beforeopen", "before open"}:
+        return "Before Open"
+    if s in {"amc", "after", "afterclose", "after close"}:
+        return "After Close"
+    return "Time TBA"
+
+
+def _extract_earnings_whispers_calendar():
+    # Best-effort scraper; may return [] if markup changes or blocked.
+    url = "https://www.earningswhispers.com/calendar"
+    rows = []
+    try:
+        res = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        if res.status_code != 200:
+            return rows
+        soup = BeautifulSoup(res.text, "html.parser")
+        # Common fallback: any ticker-like anchors/cards.
+        for node in soup.select("[data-symbol], a[href*='/stocks/']")[:120]:
+            sym = (node.get("data-symbol") or node.get_text(" ", strip=True) or "").upper()
+            sym = re.sub(r"[^A-Z.]", "", sym)
+            if not (1 <= len(sym) <= 6):
+                continue
+            rows.append(
+                {
+                    "symbol": sym,
+                    "date": datetime.now().date().isoformat(),
+                    "time": "Time TBA",
+                    "eps_estimate": None,
+                    "eps_actual": None,
+                    "revenue_estimate": None,
+                    "revenue_actual": None,
+                    "source": "EarningsWhispers",
+                }
+            )
+    except Exception:
+        return []
+    dedup = {(r["symbol"], r["date"], r["time"]): r for r in rows}
+    return list(dedup.values())[:50]
+
+
+def _extract_earnings_hub_calendar():
+    # Best-effort scraper; may return [] if markup changes or blocked.
+    candidates = [
+        "https://www.earningshub.com/calendar",
+        "https://earningshub.com/calendar",
+    ]
+    rows = []
+    for url in candidates:
+        try:
+            res = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+            if res.status_code != 200:
+                continue
+            soup = BeautifulSoup(res.text, "html.parser")
+            for node in soup.select("[data-symbol], a[href*='ticker'], a[href*='/stock/']")[:120]:
+                sym = (node.get("data-symbol") or node.get_text(" ", strip=True) or "").upper()
+                sym = re.sub(r"[^A-Z.]", "", sym)
+                if not (1 <= len(sym) <= 6):
+                    continue
+                rows.append(
+                    {
+                        "symbol": sym,
+                        "date": datetime.now().date().isoformat(),
+                        "time": "Time TBA",
+                        "eps_estimate": None,
+                        "eps_actual": None,
+                        "revenue_estimate": None,
+                        "revenue_actual": None,
+                        "source": "EarningsHub",
+                    }
+                )
+            if rows:
+                break
+        except Exception:
+            continue
+    dedup = {(r["symbol"], r["date"], r["time"]): r for r in rows}
+    return list(dedup.values())[:50]
+
+
+@st.cache_data(ttl=600)
+def get_earnings_calendar_multi(finnhub_key, days=5):
+    et = ZoneInfo("America/New_York")
+    start_date = datetime.now(et).date()
+    end_date = (datetime.now(et) + pd.Timedelta(days=days)).date()
+    rows = []
+
+    # Source 1: Finnhub earnings calendar
+    try:
+        client = finnhub.Client(api_key=finnhub_key)
+        cal = client.earnings_calendar(_from=str(start_date), to=str(end_date), symbol="", international=False)
+        for e in cal.get("earningsCalendar", []):
+            sym = (e.get("symbol") or "").upper().strip()
+            if not sym:
+                continue
+            rows.append(
+                {
+                    "symbol": sym,
+                    "date": str(e.get("date", ""))[:10],
+                    "time": _earnings_time_bucket(e.get("hour") or e.get("time")),
+                    "eps_estimate": e.get("epsEstimate"),
+                    "eps_actual": e.get("epsActual"),
+                    "revenue_estimate": e.get("revenueEstimate"),
+                    "revenue_actual": e.get("revenueActual"),
+                    "source": "Finnhub",
+                }
+            )
+    except Exception:
+        pass
+
+    # Source 2: EarningsWhispers (best effort)
+    try:
+        rows.extend(_extract_earnings_whispers_calendar())
+    except Exception:
+        pass
+
+    # Source 3: EarningsHub (best effort)
+    try:
+        rows.extend(_extract_earnings_hub_calendar())
+    except Exception:
+        pass
+
+    if not rows:
+        return pd.DataFrame(columns=[
+            "symbol", "date", "time", "eps_estimate", "eps_actual", "revenue_estimate", "revenue_actual", "source"
+        ])
+
+    df = pd.DataFrame(rows)
+    df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.date
+    df = df.dropna(subset=["date", "symbol"])
+    df = df[(df["date"] >= start_date) & (df["date"] <= end_date)]
+    df["time"] = df["time"].fillna("Time TBA")
+
+    # Prefer Finnhub when duplicates exist.
+    source_rank = {"Finnhub": 0, "EarningsWhispers": 1, "EarningsHub": 2}
+    df["source_rank"] = df["source"].map(lambda s: source_rank.get(s, 99))
+    df = (
+        df.sort_values(["date", "symbol", "source_rank"])
+        .drop_duplicates(subset=["date", "symbol"], keep="first")
+        .sort_values(["date", "time", "symbol"])
+    )
+    df = df.drop(columns=["source_rank"], errors="ignore")
+    return df.reset_index(drop=True)
+
+
+@st.cache_data(ttl=600)
+def get_earnings_detail(symbol, finnhub_key):
+    detail = {
+        "symbol": symbol.upper(),
+        "name": symbol.upper(),
+        "price": None,
+        "change": None,
+        "change_pct": None,
+        "market_cap": None,
+        "industry": None,
+        "next_earnings": None,
+        "history": [],
+    }
+    sym = detail["symbol"]
+
+    try:
+        client = finnhub.Client(api_key=finnhub_key)
+        q = client.quote(sym)
+        detail["price"] = q.get("c")
+        detail["change"] = q.get("d")
+        detail["change_pct"] = q.get("dp")
+    except Exception:
+        pass
+
+    try:
+        client = finnhub.Client(api_key=finnhub_key)
+        p = client.company_profile2(symbol=sym)
+        detail["name"] = p.get("name") or detail["name"]
+        detail["market_cap"] = p.get("marketCapitalization")
+        detail["industry"] = p.get("finnhubIndustry")
+    except Exception:
+        pass
+
+    try:
+        t = yf.Ticker(sym)
+        ed = t.get_earnings_dates(limit=6)
+        if ed is not None and not ed.empty:
+            idx = ed.index
+            if len(idx) > 0:
+                next_dt = idx[0]
+                try:
+                    next_dt = next_dt.tz_convert("America/New_York") if next_dt.tzinfo else next_dt
+                except Exception:
+                    pass
+                detail["next_earnings"] = str(next_dt)
+            hist_rows = []
+            for _, r in ed.head(6).reset_index().iterrows():
+                hist_rows.append(
+                    {
+                        "date": str(r.iloc[0])[:19],
+                        "eps_estimate": r.get("EPS Estimate"),
+                        "eps_reported": r.get("Reported EPS"),
+                        "surprise_pct": r.get("Surprise(%)"),
+                    }
+                )
+            detail["history"] = hist_rows
+    except Exception:
+        pass
+
+    return detail
 
 
 @st.cache_data(ttl=14400)

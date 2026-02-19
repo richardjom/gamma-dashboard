@@ -1,5 +1,5 @@
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import html
 
 import pandas as pd
@@ -13,6 +13,8 @@ from nq_precision.full_data import (
     exchange_schwab_auth_code,
     generate_daily_bread,
     get_cboe_options,
+    get_earnings_calendar_multi,
+    get_earnings_detail,
     get_economic_calendar,
     get_expirations_by_type,
     get_fear_greed_index,
@@ -395,6 +397,36 @@ def _theme_css(bg_color, card_bg, text_color, accent_color, border_color, compac
         gap: 8px;
         margin-top: 8px;
     }}
+    .earn-day-title {{
+        font-size: 14px;
+        color: #dbe4f2;
+        font-weight: 700;
+        margin-bottom: 6px;
+    }}
+    .earn-time-title {{
+        font-size: 11px;
+        color: #9ea9bc;
+        text-transform: uppercase;
+        font-weight: 700;
+        margin: 8px 0 6px 0;
+    }}
+    .earn-card {{
+        border: 1px solid #2f3947;
+        background: linear-gradient(180deg, #171f2b 0%, #131a24 100%);
+        border-radius: 8px;
+        padding: 8px;
+        margin-bottom: 8px;
+    }}
+    .earn-card .sym {{
+        color: #f0f4fb;
+        font-weight: 800;
+        font-size: 14px;
+    }}
+    .earn-card .meta {{
+        color: #9ba8ba;
+        font-size: 11px;
+        margin-top: 2px;
+    }}
     .skeleton-box {{
         border: 1px solid #2f3947;
         border-radius: 10px;
@@ -715,6 +747,7 @@ def run_full_app():
         "Workspace": [
             ("🏠 Overview", "📈 Market Overview"),
             ("🌐 Multi-Asset", "🌐 Multi-Asset"),
+            ("📅 Earnings Calendar", "📅 Earnings Calendar"),
         ],
         "Resources": [],
         "Analytics": [
@@ -1140,6 +1173,64 @@ def run_full_app():
             else:
                 st.info("No data available for this timeframe.")
 
+        elif active_view == "📅 Earnings Calendar":
+            st.subheader("📅 Earnings Calendar")
+            earnings_df = get_earnings_calendar_multi(finnhub_key, days=5)
+            if earnings_df is None or earnings_df.empty:
+                st.info("No earnings found for this window.")
+            else:
+                et_today = datetime.now().date()
+                day_list = [et_today + timedelta(days=i) for i in range(5)]
+                cols = st.columns(5)
+                for i, day in enumerate(day_list):
+                    with cols[i]:
+                        st.markdown(
+                            f'<div class="earn-day-title">{day.strftime("%a %b %d")}</div>',
+                            unsafe_allow_html=True,
+                        )
+                        day_df = earnings_df[earnings_df["date"] == day].copy()
+                        for bucket in ["Before Open", "After Close", "Time TBA"]:
+                            bucket_df = day_df[day_df["time"] == bucket].copy()
+                            if bucket_df.empty:
+                                continue
+                            st.markdown(
+                                f'<div class="earn-time-title">{bucket}</div>',
+                                unsafe_allow_html=True,
+                            )
+                            for _, row in bucket_df.head(12).iterrows():
+                                eps_est = row.get("eps_estimate")
+                                rev_est = row.get("revenue_estimate")
+                                eps_txt = f"EPS est: {eps_est:.2f}" if pd.notna(eps_est) else "EPS est: n/a"
+                                rev_txt = (
+                                    f"Rev est: {float(rev_est)/1_000_000:.0f}M"
+                                    if pd.notna(rev_est)
+                                    else "Rev est: n/a"
+                                )
+                                st.markdown(
+                                    f"""
+                                    <div class="earn-card">
+                                        <div class="sym">{row['symbol']}</div>
+                                        <div class="meta">{eps_txt} • {rev_txt}</div>
+                                        <div class="meta">{row.get('source', 'Source n/a')}</div>
+                                    </div>
+                                    """,
+                                    unsafe_allow_html=True,
+                                )
+                                if st.button(
+                                    f"View {row['symbol']}",
+                                    key=f"earn_view_{row['symbol']}_{row['date']}_{row['time']}",
+                                    use_container_width=True,
+                                ):
+                                    st.session_state.selected_earnings = {
+                                        "symbol": row["symbol"],
+                                        "date": str(row["date"]),
+                                        "time": row["time"],
+                                        "source": row.get("source", ""),
+                                        "eps_estimate": row.get("eps_estimate"),
+                                        "revenue_estimate": row.get("revenue_estimate"),
+                                    }
+                                    st.rerun()
+
         elif active_view == "🍞 Daily Bread":
             st.subheader("🍞 Daily Bread")
             if data_0dte:
@@ -1198,33 +1289,72 @@ def run_full_app():
                 st.plotly_chart(fig, use_container_width=True)
 
     with right_col:
-        st.markdown(
-            '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📰 Live News Feed</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
-            unsafe_allow_html=True,
-        )
-        rss_news = get_rss_news()
-        st.markdown('<div class="news-rail-title">Headlines</div>', unsafe_allow_html=True)
-        st.markdown('<div class="news-rail">', unsafe_allow_html=True)
-        if rss_news:
-            for article in rss_news[:32]:
-                headline = html.escape(article.get("headline", "No title"))
-                source = html.escape(article.get("source", "Unknown"))
-                link = article.get("link", "#")
-                published = html.escape(article.get("published", ""))
-                st.markdown(
-                    f"""
-                    <div class="news-item">
-                        <div style="font-weight:700;color:#e9eef7;font-size:15px;line-height:1.35;">{headline}</div>
-                        <div style="color:#9da8ba;font-size:12px;margin-top:6px;">{source} • {published}</div>
-                        <div style="margin-top:8px;"><a href="{link}" target="_blank">Open</a></div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
+        if active_view == "📅 Earnings Calendar":
+            st.markdown(
+                '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📊 Earnings Detail</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+                unsafe_allow_html=True,
+            )
+            selected = st.session_state.get("selected_earnings")
+            if selected and selected.get("symbol"):
+                symbol = selected["symbol"]
+                detail = get_earnings_detail(symbol, finnhub_key)
+                st.markdown(f"### {detail.get('name', symbol)} ({symbol})")
+                c1, c2 = st.columns(2)
+                px = detail.get("price")
+                chg = detail.get("change")
+                dp = detail.get("change_pct")
+                c1.metric("Price", f"${px:,.2f}" if px not in (None, "") else "N/A")
+                c2.metric(
+                    "Change",
+                    f"{chg:+.2f}" if chg not in (None, "") else "N/A",
+                    f"{dp:+.2f}%" if dp not in (None, "") else None,
                 )
+                st.caption(
+                    f"Date: {selected.get('date', 'N/A')} • {selected.get('time', 'Time TBA')} • Source: {selected.get('source', 'N/A')}"
+                )
+                st.markdown(
+                    f"Industry: `{detail.get('industry', 'N/A')}`  \n"
+                    f"Market Cap: `{detail.get('market_cap', 'N/A')}`  \n"
+                    f"Next Earnings: `{detail.get('next_earnings', 'N/A')}`"
+                )
+                hist = detail.get("history", [])
+                if hist:
+                    hist_df = pd.DataFrame(hist)
+                    st.markdown("**Recent Earnings History**")
+                    st.dataframe(hist_df, width="stretch", hide_index=True)
+                else:
+                    st.info("No earnings history available.")
+            else:
+                st.info("Select an earnings card from the calendar to view details here.")
+            st.markdown("</div></div>", unsafe_allow_html=True)
         else:
-            st.info("News feed temporarily unavailable")
-        st.markdown("</div>", unsafe_allow_html=True)
-        st.markdown("</div></div>", unsafe_allow_html=True)
+            st.markdown(
+                '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📰 Live News Feed</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+                unsafe_allow_html=True,
+            )
+            rss_news = get_rss_news()
+            st.markdown('<div class="news-rail-title">Headlines</div>', unsafe_allow_html=True)
+            st.markdown('<div class="news-rail">', unsafe_allow_html=True)
+            if rss_news:
+                for article in rss_news[:32]:
+                    headline = html.escape(article.get("headline", "No title"))
+                    source = html.escape(article.get("source", "Unknown"))
+                    link = article.get("link", "#")
+                    published = html.escape(article.get("published", ""))
+                    st.markdown(
+                        f"""
+                        <div class="news-item">
+                            <div style="font-weight:700;color:#e9eef7;font-size:15px;line-height:1.35;">{headline}</div>
+                            <div style="color:#9da8ba;font-size:12px;margin-top:6px;">{source} • {published}</div>
+                            <div style="margin-top:8px;"><a href="{link}" target="_blank">Open</a></div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+            else:
+                st.info("News feed temporarily unavailable")
+            st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown("</div></div>", unsafe_allow_html=True)
 
     st.markdown("---")
     st.caption(f"Updated: {datetime.now().strftime('%H:%M:%S')} | CBOE • {nq_source}")
