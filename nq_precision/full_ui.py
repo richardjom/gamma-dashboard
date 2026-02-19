@@ -731,6 +731,8 @@ def run_full_app():
                 )
                 heatmap_df = get_nasdaq_heatmap_data()
                 if heatmap_df is not None and not heatmap_df.empty:
+                    heatmap_df = heatmap_df.copy()
+                    heatmap_df["pct_label"] = heatmap_df["change_pct"].map(lambda x: f"{x:+.2f}%")
                     fig = px.treemap(
                         heatmap_df,
                         path=["sector", "symbol"],
@@ -744,20 +746,26 @@ def run_full_app():
                             [1.0, "#2dc46c"],
                         ],
                         color_continuous_midpoint=0,
-                        custom_data=["price", "change_pct"],
+                        custom_data=["price", "change_pct", "pct_label"],
                     )
                     fig.update_traces(
-                        texttemplate="<b>%{label}</b><br>%{customdata[1]:+.2f}%",
+                        texttemplate="<b>%{label}</b><br>%{customdata[2]}",
                         hovertemplate="<b>%{label}</b><br>Price: %{customdata[0]:,.2f}<br>Change: %{customdata[1]:+.2f}%<extra></extra>",
                         marker_line=dict(width=1, color="#1f2630"),
+                        textfont=dict(size=18, color="#e8eef8"),
+                        insidetextfont=dict(size=18, color="#e8eef8"),
+                        textposition="middle center",
                     )
                     fig.update_layout(
                         template="plotly_dark" if st.session_state.theme == "dark" else "plotly_white",
                         height=390,
                         margin=dict(l=8, r=8, t=8, b=8),
                         coloraxis_showscale=False,
+                        uniformtext=dict(minsize=12, mode="hide"),
+                        coloraxis=dict(cmin=-4, cmax=4),
                     )
                     st.plotly_chart(fig, use_container_width=True)
+                    st.caption("Tile color scale clipped to +/-4% for readability.")
                 else:
                     st.info("Heat map data is temporarily unavailable.")
                 st.markdown("</div></div>", unsafe_allow_html=True)
