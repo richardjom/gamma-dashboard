@@ -406,8 +406,7 @@ def get_runtime_health():
     return checks
 
 
-@st.cache_data(ttl=14400)
-def get_cboe_options(ticker="QQQ"):
+def _fetch_cboe_options_raw(ticker="QQQ"):
     try:
         url = f"https://cdn.cboe.com/api/global/delayed_quotes/options/{ticker}.json"
         headers = {"User-Agent": "Mozilla/5.0"}
@@ -439,6 +438,17 @@ def get_cboe_options(ticker="QQQ"):
     except Exception as e:
         st.error(f"CBOE fetch failed: {e}")
         return None, None
+
+
+@st.cache_data(ttl=14400)
+def get_cboe_options(ticker="QQQ"):
+    return _fetch_cboe_options_raw(ticker)
+
+
+@st.cache_data(ttl=45)
+def get_cboe_options_live(ticker="QQQ"):
+    """Short TTL fetch for chart tabs that need fresher ladders."""
+    return _fetch_cboe_options_raw(ticker)
 
 
 @st.cache_data(ttl=10)

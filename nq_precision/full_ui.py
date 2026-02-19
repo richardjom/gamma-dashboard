@@ -15,6 +15,7 @@ from nq_precision.full_data import (
     exchange_schwab_auth_code,
     generate_daily_bread,
     get_cboe_options,
+    get_cboe_options_live,
     get_earnings_calendar_multi,
     get_earnings_detail,
     get_economic_calendar,
@@ -1425,6 +1426,34 @@ def run_full_app():
             st.subheader("📈 Trinity-Style Dealer Exposure")
             st.caption("Two-panel horizontal GEX map for SPY and QQQ (0DTE). Monthly view removed.")
 
+            g1, g2, g3 = st.columns(3)
+            with g1:
+                strike_window_pct = st.slider(
+                    "Strike Window (%)",
+                    min_value=3,
+                    max_value=20,
+                    value=10,
+                    step=1,
+                    key="gex_window_pct",
+                )
+            with g2:
+                max_rows = st.slider(
+                    "Ladder Rows",
+                    min_value=20,
+                    max_value=120,
+                    value=70,
+                    step=5,
+                    key="gex_max_rows",
+                )
+            with g3:
+                row_mode = st.selectbox(
+                    "Row Selection",
+                    options=["Top |GEX|", "Nearest Spot"],
+                    index=0,
+                    key="gex_row_mode",
+                )
+            st.caption("GEX panel updates on each app refresh cycle (uses short cache TTL).")
+
             multi_asset_data = process_multi_asset()
 
             def _render_gex_heatmap(asset_label, asset_payload):
@@ -1432,7 +1461,7 @@ def run_full_app():
                     st.info(f"{asset_label}: no data")
                     return
                 ticker = asset_payload.get("ticker", asset_label)
-                df_raw, etf_price = get_cboe_options(ticker)
+                df_raw, etf_price = get_cboe_options_live(ticker)
                 if df_raw is None or df_raw.empty or not etf_price:
                     st.info(f"{asset_label}: no options chain")
                     return
@@ -1441,8 +1470,9 @@ def run_full_app():
                 df_plot = df_raw.copy()
                 df_plot = df_plot[df_plot["open_interest"] > 0].copy()
                 df_plot = df_plot[df_plot["iv"] > 0].copy()
-                low = etf_price * 0.90
-                high = etf_price * 1.10
+                window = strike_window_pct / 100.0
+                low = etf_price * (1.0 - window)
+                high = etf_price * (1.0 + window)
                 df_plot = df_plot[(df_plot["strike"] >= low) & (df_plot["strike"] <= high)].copy()
                 if df_plot.empty:
                     st.info(f"{asset_label}: no strikes in display window")
@@ -1457,13 +1487,22 @@ def run_full_app():
                     st.info(f"{asset_label}: empty strike map")
                     return
 
-                # Keep the strongest ladders while preserving sorted strike order.
-                if len(gex_by_strike) > 70:
-                    keep_idx = (
-                        gex_by_strike.assign(abs_gex=gex_by_strike["GEX"].abs())
-                        .nlargest(70, "abs_gex")
-                        .index
-                    )
+                spot = float(asset_payload.get("etf_price", 0) or etf_price or 0)
+
+                # Keep the strongest ladders or rows nearest spot.
+                if len(gex_by_strike) > max_rows:
+                    if row_mode == "Nearest Spot" and spot > 0:
+                        keep_idx = (
+                            gex_by_strike.assign(spot_dist=(gex_by_strike["strike"] - spot).abs())
+                            .nsmallest(max_rows, "spot_dist")
+                            .index
+                        )
+                    else:
+                        keep_idx = (
+                            gex_by_strike.assign(abs_gex=gex_by_strike["GEX"].abs())
+                            .nlargest(max_rows, "abs_gex")
+                            .index
+                        )
                     gex_by_strike = gex_by_strike.loc[keep_idx].sort_values("strike", ascending=False)
 
                 z = gex_by_strike["GEX"].to_numpy().reshape(-1, 1)
@@ -1493,7 +1532,6 @@ def run_full_app():
                 )
 
                 # Mark nearest strike to spot.
-                spot = float(asset_payload.get("etf_price", 0) or etf_price or 0)
                 if spot > 0:
                     nearest_idx = (gex_by_strike["strike"] - spot).abs().idxmin()
                     nearest_strike = float(gex_by_strike.loc[nearest_idx, "strike"])
