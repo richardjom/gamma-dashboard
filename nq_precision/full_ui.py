@@ -134,7 +134,7 @@ def _theme_css(bg_color, card_bg, text_color, accent_color, border_color):
         background: linear-gradient(180deg, #161c25 0%, #10161f 100%);
         border: 1px solid #2d3641;
         border-radius: 8px;
-        padding: 8px;
+        padding: 10px 8px;
     }}
     .left-nav-title {{
         font-size: 11px;
@@ -142,22 +142,49 @@ def _theme_css(bg_color, card_bg, text_color, accent_color, border_color):
         letter-spacing: 0.35px;
         text-transform: uppercase;
         font-weight: 700;
-        margin-bottom: 6px;
+        margin-bottom: 10px;
     }}
-    .stRadio [role="radiogroup"] {{
-        gap: 4px;
+    .left-nav-section {{
+        font-size: 10px;
+        color: #7f8ba0;
+        letter-spacing: 0.25px;
+        text-transform: uppercase;
+        font-weight: 700;
+        margin: 10px 4px 5px 4px;
     }}
-    .stRadio label {{
-        background: #141a23;
-        border: 1px solid #2d3642;
+    .left-nav-shell .stButton > button {{
+        background: transparent;
+        border: 1px solid transparent;
         border-radius: 6px;
-        padding: 6px 8px;
-        margin: 0 !important;
+        color: #b8c2d2;
+        text-align: left;
+        justify-content: flex-start;
+        font-weight: 600;
+        font-size: 15px;
+        padding: 8px 10px;
+        min-height: 40px;
     }}
-    .stRadio label:has(input:checked) {{
-        border-color: #ff7a1a;
-        box-shadow: inset 0 0 0 1px #ff7a1a;
-        background: linear-gradient(180deg, #25202a 0%, #1a1820 100%);
+    .left-nav-shell .stButton > button:hover {{
+        border-color: #2f3946;
+        background: #18202c;
+        color: #f1f5fb;
+    }}
+    .nav-item {{
+        border: 1px solid transparent;
+        border-radius: 10px;
+        color: #b8c2d2;
+        font-weight: 600;
+        font-size: 15px;
+        padding: 8px 10px;
+        min-height: 40px;
+        display: flex;
+        align-items: center;
+    }}
+    .nav-item.active {{
+        border-color: #2f3946;
+        background: linear-gradient(180deg, #2a3240 0%, #1f2733 100%);
+        color: #f1f5fb;
+        box-shadow: inset 0 0 0 1px #394657;
     }}
     .stMetric {{
         background: linear-gradient(180deg, #1a1f26 0%, #141920 100%);
@@ -328,6 +355,28 @@ def _build_level_interactions(nq_data, data_0dte):
             }
         )
     return pd.DataFrame(interactions)
+
+
+def _render_left_nav(nav_sections):
+    if "main_left_nav" not in st.session_state:
+        first_section = next(iter(nav_sections.values()))
+        st.session_state.main_left_nav = first_section[0][1]
+
+    st.markdown('<div class="left-nav-shell">', unsafe_allow_html=True)
+    st.markdown('<div class="left-nav-title">Workspace</div>', unsafe_allow_html=True)
+
+    for section_name, items in nav_sections.items():
+        st.markdown(f'<div class="left-nav-section">{section_name}</div>', unsafe_allow_html=True)
+        for label, value in items:
+            if st.session_state.main_left_nav == value:
+                st.markdown(f'<div class="nav-item active">{label}</div>', unsafe_allow_html=True)
+            else:
+                if st.button(label, key=f"nav_{value}", use_container_width=True):
+                    st.session_state.main_left_nav = value
+                    st.rerun()
+
+    st.markdown("</div>", unsafe_allow_html=True)
+    return st.session_state.main_left_nav
 
 
 def run_full_app():
@@ -525,27 +574,29 @@ def run_full_app():
         if nq_data is not None and not nq_data.empty:
             level_interactions_df = _build_level_interactions(nq_data, data_0dte)
 
-    nav_items = ["📈 Market Overview", "🌐 Multi-Asset"]
+    nav_sections = {
+        "Workspace": [
+            ("🏠 Overview", "📈 Market Overview"),
+            ("🌐 Multi-Asset", "🌐 Multi-Asset"),
+        ],
+        "Resources": [],
+        "Analytics": [
+            ("🍞 Daily Bread", "🍞 Daily Bread"),
+            ("📈 GEX Charts", "📈 GEX Charts"),
+            ("⚖️ Delta Charts", "⚖️ Delta Charts"),
+        ],
+    }
     if data_0dte:
-        nav_items.append("📊 0DTE Levels")
+        nav_sections["Resources"].append(("📊 0DTE Levels", "📊 0DTE Levels"))
     if data_weekly:
-        nav_items.append("📊 Weekly Levels")
+        nav_sections["Resources"].append(("📊 Weekly Levels", "📊 Weekly Levels"))
     if data_monthly:
-        nav_items.append("📊 Monthly Levels")
-    nav_items.extend(["🍞 Daily Bread", "📈 GEX Charts", "⚖️ Delta Charts"])
+        nav_sections["Resources"].append(("📊 Monthly Levels", "📊 Monthly Levels"))
 
     nav_col, center_col, right_col = st.columns([0.95, 5.35, 0.9], gap="small")
 
     with nav_col:
-        st.markdown('<div class="left-nav-shell">', unsafe_allow_html=True)
-        st.markdown('<div class="left-nav-title">Workspaces</div>', unsafe_allow_html=True)
-        active_view = st.radio(
-            "Main Views",
-            nav_items,
-            label_visibility="collapsed",
-            key="main_left_nav",
-        )
-        st.markdown("</div>", unsafe_allow_html=True)
+        active_view = _render_left_nav(nav_sections)
 
     with center_col:
         tape_rows = [
