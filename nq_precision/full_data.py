@@ -608,6 +608,22 @@ def _normalize_impact(impact_raw):
     return "medium"
 
 
+def _is_missing_value(v):
+    if v is None:
+        return True
+    if isinstance(v, float) and pd.isna(v):
+        return True
+    s = str(v).strip().lower()
+    return s in {"", "-", "none", "nan", "null", "n/a"}
+
+
+def _pick_first_present(row, keys):
+    for k in keys:
+        if k in row and not _is_missing_value(row.get(k)):
+            return row.get(k)
+    return None
+
+
 def _fetch_forexfactory_calendar(start_date, end_date):
     items = []
     et = ZoneInfo("America/New_York")
@@ -644,14 +660,17 @@ def _fetch_forexfactory_calendar(start_date, end_date):
             else:
                 impact = "medium"
 
+            actual_val = _pick_first_present(e, ["actual", "actualValue", "actual_value", "act"])
+            expected_val = _pick_first_present(e, ["forecast", "consensus", "estimate", "expected"])
+            prior_val = _pick_first_present(e, ["previous", "prev", "prior"])
             items.append(
                 {
                     "event": e.get("title") or e.get("event") or "Unknown",
                     "country": e.get("country", "US"),
                     "impact": impact,
-                    "actual": e.get("actual"),
-                    "expected": e.get("forecast"),
-                    "prior": e.get("previous"),
+                    "actual": actual_val,
+                    "expected": expected_val,
+                    "prior": prior_val,
                     "for_period": e.get("dateLabel") or e.get("reference") or "-",
                     "time_et": event_dt.strftime("%I:%M %p").lstrip("0"),
                     "date_et": event_dt.date().isoformat(),
@@ -714,19 +733,17 @@ def get_economic_calendar_window(finnhub_key, days=3):
                     continue
             if not (start <= event_dt.date() <= end):
                 continue
-            expected_val = e.get("estimate")
-            if expected_val is None:
-                expected_val = e.get("forecast")
-            if expected_val is None:
-                expected_val = e.get("consensus")
+            actual_val = _pick_first_present(e, ["actual", "actualValue", "actual_value", "act"])
+            expected_val = _pick_first_present(e, ["estimate", "forecast", "consensus", "expected"])
+            prior_val = _pick_first_present(e, ["prev", "previous", "prior"])
             items.append(
                 {
                     "event": e.get("event") or e.get("indicator") or e.get("name") or "Unknown",
                     "country": e.get("country", "US"),
                     "impact": _normalize_impact(e.get("impact")),
-                    "actual": e.get("actual"),
+                    "actual": actual_val,
                     "expected": expected_val,
-                    "prior": e.get("prev") if e.get("prev") is not None else e.get("previous"),
+                    "prior": prior_val,
                     "for_period": e.get("period") if e.get("period") is not None else e.get("for"),
                     "time_et": event_dt.strftime("%I:%M %p").lstrip("0"),
                     "date_et": event_dt.date().isoformat(),
@@ -760,8 +777,21 @@ def get_economic_calendar_window(finnhub_key, days=3):
             ]
         )
 
-    df = df.sort_values(["date_et", "event_dt_iso", "event"])
+    # Keep the best row per event key: prefer rows that have actual/expected/prior populated.
+    source_rank = {"Finnhub": 0, "ForexFactory": 1}
+    df["source_rank"] = df.get("source", "Unknown").map(lambda s: source_rank.get(s, 99))
+    df["has_actual"] = df["actual"].map(lambda v: 0 if _is_missing_value(v) else 1)
+    df["has_expected"] = df["expected"].map(lambda v: 0 if _is_missing_value(v) else 1)
+    df["has_prior"] = df["prior"].map(lambda v: 0 if _is_missing_value(v) else 1)
+    df["quality_score"] = (df["has_actual"] * 4) + (df["has_expected"] * 2) + df["has_prior"]
+
+    df = df.sort_values(
+        ["date_et", "event_dt_iso", "event", "country", "quality_score", "source_rank"],
+        ascending=[True, True, True, True, False, True],
+    )
     df = df.drop_duplicates(subset=["date_et", "time_et", "event", "country"], keep="first")
+    df = df.drop(columns=["source_rank", "has_actual", "has_expected", "has_prior", "quality_score"], errors="ignore")
+    df = df.sort_values(["date_et", "event_dt_iso", "event"])
     return df.reset_index(drop=True)
 
 
