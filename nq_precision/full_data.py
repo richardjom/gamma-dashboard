@@ -30,6 +30,21 @@ FUTURES_MONTH_CODES = {
     12: "Z",
 }
 
+# Major companies most likely to move NQ / ES / YM around earnings.
+MAJOR_INDEX_IMPACT_TICKERS = {
+    # NQ-heavy mega cap / semis / software
+    "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AVGO", "AMD", "NFLX",
+    "ADBE", "INTC", "CSCO", "QCOM", "AMAT", "MU", "TXN", "LRCX", "ADI", "PANW",
+    "CRM", "ORCL", "INTU", "NOW", "SNOW", "PLTR",
+    # ES / broad market heavyweights
+    "BRK.B", "BRK-B", "JPM", "BAC", "WFC", "GS", "MS", "V", "MA", "UNH", "LLY",
+    "XOM", "CVX", "JNJ", "PG", "HD", "WMT", "COST", "ABBV", "MRK", "KO", "PEP",
+    # YM (Dow components)
+    "MMM", "AXP", "AMGN", "BA", "CAT", "CRM", "CSCO", "DIS", "DOW", "GS", "HON",
+    "IBM", "JNJ", "JPM", "MCD", "MRK", "MSFT", "NKE", "PG", "TRV", "UNH", "VZ",
+    "V", "WMT",
+}
+
 
 def _get_secret(name, default=""):
     try:
@@ -1093,7 +1108,7 @@ def _extract_earnings_hub_calendar():
 
 
 @st.cache_data(ttl=600)
-def get_earnings_calendar_multi(finnhub_key, days=5):
+def get_earnings_calendar_multi(finnhub_key, days=5, major_only=True):
     et = ZoneInfo("America/New_York")
     start_date = datetime.now(et).date()
     end_date = (datetime.now(et) + pd.Timedelta(days=days)).date()
@@ -1144,6 +1159,21 @@ def get_earnings_calendar_multi(finnhub_key, days=5):
     df = df.dropna(subset=["date", "symbol"])
     df = df[(df["date"] >= start_date) & (df["date"] <= end_date)]
     df["time"] = df["time"].fillna("Time TBA")
+    if major_only:
+        df = df[df["symbol"].isin(MAJOR_INDEX_IMPACT_TICKERS)].copy()
+        if df.empty:
+            return pd.DataFrame(
+                columns=[
+                    "symbol",
+                    "date",
+                    "time",
+                    "eps_estimate",
+                    "eps_actual",
+                    "revenue_estimate",
+                    "revenue_actual",
+                    "source",
+                ]
+            )
 
     # Prefer Finnhub when duplicates exist.
     source_rank = {"Finnhub": 0, "EarningsWhispers": 1, "EarningsHub": 2}

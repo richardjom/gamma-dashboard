@@ -563,6 +563,8 @@ def run_full_app():
         st.session_state.heatmap_timeframe = "5D"
     if "heatmap_custom_symbols" not in st.session_state:
         st.session_state.heatmap_custom_symbols = "AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA"
+    if "earnings_major_only" not in st.session_state:
+        st.session_state.earnings_major_only = True
 
     _theme_css(
         bg_color,
@@ -1175,7 +1177,17 @@ def run_full_app():
 
         elif active_view == "📅 Earnings Calendar":
             st.subheader("📅 Earnings Calendar")
-            earnings_df = get_earnings_calendar_multi(finnhub_key, days=5)
+            ec1, ec2 = st.columns([1, 4])
+            with ec1:
+                st.toggle("Major Only", key="earnings_major_only")
+            with ec2:
+                st.caption("Focused list for highest-impact NQ / ES / YM earnings names.")
+
+            earnings_df = get_earnings_calendar_multi(
+                finnhub_key,
+                days=5,
+                major_only=st.session_state.earnings_major_only,
+            )
             if earnings_df is None or earnings_df.empty:
                 st.info("No earnings found for this window.")
             else:
