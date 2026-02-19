@@ -732,6 +732,30 @@ def run_full_app():
                 heatmap_df = get_nasdaq_heatmap_data()
                 if heatmap_df is not None and not heatmap_df.empty:
                     heatmap_df = heatmap_df.copy()
+                    size_cut = heatmap_df["size"].quantile(0.18)
+                    small_mask = heatmap_df["size"] < size_cut
+                    if small_mask.any():
+                        small = heatmap_df[small_mask]
+                        rolled = (
+                            small.groupby("sector", as_index=False)
+                            .apply(
+                                lambda g: pd.Series(
+                                    {
+                                        "symbol": "OTHER",
+                                        "price": 0.0,
+                                        "change_pct": (
+                                            (g["change_pct"] * g["size"]).sum() / g["size"].sum()
+                                            if g["size"].sum() > 0
+                                            else 0.0
+                                        ),
+                                        "size": g["size"].sum(),
+                                    }
+                                )
+                            )
+                            .reset_index(drop=True)
+                        )
+                        heatmap_df = pd.concat([heatmap_df[~small_mask], rolled], ignore_index=True)
+
                     heatmap_df["pct_label"] = heatmap_df["change_pct"].map(lambda x: f"{x:+.2f}%")
                     fig = px.treemap(
                         heatmap_df,
@@ -761,7 +785,7 @@ def run_full_app():
                         height=390,
                         margin=dict(l=8, r=8, t=8, b=8),
                         coloraxis_showscale=False,
-                        uniformtext=dict(minsize=12, mode="hide"),
+                        uniformtext=dict(minsize=9, mode="hide"),
                         coloraxis=dict(cmin=-4, cmax=4),
                     )
                     st.plotly_chart(fig, use_container_width=True)
