@@ -1227,24 +1227,32 @@ def run_full_app():
 
         elif active_view == "🗓 Economic Calendar":
             st.subheader("🗓 Economic Calendar")
-            ec1, ec2 = st.columns([1, 5])
-            with ec1:
-                cal_days = st.selectbox("Days", [1, 2, 3, 5], index=2, key="econ_days")
-            with ec2:
-                st.caption("Events in ET. High impact = red, medium = orange/yellow.")
+            st.caption("Week view (next 7 days, ET). High impact = red, medium = orange/yellow.")
 
-            econ_df = get_economic_calendar_window(finnhub_key, days=cal_days)
+            econ_df = get_economic_calendar_window(finnhub_key, days=7)
             if econ_df is None or econ_df.empty:
                 st.info("No economic events available for this window.")
             else:
-                now_et = datetime.now(ZoneInfo("America/New_York"))
-                for date_key, day_df in econ_df.groupby("date_et"):
-                    dt = datetime.strptime(date_key, "%Y-%m-%d")
-                    st.markdown(f"**{dt.strftime('%a %b %d')}**")
+                et_now = datetime.now(ZoneInfo("America/New_York"))
+                week_dates = [et_now.date() + timedelta(days=i) for i in range(7)]
+
+                for day in week_dates:
+                    day_key = day.isoformat()
+                    dt = datetime.strptime(day_key, "%Y-%m-%d")
+                    st.markdown(f"**{dt.strftime('%a %b %d')} Release**")
                     st.markdown(
-                        '<div class="econ-header"><div>Time</div><div>Release</div><div>Impact</div><div>Country</div><div>For</div><div>Actual</div><div>Expected</div><div>Prior</div><div>Alert</div></div>',
+                        '<div class="econ-header"><div></div><div>Release</div><div>Impact</div><div>For</div><div>Actual</div><div>Expected</div><div>Prior</div><div></div><div>Alerts</div></div>',
                         unsafe_allow_html=True,
                     )
+
+                    day_df = econ_df[econ_df["date_et"] == day_key].copy()
+                    if day_df.empty:
+                        st.markdown(
+                            '<div class="econ-row low"><div>•</div><div>No major events</div><div><span class="impact-chip low">LOW</span></div><div>-</div><div>-</div><div>-</div><div>-</div><div></div><div>-</div></div>',
+                            unsafe_allow_html=True,
+                        )
+                        continue
+
                     for _, r in day_df.iterrows():
                         impact = str(r.get("impact", "medium")).lower()
                         impact_label = "HIGH" if impact == "high" else "MED" if impact == "medium" else "LOW"
@@ -1254,7 +1262,7 @@ def run_full_app():
                             event_dt = datetime.fromisoformat(str(event_iso))
                             if event_dt.tzinfo is None:
                                 event_dt = event_dt.replace(tzinfo=ZoneInfo("America/New_York"))
-                            secs = int((event_dt - now_et).total_seconds())
+                            secs = int((event_dt - et_now).total_seconds())
                             if 0 <= secs <= 60:
                                 countdown_html = f'<span class="count-chip">T-{secs}s</span>'
                         except Exception:
@@ -1263,15 +1271,15 @@ def run_full_app():
                         st.markdown(
                             f"""
                             <div class="econ-row {impact}">
-                                <div>{r.get("time_et", "")}</div>
-                                <div>{html.escape(str(r.get("event", "")))}</div>
+                                <div>›</div>
+                                <div>{r.get("time_et", "")}  {html.escape(str(r.get("event", "")))}</div>
                                 <div><span class="impact-chip {impact}">{impact_label}</span></div>
-                                <div>{html.escape(str(r.get("country", "US")))}</div>
                                 <div>{html.escape(str(r.get("for_period", "-")))}</div>
                                 <div>{html.escape(str(r.get("actual", "-")))}</div>
                                 <div>{html.escape(str(r.get("expected", "-")))}</div>
                                 <div>{html.escape(str(r.get("prior", "-")))}</div>
                                 <div>{countdown_html}</div>
+                                <div>🔔</div>
                             </div>
                             """,
                             unsafe_allow_html=True,
