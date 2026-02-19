@@ -608,6 +608,61 @@ def _normalize_impact(impact_raw):
     return "medium"
 
 
+def _fetch_forexfactory_calendar(start_date, end_date):
+    items = []
+    et = ZoneInfo("America/New_York")
+    url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+    try:
+        res = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        if res.status_code != 200:
+            return items
+        data = res.json()
+        if not isinstance(data, list):
+            return items
+    except Exception:
+        return items
+
+    for e in data:
+        try:
+            raw_date = str(e.get("date", "")).strip()
+            if not raw_date:
+                continue
+            parsed = pd.to_datetime(raw_date, errors="coerce", utc=True)
+            if pd.isna(parsed):
+                continue
+            event_dt = parsed.to_pydatetime().astimezone(et)
+            if not (start_date <= event_dt.date() <= end_date):
+                continue
+
+            impact_raw = str(e.get("impact", "")).lower()
+            if "high" in impact_raw:
+                impact = "high"
+            elif "medium" in impact_raw or "med" in impact_raw:
+                impact = "medium"
+            elif "low" in impact_raw:
+                impact = "low"
+            else:
+                impact = "medium"
+
+            items.append(
+                {
+                    "event": e.get("title") or e.get("event") or "Unknown",
+                    "country": e.get("country", "US"),
+                    "impact": impact,
+                    "actual": e.get("actual"),
+                    "expected": e.get("forecast"),
+                    "prior": e.get("previous"),
+                    "for_period": e.get("dateLabel") or e.get("reference") or "-",
+                    "time_et": event_dt.strftime("%I:%M %p").lstrip("0"),
+                    "date_et": event_dt.date().isoformat(),
+                    "event_dt_iso": event_dt.isoformat(),
+                }
+            )
+        except Exception:
+            continue
+    return items
+
+
 @st.cache_data(ttl=30)
 def get_economic_calendar_window(finnhub_key, days=3):
     client = finnhub.Client(api_key=finnhub_key)
@@ -681,6 +736,13 @@ def get_economic_calendar_window(finnhub_key, days=3):
         except Exception:
             continue
 
+    # Fallback source (ForexFactory weekly feed) to prevent empty calendar.
+    try:
+        ff_items = _fetch_forexfactory_calendar(start, end)
+        items.extend(ff_items)
+    except Exception:
+        pass
+
     df = pd.DataFrame(items)
     if df.empty:
         return pd.DataFrame(
@@ -699,6 +761,7 @@ def get_economic_calendar_window(finnhub_key, days=3):
         )
 
     df = df.sort_values(["date_et", "event_dt_iso", "event"])
+    df = df.drop_duplicates(subset=["date_et", "time_et", "event", "country"], keep="first")
     return df.reset_index(drop=True)
 
 
