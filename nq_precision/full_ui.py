@@ -1467,7 +1467,7 @@ def run_full_app():
                     gex_by_strike = gex_by_strike.loc[keep_idx].sort_values("strike", ascending=False)
 
                 z = gex_by_strike["GEX"].to_numpy().reshape(-1, 1)
-                y = [f"{s:.2f}" for s in gex_by_strike["strike"].to_list()]
+                y = gex_by_strike["strike"].astype(float).to_list()
                 x = [asset_label]
                 max_abs = float(max(1.0, gex_by_strike["GEX"].abs().max()))
 
@@ -1488,7 +1488,7 @@ def run_full_app():
                         zmid=0,
                         zmin=-max_abs,
                         zmax=max_abs,
-                        hovertemplate="Strike %{y}<br>GEX %{z:,.0f}<extra></extra>",
+                        hovertemplate="Strike %{y:.2f}<br>GEX %{z:,.0f}<extra></extra>",
                     )
                 )
 
@@ -1498,10 +1498,20 @@ def run_full_app():
                     nearest_idx = (gex_by_strike["strike"] - spot).abs().idxmin()
                     nearest_strike = float(gex_by_strike.loc[nearest_idx, "strike"])
                     fig.add_hline(
-                        y=f"{nearest_strike:.2f}",
+                        y=nearest_strike,
                         line_dash="dot",
                         line_color="#ffffff",
                         opacity=0.8,
+                    )
+                    fig.add_annotation(
+                        x=asset_label,
+                        y=nearest_strike,
+                        text=f"Spot {spot:.2f}",
+                        showarrow=False,
+                        xanchor="left",
+                        yanchor="bottom",
+                        font=dict(size=10, color="#dfe6f3"),
+                        bgcolor="rgba(12,18,28,0.65)",
                     )
 
                 fig.update_layout(
@@ -1510,6 +1520,11 @@ def run_full_app():
                     margin=dict(l=10, r=10, t=30, b=10),
                     xaxis_title="",
                     yaxis_title="Strike",
+                )
+                fig.update_yaxes(
+                    autorange="reversed",
+                    tickformat=".0f",
+                    showgrid=False,
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
