@@ -617,13 +617,13 @@ def run_full_app():
             ("GOLD (GC)", gc.get("price", 0), gc.get("change", 0), gc.get("change_pct", 0)),
         ]
         strip_html = ['<div class="futures-strip">']
-        for name, px, chg, pct in futures_cards:
+        for name, price, chg, pct in futures_cards:
             is_pos = (chg or 0) >= 0
             badge_cls = "pos" if is_pos else "neg"
             arrow = "↑" if is_pos else "↓"
             strip_html.append(
                 f'<div class="future-card"><p class="future-title">{name}</p>'
-                f'<p class="future-value">{px:,.2f}</p>'
+                f'<p class="future-value">{price:,.2f}</p>'
                 f'<span class="future-badge {badge_cls}">{arrow} {chg:+.2f} ({pct:+.2f}%)</span></div>'
             )
         strip_html.append("</div>")
