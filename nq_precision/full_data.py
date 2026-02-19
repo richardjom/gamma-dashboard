@@ -1,6 +1,7 @@
 import re
 import time
 from datetime import datetime, timezone
+import math
 
 import feedparser
 import finnhub
@@ -794,9 +795,27 @@ def calculate_delta_neutral(df, qqq_price):
     strike_delta = all_delta.groupby("strike")["delta_notional"].sum().reset_index()
     strike_delta = strike_delta.sort_values("strike")
     strike_delta["cumulative_delta"] = strike_delta["delta_notional"].cumsum()
-
-    min_idx = strike_delta["cumulative_delta"].abs().idxmin()
-    dn_strike = strike_delta.loc[min_idx, "strike"]
+    dn_strike = None
+    for i in range(1, len(strike_delta)):
+        prev_val = float(strike_delta.iloc[i - 1]["cumulative_delta"])
+        curr_val = float(strike_delta.iloc[i]["cumulative_delta"])
+        if prev_val == 0:
+            dn_strike = float(strike_delta.iloc[i - 1]["strike"])
+            break
+        if curr_val == 0:
+            dn_strike = float(strike_delta.iloc[i]["strike"])
+            break
+        if prev_val * curr_val < 0:
+            x0 = float(strike_delta.iloc[i - 1]["strike"])
+            x1 = float(strike_delta.iloc[i]["strike"])
+            if curr_val != prev_val:
+                dn_strike = x0 + (0 - prev_val) * (x1 - x0) / (curr_val - prev_val)
+            else:
+                dn_strike = x0
+            break
+    if dn_strike is None:
+        min_idx = strike_delta["cumulative_delta"].abs().idxmin()
+        dn_strike = float(strike_delta.loc[min_idx, "strike"])
 
     df_calc["delta_exposure"] = df_calc.apply(
         lambda x: x["open_interest"] * x["delta"] * 100 * (1 if x["type"] == "call" else -1),
@@ -959,7 +978,12 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
     df = df_raw[df_raw["expiration"] == target_exp].copy()
     df = df[df["open_interest"] > 0].copy()
     df = df[df["iv"] > 0].copy()
-    df = df[(df["strike"] > qqq_price * 0.98) & (df["strike"] < qqq_price * 1.02)].copy()
+    # Use a wider strike window, then filter by liquidity to avoid noisy tails.
+    df = df[(df["strike"] > qqq_price * 0.90) & (df["strike"] < qqq_price * 1.10)].copy()
+    df["volume"] = df["volume"].fillna(0)
+    df["liquidity"] = df["open_interest"] + (0.35 * df["volume"])
+    liq_cut = df["liquidity"].quantile(0.25) if len(df) > 8 else 0
+    df = df[df["liquidity"] >= liq_cut].copy()
 
     if len(df) == 0:
         return None
@@ -972,13 +996,17 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
     net_delta = total_call_delta + total_put_delta
 
     atm_strike = df.iloc[(df["strike"] - qqq_price).abs().argsort()[:1]]["strike"].values[0]
-    atm_opts = df[df["strike"] == atm_strike]
+    atm_opts = df[(df["strike"] >= qqq_price * 0.995) & (df["strike"] <= qqq_price * 1.005)].copy()
+    if atm_opts.empty:
+        atm_opts = df[df["strike"] == atm_strike]
     atm_call = atm_opts[atm_opts["type"] == "call"]
     atm_put = atm_opts[atm_opts["type"] == "put"]
 
     if len(atm_call) > 0 and len(atm_put) > 0:
-        call_mid = (atm_call.iloc[0]["bid"] + atm_call.iloc[0]["ask"]) / 2
-        put_mid = (atm_put.iloc[0]["bid"] + atm_put.iloc[0]["ask"]) / 2
+        call_mid = ((atm_call["bid"] + atm_call["ask"]) / 2).replace([float("inf"), -float("inf")], pd.NA).dropna().median()
+        put_mid = ((atm_put["bid"] + atm_put["ask"]) / 2).replace([float("inf"), -float("inf")], pd.NA).dropna().median()
+        call_mid = float(call_mid) if pd.notna(call_mid) else 0.0
+        put_mid = float(put_mid) if pd.notna(put_mid) else 0.0
         straddle = call_mid + put_mid
     else:
         straddle = qqq_price * 0.012
@@ -996,44 +1024,73 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
         axis=1,
     )
 
-    calls = df[df["type"] == "call"].sort_values("GEX", ascending=False)
-    puts = df[df["type"] == "put"].sort_values("GEX", ascending=True)
+    calls = df[df["type"] == "call"].copy()
+    puts = df[df["type"] == "put"].copy()
+    call_strikes = (
+        calls.groupby("strike", as_index=False)
+        .agg(GEX=("GEX", "sum"), OI=("open_interest", "sum"), VOL=("volume", "sum"))
+    )
+    put_strikes = (
+        puts.groupby("strike", as_index=False)
+        .agg(GEX=("GEX", "sum"), OI=("open_interest", "sum"), VOL=("volume", "sum"))
+    )
+    call_strikes["score"] = call_strikes["GEX"].abs() * (1 + call_strikes["OI"].map(lambda v: math.log1p(max(v, 0))))
+    put_strikes["score"] = put_strikes["GEX"].abs() * (1 + put_strikes["OI"].map(lambda v: math.log1p(max(v, 0))))
+    calls = calls.sort_values("GEX", ascending=False)
+    puts = puts.sort_values("GEX", ascending=True)
 
-    calls_above = calls[calls["strike"] > qqq_price]
+    calls_above = call_strikes[call_strikes["strike"] > qqq_price].sort_values("score", ascending=False)
     if len(calls_above) > 0:
         p_wall_strike = calls_above.iloc[0]["strike"]
     else:
-        p_wall_strike = calls.iloc[0]["strike"] if len(calls) > 0 else qqq_price * 1.01
+        p_wall_strike = call_strikes.sort_values("score", ascending=False).iloc[0]["strike"] if len(call_strikes) > 0 else qqq_price * 1.01
 
-    puts_below = puts[puts["strike"] < qqq_price]
+    puts_below = put_strikes[put_strikes["strike"] < qqq_price].sort_values("score", ascending=False)
     if len(puts_below) > 0:
         p_floor_strike = puts_below.iloc[0]["strike"]
     else:
-        p_floor_strike = puts.iloc[0]["strike"] if len(puts) > 0 else qqq_price * 0.99
+        p_floor_strike = put_strikes.sort_values("score", ascending=False).iloc[0]["strike"] if len(put_strikes) > 0 else qqq_price * 0.99
 
     if p_floor_strike >= p_wall_strike:
         p_floor_strike = min(puts["strike"]) if len(puts) > 0 else qqq_price * 0.99
         p_wall_strike = max(calls["strike"]) if len(calls) > 0 else qqq_price * 1.01
 
     s_wall_strike = p_wall_strike
-    for i in range(len(calls)):
-        candidate = calls.iloc[i]["strike"]
-        if candidate > p_wall_strike and candidate != p_wall_strike:
-            s_wall_strike = candidate
-            break
+    wall_candidates = call_strikes[call_strikes["strike"] > p_wall_strike].sort_values("score", ascending=False)
+    if not wall_candidates.empty:
+        s_wall_strike = wall_candidates.iloc[0]["strike"]
 
     s_floor_strike = p_floor_strike
-    for i in range(len(puts)):
-        candidate = puts.iloc[i]["strike"]
-        if candidate < p_floor_strike and candidate != p_floor_strike:
-            s_floor_strike = candidate
-            break
+    floor_candidates = put_strikes[put_strikes["strike"] < p_floor_strike].sort_values("score", ascending=False)
+    if not floor_candidates.empty:
+        s_floor_strike = floor_candidates.iloc[0]["strike"]
 
     if s_floor_strike >= s_wall_strike:
         s_floor_strike = p_floor_strike * 0.995
         s_wall_strike = p_wall_strike * 1.005
 
-    g_flip_strike = df.groupby("strike")["GEX"].sum().abs().idxmin()
+    gex_by_strike = df.groupby("strike", as_index=False)["GEX"].sum().sort_values("strike")
+    g_flip_strike = None
+    for i in range(1, len(gex_by_strike)):
+        prev_val = float(gex_by_strike.iloc[i - 1]["GEX"])
+        curr_val = float(gex_by_strike.iloc[i]["GEX"])
+        if prev_val == 0:
+            g_flip_strike = float(gex_by_strike.iloc[i - 1]["strike"])
+            break
+        if curr_val == 0:
+            g_flip_strike = float(gex_by_strike.iloc[i]["strike"])
+            break
+        if prev_val * curr_val < 0:
+            x0 = float(gex_by_strike.iloc[i - 1]["strike"])
+            x1 = float(gex_by_strike.iloc[i]["strike"])
+            if curr_val != prev_val:
+                g_flip_strike = x0 + (0 - prev_val) * (x1 - x0) / (curr_val - prev_val)
+            else:
+                g_flip_strike = x0
+            break
+    if g_flip_strike is None:
+        min_idx = gex_by_strike["GEX"].abs().idxmin()
+        g_flip_strike = float(gex_by_strike.loc[min_idx, "strike"])
 
     results = [
         ("Delta Neutral", dn_nq, 5.0, "⚖️"),
