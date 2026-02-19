@@ -627,15 +627,23 @@ def _pick_first_present(row, keys):
 def _fetch_forexfactory_calendar(start_date, end_date):
     items = []
     et = ZoneInfo("America/New_York")
-    url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
-    try:
-        res = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
-        if res.status_code != 200:
-            return items
-        data = res.json()
-        if not isinstance(data, list):
-            return items
-    except Exception:
+    urls = [
+        "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+        "https://cdn-nfs.faireconomy.media/ff_calendar_thisweek.json",
+    ]
+    data = None
+    for url in urls:
+        try:
+            res = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+            if res.status_code != 200:
+                continue
+            payload = res.json()
+            if isinstance(payload, list) and payload:
+                data = payload
+                break
+        except Exception:
+            continue
+    if not isinstance(data, list):
         return items
 
     for e in data:
@@ -692,6 +700,118 @@ def _fetch_forexfactory_calendar(start_date, end_date):
             )
         except Exception:
             continue
+    return items
+
+
+def _fetch_marketwatch_economic_calendar(start_date, end_date):
+    items = []
+    et = ZoneInfo("America/New_York")
+    urls = [
+        "https://www.marketwatch.com/economy-politics/calendar",
+        "https://www.marketwatch.com/economy-politics/calendar?mod=mw_latestnews",
+    ]
+    html_text = ""
+    for url in urls:
+        try:
+            res = requests.get(
+                url,
+                timeout=12,
+                headers={
+                    "User-Agent": "Mozilla/5.0",
+                    "Accept-Language": "en-US,en;q=0.9",
+                },
+            )
+            if res.status_code == 200 and res.text:
+                html_text = res.text
+                break
+        except Exception:
+            continue
+    if not html_text:
+        return items
+
+    try:
+        soup = BeautifulSoup(html_text, "html.parser")
+    except Exception:
+        return items
+
+    day_labels = []
+    for h in soup.find_all(["h2", "h3", "th", "div"]):
+        txt = " ".join((h.get_text(" ", strip=True) or "").split())
+        if re.search(r"(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+[A-Za-z]{3}\s+\d{1,2}", txt):
+            day_labels.append(txt)
+    day_map = {}
+    for lbl in day_labels:
+        try:
+            dt = pd.to_datetime(lbl, errors="coerce")
+            if pd.isna(dt):
+                continue
+            day_map[lbl] = dt.date()
+        except Exception:
+            continue
+
+    rows = soup.find_all("tr")
+    current_day = start_date
+    for tr in rows:
+        tds = tr.find_all("td")
+        if len(tds) < 3:
+            maybe_header = " ".join((tr.get_text(" ", strip=True) or "").split())
+            for lbl, d in day_map.items():
+                if lbl in maybe_header:
+                    current_day = d
+                    break
+            continue
+
+        cols = [" ".join((td.get_text(" ", strip=True) or "").split()) for td in tds]
+        if not any(cols):
+            continue
+        # Best-effort extraction from varying table layouts.
+        time_raw = cols[0] if len(cols) > 0 else "Time TBA"
+        event_name = cols[1] if len(cols) > 1 else "Unknown"
+        actual = cols[2] if len(cols) > 2 else "-"
+        expected = cols[3] if len(cols) > 3 else "-"
+        prior = cols[4] if len(cols) > 4 else "-"
+
+        if not event_name or event_name.lower() in {"event", "release"}:
+            continue
+        if current_day < start_date or current_day > end_date:
+            continue
+
+        time_clean = "Time TBA"
+        event_dt = datetime.combine(current_day, datetime.min.time(), tzinfo=et)
+        try:
+            if re.search(r"\d", time_raw):
+                parsed_t = pd.to_datetime(time_raw, errors="coerce")
+                if not pd.isna(parsed_t):
+                    t = parsed_t.to_pydatetime().time()
+                    event_dt = datetime.combine(current_day, t, tzinfo=et)
+                    time_clean = event_dt.strftime("%I:%M %p").lstrip("0")
+        except Exception:
+            pass
+
+        impact = "medium"
+        lower_name = event_name.lower()
+        if any(k in lower_name for k in ["fomc", "cpi", "ppi", "nfp", "payroll", "fed", "powell", "rate decision"]):
+            impact = "high"
+        elif any(k in lower_name for k in ["claims", "housing", "pmi", "durable"]):
+            impact = "medium"
+        else:
+            impact = "low"
+
+        items.append(
+            {
+                "event": event_name,
+                "country": "US",
+                "impact": impact,
+                "actual": actual,
+                "expected": expected,
+                "prior": prior,
+                "for_period": "-",
+                "time_et": time_clean,
+                "date_et": current_day.isoformat(),
+                "event_dt_iso": event_dt.isoformat(),
+                "source": "MarketWatch",
+            }
+        )
     return items
 
 
@@ -901,6 +1021,11 @@ def get_economic_calendar_window(finnhub_key, days=3):
         items.extend(fmp_items)
     except Exception:
         pass
+    try:
+        mw_items = _fetch_marketwatch_economic_calendar(start, end)
+        items.extend(mw_items)
+    except Exception:
+        pass
 
     # Rescue pass: if strict parsing/filtering produced no rows, keep raw Finnhub events
     # as best-effort records so UI does not show an empty window.
@@ -939,8 +1064,15 @@ def get_economic_calendar_window(finnhub_key, days=3):
         except Exception:
             pass
 
+    raw_source_counts = {}
+    for it in items:
+        src = it.get("source", "Unknown")
+        raw_source_counts[src] = raw_source_counts.get(src, 0) + 1
+    st.session_state["econ_source_counts_raw"] = raw_source_counts
+
     df = pd.DataFrame(items)
     if df.empty:
+        st.session_state["econ_source_counts_final"] = {}
         return pd.DataFrame(
             columns=[
                 "event",
@@ -957,7 +1089,7 @@ def get_economic_calendar_window(finnhub_key, days=3):
         )
 
     # Keep the best row per event key: prefer rows that have actual/expected/prior populated.
-    source_rank = {"TradingEconomics": 0, "FMP": 1, "Finnhub": 2, "ForexFactory": 3}
+    source_rank = {"TradingEconomics": 0, "FMP": 1, "Finnhub": 2, "ForexFactory": 3, "MarketWatch": 4}
     if "source" not in df.columns:
         df["source"] = "Unknown"
     df["source_rank"] = df["source"].map(lambda s: source_rank.get(s, 99))
@@ -973,6 +1105,9 @@ def get_economic_calendar_window(finnhub_key, days=3):
     df = df.drop_duplicates(subset=["date_et", "time_et", "event", "country"], keep="first")
     df = df.drop(columns=["source_rank", "has_actual", "has_expected", "has_prior", "quality_score"], errors="ignore")
     df = df.sort_values(["date_et", "event_dt_iso", "event"])
+    st.session_state["econ_source_counts_final"] = (
+        df["source"].value_counts(dropna=False).to_dict() if "source" in df.columns else {}
+    )
     return df.reset_index(drop=True)
 
 

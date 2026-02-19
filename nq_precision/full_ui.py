@@ -1241,6 +1241,16 @@ def run_full_app():
             st.caption("Week view (next 7 days, ET). High impact = red, medium = orange/yellow.")
 
             econ_df = get_economic_calendar_window(finnhub_key, days=7)
+            raw_counts = st.session_state.get("econ_source_counts_raw", {})
+            final_counts = st.session_state.get("econ_source_counts_final", {})
+            if raw_counts:
+                st.caption(
+                    "Sources (raw -> final): "
+                    + ", ".join(
+                        f"{k}: {raw_counts.get(k, 0)} -> {final_counts.get(k, 0)}"
+                        for k in sorted(raw_counts.keys())
+                    )
+                )
             if econ_df is None or econ_df.empty:
                 st.info("No economic events available for this window.")
             else:
