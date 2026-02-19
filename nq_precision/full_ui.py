@@ -1430,9 +1430,9 @@ def run_full_app():
             with g1:
                 strike_window_pct = st.slider(
                     "Strike Window (%)",
-                    min_value=3,
+                    min_value=1,
                     max_value=20,
-                    value=10,
+                    value=6,
                     step=1,
                     key="gex_window_pct",
                 )
@@ -1466,13 +1466,16 @@ def run_full_app():
                     st.info(f"{asset_label}: no options chain")
                     return
 
+                spot = float(asset_payload.get("etf_price", 0) or etf_price or 0)
+                anchor = float(spot if spot > 0 else etf_price)
+
                 # Build chart from a wider, display-only strike universe.
                 df_plot = df_raw.copy()
                 df_plot = df_plot[df_plot["open_interest"] > 0].copy()
                 df_plot = df_plot[df_plot["iv"] > 0].copy()
                 window = strike_window_pct / 100.0
-                low = etf_price * (1.0 - window)
-                high = etf_price * (1.0 + window)
+                low = anchor * (1.0 - window)
+                high = anchor * (1.0 + window)
                 df_plot = df_plot[(df_plot["strike"] >= low) & (df_plot["strike"] <= high)].copy()
                 if df_plot.empty:
                     st.info(f"{asset_label}: no strikes in display window")
@@ -1486,8 +1489,6 @@ def run_full_app():
                 if gex_by_strike.empty:
                     st.info(f"{asset_label}: empty strike map")
                     return
-
-                spot = float(asset_payload.get("etf_price", 0) or etf_price or 0)
 
                 # Keep the strongest ladders or rows nearest spot.
                 if len(gex_by_strike) > max_rows:
@@ -1561,6 +1562,7 @@ def run_full_app():
                 )
                 fig.update_yaxes(
                     autorange="reversed",
+                    range=[high, low],
                     tickformat=".0f",
                     showgrid=False,
                 )
