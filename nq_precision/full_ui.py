@@ -619,13 +619,9 @@ def run_full_app():
             badge_cls = "pos" if is_pos else "neg"
             arrow = "↑" if is_pos else "↓"
             strip_html.append(
-                f"""
-                <div class="future-card">
-                    <p class="future-title">{name}</p>
-                    <p class="future-value">{px:,.2f}</p>
-                    <span class="future-badge {badge_cls}">{arrow} {chg:+.2f} ({pct:+.2f}%)</span>
-                </div>
-                """
+                f'<div class="future-card"><p class="future-title">{name}</p>'
+                f'<p class="future-value">{px:,.2f}</p>'
+                f'<span class="future-badge {badge_cls}">{arrow} {chg:+.2f} ({pct:+.2f}%)</span></div>'
             )
         strip_html.append("</div>")
         st.markdown("".join(strip_html), unsafe_allow_html=True)
