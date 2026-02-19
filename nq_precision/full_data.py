@@ -695,6 +695,122 @@ def _fetch_forexfactory_calendar(start_date, end_date):
     return items
 
 
+def _fetch_tradingeconomics_calendar(start_date, end_date):
+    items = []
+    et = ZoneInfo("America/New_York")
+    # Public guest access often works for calendar reads.
+    url = (
+        "https://api.tradingeconomics.com/calendar"
+        f"?c=guest:guest&f=json&d1={start_date.isoformat()}&d2={end_date.isoformat()}"
+    )
+    try:
+        res = requests.get(url, timeout=12, headers={"User-Agent": "Mozilla/5.0"})
+        if res.status_code != 200:
+            return items
+        data = res.json()
+        if not isinstance(data, list):
+            return items
+    except Exception:
+        return items
+
+    for e in data:
+        try:
+            event_dt = (
+                _parse_event_dt_et(e.get("Date"))
+                or _parse_event_dt_et(e.get("date"))
+                or _parse_event_dt_et(e.get("CalendarDate"))
+            )
+            if event_dt is None:
+                event_dt = datetime.combine(start_date, datetime.min.time(), tzinfo=et)
+            if not (start_date <= event_dt.date() <= end_date):
+                continue
+
+            importance = str(e.get("Importance", "")).strip().lower()
+            if "3" in importance or "high" in importance:
+                impact = "high"
+            elif "2" in importance or "medium" in importance or "med" in importance:
+                impact = "medium"
+            else:
+                impact = "low"
+
+            items.append(
+                {
+                    "event": e.get("Event") or e.get("event") or "Unknown",
+                    "country": e.get("Country") or e.get("country") or "US",
+                    "impact": impact,
+                    "actual": _pick_first_present(e, ["Actual", "actual"]),
+                    "expected": _pick_first_present(e, ["Forecast", "forecast", "Consensus"]),
+                    "prior": _pick_first_present(e, ["Previous", "previous"]),
+                    "for_period": _pick_first_present(e, ["Reference", "reference", "Period", "period"]) or "-",
+                    "time_et": event_dt.strftime("%I:%M %p").lstrip("0") if event_dt.time() != datetime.min.time() else "Time TBA",
+                    "date_et": event_dt.date().isoformat(),
+                    "event_dt_iso": event_dt.isoformat(),
+                    "source": "TradingEconomics",
+                }
+            )
+        except Exception:
+            continue
+    return items
+
+
+def _fetch_fmp_economic_calendar(start_date, end_date):
+    items = []
+    et = ZoneInfo("America/New_York")
+    api_key = _get_secret("FMP_API_KEY", "demo")
+    url = (
+        "https://financialmodelingprep.com/api/v3/economic_calendar"
+        f"?from={start_date.isoformat()}&to={end_date.isoformat()}&apikey={api_key}"
+    )
+    try:
+        res = requests.get(url, timeout=12, headers={"User-Agent": "Mozilla/5.0"})
+        if res.status_code != 200:
+            return items
+        data = res.json()
+        if not isinstance(data, list):
+            return items
+    except Exception:
+        return items
+
+    for e in data:
+        try:
+            event_dt = (
+                _parse_event_dt_et(e.get("date"))
+                or _parse_event_dt_et(e.get("datetime"))
+                or _parse_event_dt_et(e.get("time"))
+            )
+            if event_dt is None:
+                event_dt = datetime.combine(start_date, datetime.min.time(), tzinfo=et)
+            if not (start_date <= event_dt.date() <= end_date):
+                continue
+
+            impact_raw = str(e.get("impact", "")).lower()
+            if "high" in impact_raw:
+                impact = "high"
+            elif "medium" in impact_raw or "med" in impact_raw:
+                impact = "medium"
+            else:
+                impact = "low"
+
+            items.append(
+                {
+                    "event": e.get("event") or e.get("name") or "Unknown",
+                    "country": e.get("country") or "US",
+                    "impact": impact,
+                    "actual": _pick_first_present(e, ["actual"]),
+                    "expected": _pick_first_present(e, ["estimate", "forecast", "consensus"]),
+                    "prior": _pick_first_present(e, ["previous", "prior"]),
+                    "for_period": _pick_first_present(e, ["period", "reference"]) or "-",
+                    "time_et": event_dt.strftime("%I:%M %p").lstrip("0") if event_dt.time() != datetime.min.time() else "Time TBA",
+                    "date_et": event_dt.date().isoformat(),
+                    "event_dt_iso": event_dt.isoformat(),
+                    "source": "FMP",
+                }
+            )
+        except Exception:
+            continue
+    return items
+
+
 @st.cache_data(ttl=30)
 def get_economic_calendar_window(finnhub_key, days=3):
     client = finnhub.Client(api_key=finnhub_key)
@@ -775,6 +891,16 @@ def get_economic_calendar_window(finnhub_key, days=3):
         items.extend(ff_items)
     except Exception:
         pass
+    try:
+        te_items = _fetch_tradingeconomics_calendar(start, end)
+        items.extend(te_items)
+    except Exception:
+        pass
+    try:
+        fmp_items = _fetch_fmp_economic_calendar(start, end)
+        items.extend(fmp_items)
+    except Exception:
+        pass
 
     # Rescue pass: if strict parsing/filtering produced no rows, keep raw Finnhub events
     # as best-effort records so UI does not show an empty window.
@@ -831,7 +957,7 @@ def get_economic_calendar_window(finnhub_key, days=3):
         )
 
     # Keep the best row per event key: prefer rows that have actual/expected/prior populated.
-    source_rank = {"Finnhub": 0, "ForexFactory": 1}
+    source_rank = {"TradingEconomics": 0, "FMP": 1, "Finnhub": 2, "ForexFactory": 3}
     if "source" not in df.columns:
         df["source"] = "Unknown"
     df["source_rank"] = df["source"].map(lambda s: source_rank.get(s, 99))
