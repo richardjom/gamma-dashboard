@@ -220,6 +220,52 @@ def _theme_css(bg_color, card_bg, text_color, accent_color, border_color):
         margin-top: 6px;
         font-weight: 600;
     }}
+    .score-panel {{
+        background: linear-gradient(180deg, #1a1f28 0%, #121924 100%);
+        border: 1px solid #2f3947;
+        border-radius: 10px;
+        padding: 12px;
+        min-height: 122px;
+    }}
+    .score-kicker {{
+        color: #9ca8bb;
+        font-size: 11px;
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
+        font-weight: 700;
+        margin: 0 0 6px 0;
+    }}
+    .score-value {{
+        color: #39d8ff;
+        font-size: 42px;
+        line-height: 1.05;
+        margin: 0;
+        font-weight: 800;
+    }}
+    .score-badge {{
+        display: inline-block;
+        margin-top: 10px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 700;
+        border: 1px solid transparent;
+    }}
+    .score-badge.bear {{
+        color: #ff8d8d;
+        background: rgba(176, 56, 56, 0.22);
+        border-color: #7e3434;
+    }}
+    .score-badge.neutral {{
+        color: #ffd47a;
+        background: rgba(166, 123, 32, 0.22);
+        border-color: #7d6430;
+    }}
+    .score-badge.bull {{
+        color: #63f6a8;
+        background: rgba(42, 136, 86, 0.25);
+        border-color: #2f7d56;
+    }}
     .quick-glance {{
         background: linear-gradient(180deg, #1a1f28 0%, #131821 100%);
         padding: 14px;
@@ -695,10 +741,11 @@ def run_full_app():
                 )
                 sc1, sc2 = st.columns([3, 1])
                 with sc1:
+                    marker_left = max(1, min(99, sentiment_score))
                     st.markdown(
                         f"""
                     <div style="position: relative;">
-                        <div class="sentiment-meter"><div class="sentiment-marker" style="left: {sentiment_score}%;"></div></div>
+                        <div class="sentiment-meter"><div class="sentiment-marker" style="left: {marker_left}%;"></div></div>
                         <div style="display: flex; justify-content: space-between; margin-top: 5px; font-size: 12px; color: #888;">
                             <span>0 (Bearish)</span><span>50 (Neutral)</span><span>100 (Bullish)</span>
                         </div>
@@ -718,11 +765,24 @@ def run_full_app():
                         if sentiment_score < 70
                         else "BULLISH"
                     )
-                    st.metric("Score", f"{sentiment_score}/100", sentiment_text)
-                    if sentiment_score >= 55:
-                        st.markdown('<span class="metric-chip">↑ Bullish</span>', unsafe_allow_html=True)
-                    elif sentiment_score <= 45:
-                        st.markdown('<span class="metric-chip">↓ Bearish</span>', unsafe_allow_html=True)
+                    sentiment_badge = (
+                        "bear"
+                        if sentiment_score < 45
+                        else "neutral"
+                        if sentiment_score < 55
+                        else "bull"
+                    )
+                    sentiment_arrow = "↓" if sentiment_score < 45 else "→" if sentiment_score < 55 else "↑"
+                    st.markdown(
+                        f"""
+                        <div class="score-panel">
+                            <p class="score-kicker">Score</p>
+                            <p class="score-value">{sentiment_score}/100</p>
+                            <span class="score-badge {sentiment_badge}">{sentiment_arrow} {sentiment_text}</span>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
                 st.markdown("</div></div>", unsafe_allow_html=True)
 
                 st.markdown(
