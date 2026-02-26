@@ -605,6 +605,16 @@ def _latency_from_asof_utc(asof_utc):
         return None
 
 
+def _latency_label(age_sec):
+    if age_sec is None:
+        return "n/a"
+    if age_sec < 60:
+        return f"{age_sec}s"
+    mins = age_sec // 60
+    secs = age_sec % 60
+    return f"{mins}m {secs:02d}s"
+
+
 def _render_external_econ_widget():
     widget_html = """
     <div style="border:1px solid #2f3540;border-radius:8px;overflow:hidden;background:#111722;">
@@ -1314,7 +1324,7 @@ def run_full_app():
                 st.caption("Sources (raw -> final): no events returned from provider APIs")
             st.caption(
                 f"Calendar health: {econ_health.get('status', 'unknown')} | "
-                f"latency {econ_health.get('latency_s') if econ_health.get('latency_s') is not None else 'n/a'}s | "
+                f"latency {_latency_label(econ_health.get('latency_s'))} | "
                 f"asof {econ_health.get('asof_utc') if econ_health.get('asof_utc') else 'n/a'}"
             )
             if econ_df is None or econ_df.empty:
@@ -1347,7 +1357,7 @@ def run_full_app():
                         row_conf = int(r.get("confidence_score", 0) or 0)
                         row_conf_label = str(r.get("confidence_label", "Low"))
                         row_latency = _latency_from_asof_utc(r.get("asof_utc"))
-                        row_latency_txt = f"{row_latency}s" if row_latency is not None else "n/a"
+                        row_latency_txt = _latency_label(row_latency)
                         event_iso = r.get("event_dt_iso")
                         countdown_html = ""
                         try:
@@ -1396,7 +1406,7 @@ def run_full_app():
             earnings_health = get_dataset_freshness("earnings_calendar", max_age_sec=900)
             st.caption(
                 f"Earnings health: {earnings_health.get('status', 'unknown')} | "
-                f"latency {earnings_health.get('latency_s') if earnings_health.get('latency_s') is not None else 'n/a'}s | "
+                f"latency {_latency_label(earnings_health.get('latency_s'))} | "
                 f"asof {earnings_health.get('asof_utc') if earnings_health.get('asof_utc') else 'n/a'}"
             )
             if earnings_df is None or earnings_df.empty:
@@ -1430,7 +1440,7 @@ def run_full_app():
                                     else "Rev est: n/a"
                                 )
                                 row_latency = _latency_from_asof_utc(row.get("asof_utc"))
-                                row_latency_txt = f"{row_latency}s" if row_latency is not None else "n/a"
+                                row_latency_txt = _latency_label(row_latency)
                                 conf_label = row.get("confidence_label", "Low")
                                 conf_score = int(row.get("confidence_score", 0) or 0)
                                 st.markdown(
