@@ -658,6 +658,122 @@ def _countdown_label(seconds_to):
     return f"{direction}{ss}s"
 
 
+def _render_live_countdown_table(rows, height=360):
+    if not rows:
+        st.info("No upcoming events in this horizon.")
+        return
+
+    table_rows = []
+    for r in rows:
+        when_txt = html.escape(str(r.get("when_et", "")))
+        impact_txt = html.escape(str(r.get("impact", "")))
+        type_txt = html.escape(str(r.get("kind", "")))
+        event_txt = html.escape(str(r.get("event", "")))
+        source_txt = html.escape(str(r.get("source", "")))
+        sec = int(r.get("seconds_to", 0))
+        table_rows.append(
+            f"""
+            <tr>
+              <td>{when_txt}</td>
+              <td class="live-countdown" data-seconds="{sec}"></td>
+              <td>{impact_txt}</td>
+              <td>{type_txt}</td>
+              <td>{event_txt}</td>
+              <td>{source_txt}</td>
+            </tr>
+            """
+        )
+
+    table_html = "".join(table_rows)
+    widget_id = f"countdown_{int(time.time() * 1000)}"
+    html_block = f"""
+    <div id="{widget_id}">
+      <style>
+        #{widget_id} table {{
+          width: 100%;
+          border-collapse: collapse;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+          font-size: 13px;
+          color: #dce6f3;
+        }}
+        #{widget_id} thead th {{
+          text-align: left;
+          background: #131923;
+          border: 1px solid #2c3646;
+          padding: 7px 8px;
+          color: #9fb0c7;
+          font-weight: 700;
+        }}
+        #{widget_id} tbody td {{
+          border: 1px solid #243043;
+          padding: 7px 8px;
+          background: #111722;
+          vertical-align: top;
+        }}
+        #{widget_id} tbody tr:nth-child(odd) td {{
+          background: #0f1520;
+        }}
+        #{widget_id} .live-countdown {{
+          font-weight: 700;
+          color: #8ff3c3;
+          white-space: nowrap;
+        }}
+      </style>
+      <table>
+        <thead>
+          <tr>
+            <th>When (ET)</th>
+            <th>Countdown</th>
+            <th>Impact</th>
+            <th>Type</th>
+            <th>Event</th>
+            <th>Source</th>
+          </tr>
+        </thead>
+        <tbody>
+          {table_html}
+        </tbody>
+      </table>
+      <script>
+        (function() {{
+          const root = document.getElementById("{widget_id}");
+          if (!root) return;
+
+          function fmt(sec) {{
+            const dir = sec >= 0 ? "T-" : "T+";
+            let s = Math.abs(sec);
+            const h = Math.floor(s / 3600);
+            s -= h * 3600;
+            const m = Math.floor(s / 60);
+            const ss = s - m * 60;
+            if (h > 0) return `${{dir}}${{h}}h ${{String(m).padStart(2, "0")}}m`;
+            if (m > 0) return `${{dir}}${{m}}m ${{String(ss).padStart(2, "0")}}s`;
+            return `${{dir}}${{ss}}s`;
+          }}
+
+          function tick() {{
+            const nodes = root.querySelectorAll(".live-countdown[data-seconds]");
+            nodes.forEach((el) => {{
+              const sec = parseInt(el.dataset.seconds || "0", 10);
+              if (Number.isNaN(sec)) {{
+                el.textContent = "-";
+                return;
+              }}
+              el.textContent = fmt(sec);
+              el.dataset.seconds = String(sec - 1);
+            }});
+          }}
+
+          tick();
+          if (root._timer) clearInterval(root._timer);
+          root._timer = setInterval(tick, 1000);
+        }})();
+      </script>
+    </div>
+    """
+    components.html(html_block, height=height, scrolling=True)
+
+
 def _build_morning_playbook(data_0dte, data_weekly, nq_now, event_risk):
     if not data_0dte:
         return {}
@@ -945,15 +1061,15 @@ def _render_event_risk_panel(event_risk):
         for e in upcoming[:10]:
             rows.append(
                 {
-                    "When (ET)": f"{e.get('date_et', '')} {e.get('time_et', '')}",
-                    "Countdown": _countdown_label(e.get("seconds_to", 0)),
-                    "Impact": str(e.get("impact", "")).upper(),
-                    "Type": e.get("kind", ""),
-                    "Event": e.get("event", ""),
-                    "Source": e.get("source", ""),
+                    "when_et": f"{e.get('date_et', '')} {e.get('time_et', '')}",
+                    "seconds_to": int(e.get("seconds_to", 0)),
+                    "impact": str(e.get("impact", "")).upper(),
+                    "kind": e.get("kind", ""),
+                    "event": e.get("event", ""),
+                    "source": e.get("source", ""),
                 }
             )
-        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+        _render_live_countdown_table(rows, height=360)
     else:
         st.info("No upcoming events in this horizon.")
     st.markdown("</div></div>", unsafe_allow_html=True)
