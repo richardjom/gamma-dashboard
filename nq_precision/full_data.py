@@ -3,6 +3,7 @@ import time
 from datetime import datetime, timezone, timedelta
 import math
 from zoneinfo import ZoneInfo
+from urllib.parse import parse_qs, unquote, urlparse
 
 import feedparser
 import finnhub
@@ -263,12 +264,34 @@ def exchange_schwab_auth_code(auth_code, redirect_uri):
     if not auth_code:
         return None, "Authorization code is required."
 
+    # Accept either raw code or full redirect URL pasted by user.
+    code_input = str(auth_code).strip()
+    if code_input.startswith("http://") or code_input.startswith("https://"):
+        try:
+            parsed = urlparse(code_input)
+            code_input = parse_qs(parsed.query).get("code", [code_input])[0]
+        except Exception:
+            pass
+    elif "code=" in code_input:
+        try:
+            parsed = urlparse(code_input)
+            code_input = parse_qs(parsed.query).get("code", [code_input])[0]
+        except Exception:
+            code_input = code_input.split("code=", 1)[-1]
+            if "&" in code_input:
+                code_input = code_input.split("&", 1)[0]
+
+    # URL decode and hard-trim accidental session/query remnants.
+    code_input = unquote(code_input).strip()
+    if "&" in code_input:
+        code_input = code_input.split("&", 1)[0].strip()
+
     try:
         response = requests.post(
             SCHWAB_TOKEN_URL,
             data={
                 "grant_type": "authorization_code",
-                "code": auth_code,
+                "code": code_input,
                 "redirect_uri": redirect_uri,
             },
             auth=(app_key, app_secret),
