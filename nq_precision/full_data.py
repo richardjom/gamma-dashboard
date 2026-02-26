@@ -82,6 +82,71 @@ def get_quote_age_label(symbol):
     return f"{mins}m {secs:02d}s"
 
 
+def _utc_iso_from_ms(timestamp_ms):
+    try:
+        return datetime.fromtimestamp(int(timestamp_ms) / 1000, tz=timezone.utc).isoformat()
+    except Exception:
+        return None
+
+
+def _set_dataset_meta(dataset_key, source, timestamp_ms=None, max_age_sec=180):
+    if timestamp_ms is None:
+        timestamp_ms = int(time.time() * 1000)
+    st.session_state[f"dataset_meta::{dataset_key}"] = {
+        "source": source,
+        "timestamp_ms": int(timestamp_ms),
+        "asof_utc": _utc_iso_from_ms(timestamp_ms),
+        "max_age_sec": int(max_age_sec),
+    }
+
+
+def get_dataset_meta(dataset_key):
+    meta = st.session_state.get(f"dataset_meta::{dataset_key}", {}) or {}
+    ts = meta.get("timestamp_ms")
+    age_sec = None
+    if ts:
+        age_sec = max(0, int((int(time.time() * 1000) - int(ts)) / 1000))
+    return {
+        "source": meta.get("source", "unknown"),
+        "asof_utc": meta.get("asof_utc"),
+        "timestamp_ms": ts,
+        "latency_s": age_sec,
+        "max_age_sec": int(meta.get("max_age_sec", 180)),
+    }
+
+
+def get_dataset_freshness(dataset_key, max_age_sec=None):
+    meta = get_dataset_meta(dataset_key)
+    age = meta.get("latency_s")
+    hard_mult = float(_get_secret("STALE_CONFIDENCE_HARD_MULTIPLIER", 0.45))
+    soft_mult = float(_get_secret("STALE_CONFIDENCE_SOFT_MULTIPLIER", 0.75))
+    target_max = int(max_age_sec or meta.get("max_age_sec") or 180)
+
+    if age is None:
+        return {
+            **meta,
+            "status": "unknown",
+            "confidence_multiplier": 0.60,
+        }
+    if age <= target_max:
+        return {
+            **meta,
+            "status": "fresh",
+            "confidence_multiplier": 1.0,
+        }
+    if age <= target_max * 2:
+        return {
+            **meta,
+            "status": "stale_soft",
+            "confidence_multiplier": soft_mult,
+        }
+    return {
+        **meta,
+        "status": "stale_hard",
+        "confidence_multiplier": hard_mult,
+    }
+
+
 def schwab_is_configured():
     return bool(_get_secret("SCHWAB_APP_KEY") and _get_secret("SCHWAB_APP_SECRET"))
 
@@ -434,18 +499,24 @@ def _fetch_cboe_options_raw(ticker="QQQ"):
         parsed = df.apply(parse_option, axis=1)
         df = pd.concat([df, parsed], axis=1)
         df = df[df["type"] != "unknown"].copy()
+        _set_dataset_meta(
+            f"options:{ticker.upper()}",
+            "CBOE",
+            timestamp_ms=int(time.time() * 1000),
+            max_age_sec=int(_get_secret("OPTIONS_MAX_STALE_SECONDS", 180)),
+        )
         return df, current_price
     except Exception as e:
         st.error(f"CBOE fetch failed: {e}")
         return None, None
 
 
-@st.cache_data(ttl=14400)
+@st.cache_data(ttl=120)
 def get_cboe_options(ticker="QQQ"):
     return _fetch_cboe_options_raw(ticker)
 
 
-@st.cache_data(ttl=45)
+@st.cache_data(ttl=15)
 def get_cboe_options_live(ticker="QQQ"):
     """Short TTL fetch for chart tabs that need fresher ladders."""
     return _fetch_cboe_options_raw(ticker)
@@ -1635,7 +1706,7 @@ def get_futures_price(symbol):
     return None, "unavailable"
 
 
-@st.cache_data(ttl=14400)
+@st.cache_data(ttl=90)
 def process_multi_asset():
     assets_config = {
         "SPY": {"ticker": "SPY", "futures": "ES=F", "name": "S&P 500"},
@@ -1662,13 +1733,13 @@ def process_multi_asset():
             data_0dte = None
             if exp_0dte:
                 data_0dte = process_expiration(
-                    df_raw, exp_0dte, etf_price, ratio, futures_price
+                    df_raw, exp_0dte, etf_price, ratio, futures_price, options_ticker=config["ticker"]
                 )
 
             data_weekly = None
             if exp_weekly and exp_weekly != exp_0dte:
                 data_weekly = process_expiration(
-                    df_raw, exp_weekly, etf_price, ratio, futures_price
+                    df_raw, exp_weekly, etf_price, ratio, futures_price, options_ticker=config["ticker"]
                 )
 
             results[asset_name] = {
@@ -1985,8 +2056,8 @@ def get_earnings_detail(symbol, finnhub_key):
     return detail
 
 
-@st.cache_data(ttl=14400)
-def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
+@st.cache_data(ttl=90)
+def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_ticker="QQQ"):
     df = df_raw[df_raw["expiration"] == target_exp].copy()
     df = df[df["open_interest"] > 0].copy()
     df = df[df["iv"] > 0].copy()
@@ -2152,6 +2223,26 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
     level_confidence["Lower 0.25σ"] = {"score": 45, "label": "Medium"}
     level_confidence["Lower 0.50σ"] = {"score": 40, "label": "Low"}
 
+    # Freshness penalty so stale options chains cannot present high confidence.
+    options_health = get_dataset_freshness(
+        f"options:{str(options_ticker).upper()}",
+        max_age_sec=int(_get_secret("OPTIONS_MAX_STALE_SECONDS", 180)),
+    )
+    conf_mult = float(options_health.get("confidence_multiplier", 1.0))
+    for key, val in level_confidence.items():
+        base_score = int(val.get("score", 0))
+        adj_score = int(round(base_score * conf_mult))
+        adj_score = max(0, min(100, adj_score))
+        if adj_score >= 70:
+            adj_label = "High"
+        elif adj_score >= 45:
+            adj_label = "Medium"
+        else:
+            adj_label = "Low"
+        val["score_base"] = base_score
+        val["score"] = adj_score
+        val["label"] = adj_label
+
     results = [
         ("Delta Neutral", dn_nq, 5.0, "⚖️"),
         ("Target Resistance", (p_wall_strike * ratio) + 35, 3.0, "🎯"),
@@ -2183,6 +2274,13 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now):
         "strike_delta": strike_delta,
         "results": results,
         "level_confidence": level_confidence,
+        "data_meta": {
+            "options_source": options_health.get("source", "CBOE"),
+            "options_asof_utc": options_health.get("asof_utc"),
+            "options_latency_s": options_health.get("latency_s"),
+            "options_freshness": options_health.get("status", "unknown"),
+            "confidence_multiplier": conf_mult,
+        },
         "straddle": straddle,
         "nq_em_full": nq_em_full,
         "atm_strike": atm_strike,

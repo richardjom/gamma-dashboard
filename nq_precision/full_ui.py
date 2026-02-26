@@ -16,6 +16,7 @@ from nq_precision.full_data import (
     generate_daily_bread,
     get_cboe_options,
     get_cboe_options_live,
+    get_dataset_freshness,
     get_earnings_calendar_multi,
     get_earnings_detail,
     get_economic_calendar,
@@ -807,16 +808,18 @@ def run_full_app():
         data_monthly = None
 
         if exp_0dte:
-            data_0dte = process_expiration(df_raw, exp_0dte, qqq_price, ratio, nq_now)
+            data_0dte = process_expiration(
+                df_raw, exp_0dte, qqq_price, ratio, nq_now, options_ticker="QQQ"
+            )
 
         if exp_weekly and exp_weekly != exp_0dte:
             data_weekly = process_expiration(
-                df_raw, exp_weekly, qqq_price, ratio, nq_now
+                df_raw, exp_weekly, qqq_price, ratio, nq_now, options_ticker="QQQ"
             )
 
         if exp_monthly and exp_monthly not in [exp_0dte, exp_weekly]:
             data_monthly = process_expiration(
-                df_raw, exp_monthly, qqq_price, ratio, nq_now
+                df_raw, exp_monthly, qqq_price, ratio, nq_now, options_ticker="QQQ"
             )
 
         market_data = get_market_overview_yahoo()
@@ -1227,14 +1230,30 @@ def run_full_app():
                 d2.metric("Gamma Flip", f"{selected_data['g_flip_nq']:.2f}")
                 d3.metric("Net Delta", f"{selected_data['net_delta']:,.0f}")
                 d4.metric("Expected Move", f"±{selected_data['nq_em_full']:.0f}")
+                data_meta = selected_data.get("data_meta", {})
+                freshness = data_meta.get("options_freshness", "unknown")
+                latency = data_meta.get("options_latency_s")
+                source = data_meta.get("options_source", "CBOE")
+                conf_mult = data_meta.get("confidence_multiplier", 1.0)
+                st.caption(
+                    f"Options data: {source} | freshness: {freshness} | latency: "
+                    f"{latency if latency is not None else 'n/a'}s | confidence x{conf_mult:.2f}"
+                )
+                if freshness == "stale_hard":
+                    st.warning("Options chain is stale (hard). Confidence has been heavily penalized.")
+                elif freshness == "stale_soft":
+                    st.warning("Options chain is stale (soft). Confidence has been reduced.")
                 results_df = pd.DataFrame(selected_data["results"], columns=["Level", "Price", "Width", "Icon"])
                 conf_map = selected_data.get("level_confidence", {})
                 results_df["Confidence"] = results_df["Level"].map(
                     lambda lvl: conf_map.get(lvl, {}).get("label", "-")
                 )
+                results_df["Conf Score"] = results_df["Level"].map(
+                    lambda lvl: conf_map.get(lvl, {}).get("score", 0)
+                )
                 table_height = max(300, min(650, 52 + (len(results_df) + 1) * 35))
                 st.dataframe(
-                    results_df[["Icon", "Level", "Price", "Width", "Confidence"]],
+                    results_df[["Icon", "Level", "Price", "Width", "Confidence", "Conf Score"]],
                     width="stretch",
                     hide_index=True,
                     height=table_height,
@@ -1476,6 +1495,24 @@ def run_full_app():
                 if df_raw is None or df_raw.empty or not etf_price:
                     st.info(f"{asset_label}: no options chain")
                     return
+                health = get_dataset_freshness(
+                    f"options:{str(ticker).upper()}",
+                    max_age_sec=180,
+                )
+                health_status = health.get("status", "unknown")
+                health_latency = health.get("latency_s")
+                health_source = health.get("source", "CBOE")
+                health_asof = health.get("asof_utc")
+                health_mult = float(health.get("confidence_multiplier", 1.0))
+                st.caption(
+                    f"{asset_label} chain: {health_source} | {health_status} | "
+                    f"latency {health_latency if health_latency is not None else 'n/a'}s | conf x{health_mult:.2f} | "
+                    f"asof {health_asof if health_asof else 'n/a'}"
+                )
+                if health_status == "stale_hard":
+                    st.warning(f"{asset_label}: stale_hard options chain; levels may be lagging.")
+                elif health_status == "stale_soft":
+                    st.info(f"{asset_label}: stale_soft options chain; confidence reduced.")
 
                 spot = float(asset_payload.get("etf_price", 0) or etf_price or 0)
                 anchor = float(spot if spot > 0 else etf_price)
@@ -1602,8 +1639,8 @@ def run_full_app():
                     yaxis_title="Strike",
                 )
                 fig.update_yaxes(
-                    autorange="reversed",
-                    range=[high, low],
+                    autorange=False,
+                    range=[low, high],
                     tickformat=".0f",
                     showgrid=False,
                 )
