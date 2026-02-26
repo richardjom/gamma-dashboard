@@ -1176,6 +1176,8 @@ def _fetch_fmp_economic_calendar(start_date, end_date):
 def get_economic_calendar_window(finnhub_key, days=3):
     client = finnhub.Client(api_key=finnhub_key)
     et = ZoneInfo("America/New_York")
+    fetch_ms = int(time.time() * 1000)
+    fetch_asof_utc = _utc_iso_from_ms(fetch_ms)
     start = datetime.now(et).date()
     end = start + timedelta(days=max(1, int(days)))
     items = []
@@ -1319,6 +1321,12 @@ def get_economic_calendar_window(finnhub_key, days=3):
     df = pd.DataFrame(items)
     if df.empty:
         st.session_state["econ_source_counts_final"] = {}
+        _set_dataset_meta(
+            "econ_calendar",
+            "multi-source",
+            timestamp_ms=fetch_ms,
+            max_age_sec=int(_get_secret("ECON_MAX_STALE_SECONDS", 120)),
+        )
         return pd.DataFrame(
             columns=[
                 "event",
@@ -1331,8 +1339,17 @@ def get_economic_calendar_window(finnhub_key, days=3):
                 "time_et",
                 "date_et",
                 "event_dt_iso",
+                "source",
+                "asof_utc",
+                "latency_s",
+                "confidence_score",
+                "confidence_label",
             ]
         )
+
+    if "asof_utc" not in df.columns:
+        df["asof_utc"] = fetch_asof_utc
+    df["asof_utc"] = df["asof_utc"].fillna(fetch_asof_utc)
 
     # Keep the best row per event key: prefer rows that have actual/expected/prior populated.
     source_rank = {
@@ -1363,10 +1380,46 @@ def get_economic_calendar_window(finnhub_key, days=3):
         ascending=[True, True, True, True, False, True],
     )
     df = df.drop_duplicates(subset=["date_et", "time_et", "event", "country"], keep="first")
-    df = df.drop(columns=["source_rank", "has_actual", "has_expected", "has_prior", "quality_score"], errors="ignore")
+
+    source_conf = {
+        "TradingEconomics": 90,
+        "FMP": 84,
+        "Finnhub": 82,
+        "Finviz": 72,
+        "ForexFactory": 66,
+        "MarketWatch": 62,
+    }
+    df["source_score"] = df["source"].map(lambda s: source_conf.get(s, 55))
+    field_score = (df["has_actual"] * 50) + (df["has_expected"] * 30) + (df["has_prior"] * 20)
+    df["confidence_score"] = ((0.65 * field_score) + (0.35 * df["source_score"])).round().astype(int)
+    df["confidence_score"] = df["confidence_score"].clip(0, 100)
+    df["confidence_label"] = df["confidence_score"].map(
+        lambda s: "High" if s >= 70 else "Medium" if s >= 45 else "Low"
+    )
+    df["latency_s"] = max(0, int((int(time.time() * 1000) - fetch_ms) / 1000))
+
+    df = df.drop(
+        columns=[
+            "source_rank",
+            "has_actual",
+            "has_expected",
+            "has_prior",
+            "quality_score",
+            "source_score",
+            "event_key",
+            "time_bucket",
+        ],
+        errors="ignore",
+    )
     df = df.sort_values(["date_et", "event_dt_iso", "event"])
     st.session_state["econ_source_counts_final"] = (
         df["source"].value_counts(dropna=False).to_dict() if "source" in df.columns else {}
+    )
+    _set_dataset_meta(
+        "econ_calendar",
+        "multi-source",
+        timestamp_ms=fetch_ms,
+        max_age_sec=int(_get_secret("ECON_MAX_STALE_SECONDS", 120)),
     )
     return df.reset_index(drop=True)
 
@@ -1917,6 +1970,8 @@ def _extract_earnings_hub_calendar():
 @st.cache_data(ttl=600)
 def get_earnings_calendar_multi(finnhub_key, days=5, major_only=True):
     et = ZoneInfo("America/New_York")
+    fetch_ms = int(time.time() * 1000)
+    fetch_asof_utc = _utc_iso_from_ms(fetch_ms)
     start_date = datetime.now(et).date()
     end_date = (datetime.now(et) + pd.Timedelta(days=days)).date()
     rows = []
@@ -1957,8 +2012,25 @@ def get_earnings_calendar_multi(finnhub_key, days=5, major_only=True):
         pass
 
     if not rows:
+        _set_dataset_meta(
+            "earnings_calendar",
+            "multi-source",
+            timestamp_ms=fetch_ms,
+            max_age_sec=int(_get_secret("EARNINGS_MAX_STALE_SECONDS", 900)),
+        )
         return pd.DataFrame(columns=[
-            "symbol", "date", "time", "eps_estimate", "eps_actual", "revenue_estimate", "revenue_actual", "source"
+            "symbol",
+            "date",
+            "time",
+            "eps_estimate",
+            "eps_actual",
+            "revenue_estimate",
+            "revenue_actual",
+            "source",
+            "asof_utc",
+            "latency_s",
+            "confidence_score",
+            "confidence_label",
         ])
 
     df = pd.DataFrame(rows)
@@ -1969,6 +2041,12 @@ def get_earnings_calendar_multi(finnhub_key, days=5, major_only=True):
     if major_only:
         df = df[df["symbol"].isin(MAJOR_INDEX_IMPACT_TICKERS)].copy()
         if df.empty:
+            _set_dataset_meta(
+                "earnings_calendar",
+                "multi-source",
+                timestamp_ms=fetch_ms,
+                max_age_sec=int(_get_secret("EARNINGS_MAX_STALE_SECONDS", 900)),
+            )
             return pd.DataFrame(
                 columns=[
                     "symbol",
@@ -1979,8 +2057,16 @@ def get_earnings_calendar_multi(finnhub_key, days=5, major_only=True):
                     "revenue_estimate",
                     "revenue_actual",
                     "source",
+                    "asof_utc",
+                    "latency_s",
+                    "confidence_score",
+                    "confidence_label",
                 ]
             )
+
+    if "asof_utc" not in df.columns:
+        df["asof_utc"] = fetch_asof_utc
+    df["asof_utc"] = df["asof_utc"].fillna(fetch_asof_utc)
 
     # Prefer Finnhub when duplicates exist.
     source_rank = {"Finnhub": 0, "EarningsWhispers": 1, "EarningsHub": 2}
@@ -1990,7 +2076,41 @@ def get_earnings_calendar_multi(finnhub_key, days=5, major_only=True):
         .drop_duplicates(subset=["date", "symbol"], keep="first")
         .sort_values(["date", "time", "symbol"])
     )
-    df = df.drop(columns=["source_rank"], errors="ignore")
+    source_conf = {"Finnhub": 88, "EarningsWhispers": 56, "EarningsHub": 52}
+    df["source_score"] = df["source"].map(lambda s: source_conf.get(s, 50))
+    df["has_eps_actual"] = df["eps_actual"].map(lambda v: 0 if _is_missing_value(v) else 1)
+    df["has_eps_estimate"] = df["eps_estimate"].map(lambda v: 0 if _is_missing_value(v) else 1)
+    df["has_rev_actual"] = df["revenue_actual"].map(lambda v: 0 if _is_missing_value(v) else 1)
+    df["has_rev_estimate"] = df["revenue_estimate"].map(lambda v: 0 if _is_missing_value(v) else 1)
+    field_score = (
+        (df["has_eps_actual"] * 45)
+        + (df["has_eps_estimate"] * 20)
+        + (df["has_rev_actual"] * 25)
+        + (df["has_rev_estimate"] * 10)
+    )
+    df["confidence_score"] = ((0.65 * field_score) + (0.35 * df["source_score"])).round().astype(int)
+    df["confidence_score"] = df["confidence_score"].clip(0, 100)
+    df["confidence_label"] = df["confidence_score"].map(
+        lambda s: "High" if s >= 70 else "Medium" if s >= 45 else "Low"
+    )
+    df["latency_s"] = max(0, int((int(time.time() * 1000) - fetch_ms) / 1000))
+    df = df.drop(
+        columns=[
+            "source_rank",
+            "source_score",
+            "has_eps_actual",
+            "has_eps_estimate",
+            "has_rev_actual",
+            "has_rev_estimate",
+        ],
+        errors="ignore",
+    )
+    _set_dataset_meta(
+        "earnings_calendar",
+        "multi-source",
+        timestamp_ms=fetch_ms,
+        max_age_sec=int(_get_secret("EARNINGS_MAX_STALE_SECONDS", 900)),
+    )
     return df.reset_index(drop=True)
 
 

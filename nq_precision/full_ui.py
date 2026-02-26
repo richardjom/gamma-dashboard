@@ -592,6 +592,19 @@ def _fmt_econ_value(v):
     return s
 
 
+def _latency_from_asof_utc(asof_utc):
+    if not asof_utc:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(asof_utc).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+        now_utc = datetime.now(ZoneInfo("UTC"))
+        return max(0, int((now_utc - dt).total_seconds()))
+    except Exception:
+        return None
+
+
 def _render_external_econ_widget():
     widget_html = """
     <div style="border:1px solid #2f3540;border-radius:8px;overflow:hidden;background:#111722;">
@@ -1286,6 +1299,7 @@ def run_full_app():
             st.caption("Week view (next 7 days, ET). High impact = red, medium = orange/yellow.")
 
             econ_df = get_economic_calendar_window(finnhub_key, days=7)
+            econ_health = get_dataset_freshness("econ_calendar", max_age_sec=120)
             raw_counts = st.session_state.get("econ_source_counts_raw", {})
             final_counts = st.session_state.get("econ_source_counts_final", {})
             if raw_counts:
@@ -1298,6 +1312,11 @@ def run_full_app():
                 )
             else:
                 st.caption("Sources (raw -> final): no events returned from provider APIs")
+            st.caption(
+                f"Calendar health: {econ_health.get('status', 'unknown')} | "
+                f"latency {econ_health.get('latency_s') if econ_health.get('latency_s') is not None else 'n/a'}s | "
+                f"asof {econ_health.get('asof_utc') if econ_health.get('asof_utc') else 'n/a'}"
+            )
             if econ_df is None or econ_df.empty:
                 st.info("No economic events available for this window.")
             else:
@@ -1324,6 +1343,11 @@ def run_full_app():
                     for _, r in day_df.iterrows():
                         impact = str(r.get("impact", "medium")).lower()
                         impact_label = "HIGH" if impact == "high" else "MED" if impact == "medium" else "LOW"
+                        row_source = str(r.get("source", "unknown"))
+                        row_conf = int(r.get("confidence_score", 0) or 0)
+                        row_conf_label = str(r.get("confidence_label", "Low"))
+                        row_latency = _latency_from_asof_utc(r.get("asof_utc"))
+                        row_latency_txt = f"{row_latency}s" if row_latency is not None else "n/a"
                         event_iso = r.get("event_dt_iso")
                         countdown_html = ""
                         try:
@@ -1340,7 +1364,10 @@ def run_full_app():
                             f"""
                             <div class="econ-row {impact}">
                                 <div>›</div>
-                                <div>{r.get("time_et", "")}  {html.escape(str(r.get("event", "")))}</div>
+                                <div>
+                                    <div>{r.get("time_et", "")}  {html.escape(str(r.get("event", "")))}</div>
+                                    <div style="font-size:11px;color:#9fb0c7;">{html.escape(row_source)} • {row_conf_label} {row_conf}% • age {row_latency_txt}</div>
+                                </div>
                                 <div><span class="impact-chip {impact}">{impact_label}</span></div>
                                 <div>{html.escape(_fmt_econ_value(r.get("actual", "-")))}</div>
                                 <div>{html.escape(_fmt_econ_value(r.get("expected", "-")))}</div>
@@ -1365,6 +1392,12 @@ def run_full_app():
                 finnhub_key,
                 days=5,
                 major_only=st.session_state.earnings_major_only,
+            )
+            earnings_health = get_dataset_freshness("earnings_calendar", max_age_sec=900)
+            st.caption(
+                f"Earnings health: {earnings_health.get('status', 'unknown')} | "
+                f"latency {earnings_health.get('latency_s') if earnings_health.get('latency_s') is not None else 'n/a'}s | "
+                f"asof {earnings_health.get('asof_utc') if earnings_health.get('asof_utc') else 'n/a'}"
             )
             if earnings_df is None or earnings_df.empty:
                 st.info("No earnings found for this window.")
@@ -1396,12 +1429,16 @@ def run_full_app():
                                     if pd.notna(rev_est)
                                     else "Rev est: n/a"
                                 )
+                                row_latency = _latency_from_asof_utc(row.get("asof_utc"))
+                                row_latency_txt = f"{row_latency}s" if row_latency is not None else "n/a"
+                                conf_label = row.get("confidence_label", "Low")
+                                conf_score = int(row.get("confidence_score", 0) or 0)
                                 st.markdown(
                                     f"""
                                     <div class="earn-card">
                                         <div class="sym">{row['symbol']}</div>
                                         <div class="meta">{eps_txt} • {rev_txt}</div>
-                                        <div class="meta">{row.get('source', 'Source n/a')}</div>
+                                        <div class="meta">{row.get('source', 'Source n/a')} • {conf_label} {conf_score}% • age {row_latency_txt}</div>
                                     </div>
                                     """,
                                     unsafe_allow_html=True,
@@ -1418,6 +1455,9 @@ def run_full_app():
                                         "source": row.get("source", ""),
                                         "eps_estimate": row.get("eps_estimate"),
                                         "revenue_estimate": row.get("revenue_estimate"),
+                                        "confidence_label": row.get("confidence_label", "Low"),
+                                        "confidence_score": int(row.get("confidence_score", 0) or 0),
+                                        "asof_utc": row.get("asof_utc"),
                                     }
                                     st.rerun()
 
@@ -1697,7 +1737,10 @@ def run_full_app():
                     f"{dp:+.2f}%" if dp not in (None, "") else None,
                 )
                 st.caption(
-                    f"Date: {selected.get('date', 'N/A')} • {selected.get('time', 'Time TBA')} • Source: {selected.get('source', 'N/A')}"
+                    f"Date: {selected.get('date', 'N/A')} • {selected.get('time', 'Time TBA')} • "
+                    f"Source: {selected.get('source', 'N/A')} • "
+                    f"Confidence: {selected.get('confidence_label', 'Low')} {selected.get('confidence_score', 0)}% • "
+                    f"AsOf: {selected.get('asof_utc', 'n/a')}"
                 )
                 st.markdown(
                     f"Industry: `{detail.get('industry', 'N/A')}`  \n"
