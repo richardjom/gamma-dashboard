@@ -21,8 +21,11 @@ from nq_precision.full_data import (
     get_earnings_detail,
     get_economic_calendar,
     get_economic_calendar_window,
+    get_event_risk_snapshot,
     get_expirations_by_type,
     get_fear_greed_index,
+    get_futures_breadth_internals,
+    get_futures_opening_structure,
     get_market_overview_yahoo,
     get_nasdaq_heatmap_data,
     get_nq_intraday_data,
@@ -639,6 +642,399 @@ def _render_external_econ_widget():
     components.html(widget_html, height=760, scrolling=True)
 
 
+def _countdown_label(seconds_to):
+    if seconds_to is None:
+        return "-"
+    sec = int(seconds_to)
+    direction = "T-" if sec >= 0 else "T+"
+    sec_abs = abs(sec)
+    hh = sec_abs // 3600
+    mm = (sec_abs % 3600) // 60
+    ss = sec_abs % 60
+    if hh > 0:
+        return f"{direction}{hh}h {mm:02d}m"
+    if mm > 0:
+        return f"{direction}{mm}m {ss:02d}s"
+    return f"{direction}{ss}s"
+
+
+def _build_morning_playbook(data_0dte, data_weekly, nq_now, event_risk):
+    if not data_0dte:
+        return {}
+
+    dn_distance = float(nq_now - data_0dte["dn_nq"])
+    gf_distance = float(nq_now - data_0dte["g_flip_nq"])
+    regime = "Negative Gamma" if gf_distance > 0 else "Positive Gamma"
+    if abs(dn_distance) > 200:
+        bias = "Short Bias" if dn_distance > 0 else "Long Bias"
+    else:
+        bias = "Neutral"
+
+    level_conf = data_0dte.get("level_confidence", {})
+    base_candidates = [
+        ("Primary Wall", float(data_0dte["p_wall"])),
+        ("Secondary Wall", float(data_0dte["s_wall"])),
+        ("Target Resistance", float(data_0dte["p_wall"] + 35)),
+        ("Gamma Flip", float(data_0dte["g_flip_nq"])),
+        ("Delta Neutral", float(data_0dte["dn_nq"])),
+        ("Primary Floor", float(data_0dte["p_floor"])),
+        ("Secondary Floor", float(data_0dte["s_floor"])),
+        ("Target Support", float(data_0dte["p_floor"] - 35)),
+        ("Lower 0.25σ", float(nq_now - data_0dte.get("nq_em_full", 0) * 0.25)),
+        ("Lower 0.50σ", float(nq_now - data_0dte.get("nq_em_full", 0) * 0.50)),
+        ("Upper 0.25σ", float(nq_now + data_0dte.get("nq_em_full", 0) * 0.25)),
+        ("Upper 0.50σ", float(nq_now + data_0dte.get("nq_em_full", 0) * 0.50)),
+    ]
+
+    rows = []
+    for lvl, px in base_candidates:
+        c = level_conf.get(lvl, {})
+        score = int(c.get("score", 40))
+        dist = float(px - nq_now)
+        rows.append(
+            {
+                "level": lvl,
+                "price": float(px),
+                "distance": dist,
+                "score": score,
+            }
+        )
+
+    longs = sorted(
+        [r for r in rows if r["distance"] <= 0],
+        key=lambda r: (-r["score"], abs(r["distance"])),
+    )[:3]
+    shorts = sorted(
+        [r for r in rows if r["distance"] >= 0],
+        key=lambda r: (-r["score"], abs(r["distance"])),
+    )[:3]
+
+    no_trade = []
+    if event_risk and event_risk.get("lockout_active"):
+        ev = event_risk.get("lockout_event", {}) or {}
+        no_trade.append(f"Event lockout: {ev.get('event', 'High-impact release')} ({_countdown_label(ev.get('seconds_to', 0))})")
+    if abs(gf_distance) <= 15:
+        no_trade.append("Price is within 15 pts of Gamma Flip (high whipsaw risk).")
+    freshness = str((data_0dte.get("data_meta", {}) or {}).get("options_freshness", "unknown"))
+    if freshness != "fresh":
+        no_trade.append(f"Options chain freshness is {freshness}; reduce trust/size.")
+    if data_weekly:
+        dn_spread = abs(float(data_0dte["dn_nq"] - data_weekly["dn_nq"]))
+        if dn_spread > 150:
+            no_trade.append(f"0DTE/Weekly DN spread is {dn_spread:.0f} pts (chop regime risk).")
+    if not no_trade:
+        no_trade.append("No hard lockout right now. Follow event risk timer and opening structure.")
+
+    catalysts = []
+    for ev in (event_risk or {}).get("next_events", [])[:6]:
+        if ev.get("impact") not in {"high", "medium"}:
+            continue
+        catalysts.append(
+            {
+                "time_et": ev.get("time_et", ""),
+                "event": ev.get("event", ""),
+                "impact": str(ev.get("impact", "")).upper(),
+                "countdown": _countdown_label(ev.get("seconds_to", 0)),
+            }
+        )
+
+    return {
+        "regime": regime,
+        "bias": bias,
+        "dn_distance": dn_distance,
+        "gf_distance": gf_distance,
+        "long_setups": longs,
+        "short_setups": shorts,
+        "no_trade": no_trade,
+        "catalysts": catalysts,
+    }
+
+
+def _render_morning_playbook(playbook, nq_source, options_freshness, econ_freshness, breadth_freshness):
+    if not playbook:
+        st.info("Morning playbook unavailable.")
+        return
+    st.markdown(
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">☀️ Morning Playbook</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        unsafe_allow_html=True,
+    )
+    c1, c2, c3 = st.columns([1.05, 1.2, 1.2])
+    with c1:
+        st.markdown(f"**Regime:** `{playbook['regime']}`")
+        st.markdown(f"**Bias:** `{playbook['bias']}`")
+        st.markdown(f"**NQ vs DN:** `{playbook['dn_distance']:+.0f} pts`")
+        st.markdown(f"**NQ vs GF:** `{playbook['gf_distance']:+.0f} pts`")
+        st.markdown("**Data Freshness**")
+        st.markdown(
+            f"- Price: `{nq_source}`\n"
+            f"- Options: `{options_freshness}`\n"
+            f"- Econ: `{econ_freshness}`\n"
+            f"- Breadth: `{breadth_freshness}`"
+        )
+    with c2:
+        st.markdown("**Top Long Levels**")
+        for r in playbook.get("long_setups", []):
+            st.markdown(
+                f"- `{r['level']}` {r['price']:.2f} "
+                f"({r['distance']:+.0f} pts, score {r['score']})"
+            )
+        st.markdown("**Top Short Levels**")
+        for r in playbook.get("short_setups", []):
+            st.markdown(
+                f"- `{r['level']}` {r['price']:.2f} "
+                f"({r['distance']:+.0f} pts, score {r['score']})"
+            )
+    with c3:
+        st.markdown("**No-Trade Conditions**")
+        for item in playbook.get("no_trade", [])[:4]:
+            st.markdown(f"- {item}")
+        st.markdown("**Today's Catalysts**")
+        cats = playbook.get("catalysts", [])
+        if cats:
+            for ev in cats[:5]:
+                st.markdown(
+                    f"- `{ev['time_et']}` {ev['event']} ({ev['impact']}, {ev['countdown']})"
+                )
+        else:
+            st.markdown("- No high/medium events in the near window.")
+    st.markdown("</div></div>", unsafe_allow_html=True)
+
+
+def _render_level_quality_panel(data_0dte, data_weekly, nq_now):
+    st.markdown(
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🎯 Level Quality Engine</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        unsafe_allow_html=True,
+    )
+    if not data_0dte:
+        st.info("Level quality unavailable.")
+        st.markdown("</div></div>", unsafe_allow_html=True)
+        return
+
+    level_conf = data_0dte.get("level_confidence", {})
+    rows = [
+        ("Delta Neutral", float(data_0dte["dn_nq"])),
+        ("Gamma Flip", float(data_0dte["g_flip_nq"])),
+        ("Primary Wall", float(data_0dte["p_wall"])),
+        ("Primary Floor", float(data_0dte["p_floor"])),
+        ("Secondary Wall", float(data_0dte["s_wall"])),
+        ("Secondary Floor", float(data_0dte["s_floor"])),
+    ]
+    weekly_refs = []
+    if data_weekly:
+        weekly_refs = [
+            float(data_weekly["dn_nq"]),
+            float(data_weekly["g_flip_nq"]),
+            float(data_weekly["p_wall"]),
+            float(data_weekly["p_floor"]),
+            float(data_weekly["s_wall"]),
+            float(data_weekly["s_floor"]),
+        ]
+
+    quality_rows = []
+    for name, px in rows:
+        base = int((level_conf.get(name, {}) or {}).get("score", 40))
+        dist = abs(float(px - nq_now))
+        if dist <= 80:
+            dist_bonus = 10
+        elif dist <= 200:
+            dist_bonus = 5
+        else:
+            dist_bonus = 0
+
+        confl_bonus = 0
+        nearest_weekly = None
+        if weekly_refs:
+            nearest_weekly = min(abs(px - w) for w in weekly_refs)
+            if nearest_weekly <= 10:
+                confl_bonus = 20
+            elif nearest_weekly <= 25:
+                confl_bonus = 12
+            elif nearest_weekly <= 50:
+                confl_bonus = 6
+
+        final_score = int(max(0, min(100, round((base * 0.78) + dist_bonus + confl_bonus))))
+        label = "High" if final_score >= 70 else "Medium" if final_score >= 45 else "Low"
+        quality_rows.append(
+            {
+                "Level": name,
+                "Price": round(px, 2),
+                "Dist (pts)": round(px - nq_now, 1),
+                "Base": base,
+                "Confluence": 0 if nearest_weekly is None else round(nearest_weekly, 1),
+                "Final Score": final_score,
+                "Quality": label,
+            }
+        )
+
+    qdf = pd.DataFrame(quality_rows).sort_values(["Final Score", "Dist (pts)"], ascending=[False, True])
+    st.dataframe(qdf, width="stretch", hide_index=True)
+    st.caption("Final Score blends base options confidence, distance-to-spot usability, and weekly confluence.")
+    st.markdown("</div></div>", unsafe_allow_html=True)
+
+
+def _render_opening_structure_panel(opening):
+    st.markdown(
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">⏱ Opening Structure (First 60m)</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        unsafe_allow_html=True,
+    )
+    if not opening:
+        st.info("Opening structure data unavailable.")
+        st.markdown("</div></div>", unsafe_allow_html=True)
+        return
+
+    o1, o2, o3, o4 = st.columns(4)
+    o1.metric("Overnight High", f"{opening.get('overnight_high', 0):.2f}" if opening.get("overnight_high") else "N/A")
+    o2.metric("Overnight Low", f"{opening.get('overnight_low', 0):.2f}" if opening.get("overnight_low") else "N/A")
+    o3.metric("Globex VWAP", f"{opening.get('globex_vwap', 0):.2f}" if opening.get("globex_vwap") else "N/A")
+    o4.metric("RTH Open", f"{opening.get('rth_open', 0):.2f}" if opening.get("rth_open") else "N/A")
+
+    p1, p2, p3, p4 = st.columns(4)
+    p1.metric("Prior Day High", f"{opening.get('prior_day_high', 0):.2f}" if opening.get("prior_day_high") else "N/A")
+    p2.metric("Prior Day Low", f"{opening.get('prior_day_low', 0):.2f}" if opening.get("prior_day_low") else "N/A")
+    p3.metric("Prior Day Close", f"{opening.get('prior_day_close', 0):.2f}" if opening.get("prior_day_close") else "N/A")
+    p4.metric("Minutes Since Open", f"{int(opening.get('minutes_since_open', 0))}m")
+
+    ib_complete = opening.get("initial_balance_complete", False)
+    ib_status = "Complete" if ib_complete else "Building"
+    st.markdown(
+        f"**Open Type:** `{opening.get('opening_type', 'N/A')}` • "
+        f"**IB:** `{ib_status}` • "
+        f"**IB High/Low:** `{opening.get('initial_balance_high', 0):.2f}` / `{opening.get('initial_balance_low', 0):.2f}`  "
+        if opening.get("initial_balance_high") and opening.get("initial_balance_low")
+        else f"**Open Type:** `{opening.get('opening_type', 'N/A')}` • **IB:** `{ib_status}`"
+    )
+    st.caption(f"{opening.get('opening_note', '')} • asof {opening.get('asof_et', 'n/a')}")
+    st.markdown("</div></div>", unsafe_allow_html=True)
+
+
+def _render_event_risk_panel(event_risk):
+    st.markdown(
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🚨 Event-Risk Engine</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        unsafe_allow_html=True,
+    )
+    if not event_risk:
+        st.info("Event-risk data unavailable.")
+        st.markdown("</div></div>", unsafe_allow_html=True)
+        return
+
+    if event_risk.get("lockout_active"):
+        lock = event_risk.get("lockout_event", {}) or {}
+        st.error(
+            f"Risk lockout active: {lock.get('event', 'High-impact event')} "
+            f"({lock.get('time_et', '')}, {_countdown_label(lock.get('seconds_to', 0))})."
+        )
+    else:
+        nh = event_risk.get("next_high")
+        if nh:
+            st.warning(
+                f"Next high-impact event: {nh.get('event', 'N/A')} at {nh.get('time_et', 'N/A')} "
+                f"({_countdown_label(nh.get('seconds_to', 0))})."
+            )
+        else:
+            st.success("No high-impact releases in the active horizon.")
+
+    st.caption(
+        f"Today: {event_risk.get('today_high_count', 0)} high-impact, "
+        f"{event_risk.get('today_medium_count', 0)} medium-impact events. "
+        f"Total monitored: {event_risk.get('total_events', 0)}."
+    )
+
+    upcoming = event_risk.get("next_events", [])
+    if upcoming:
+        rows = []
+        for e in upcoming[:10]:
+            rows.append(
+                {
+                    "When (ET)": f"{e.get('date_et', '')} {e.get('time_et', '')}",
+                    "Countdown": _countdown_label(e.get("seconds_to", 0)),
+                    "Impact": str(e.get("impact", "")).upper(),
+                    "Type": e.get("kind", ""),
+                    "Event": e.get("event", ""),
+                    "Source": e.get("source", ""),
+                }
+            )
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+    else:
+        st.info("No upcoming events in this horizon.")
+    st.markdown("</div></div>", unsafe_allow_html=True)
+
+
+def _render_breadth_internals_panel(breadth_data, nq_day_change_pct, es_change_pct):
+    st.markdown(
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📡 Breadth & Internals (Futures Context)</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        unsafe_allow_html=True,
+    )
+    if not breadth_data:
+        st.info("Breadth/internals unavailable.")
+        st.markdown("</div></div>", unsafe_allow_html=True)
+        return
+
+    def _render_snapshot_card(name, snap, future_change):
+        if not snap:
+            st.info(f"{name}: unavailable")
+            return
+        adv = int(snap.get("advancers", 0))
+        dec = int(snap.get("decliners", 0))
+        breadth_pct = float(snap.get("breadth_pct", 0.0))
+        ad_line = int(snap.get("ad_line", 0))
+        vold_ratio = snap.get("vold_ratio")
+        trin_proxy = snap.get("trin_proxy")
+        tick_proxy = snap.get("tick_proxy")
+
+        st.markdown(f"**{name}**")
+        a1, a2, a3 = st.columns(3)
+        a1.metric("Adv / Dec", f"{adv} / {dec}")
+        a2.metric("Breadth %", f"{breadth_pct:.1f}%")
+        a3.metric("A/D Line", f"{ad_line:+d}")
+
+        b1, b2, b3 = st.columns(3)
+        b1.metric("Up/Down Vol", f"{vold_ratio:.2f}" if vold_ratio is not None else "N/A")
+        b2.metric("TRIN Proxy", f"{trin_proxy:.2f}" if trin_proxy is not None else "N/A")
+        b3.metric("TICK Proxy", f"{tick_proxy:+.0f}" if tick_proxy is not None else "N/A")
+
+        divergence = "Aligned"
+        if future_change > 0 and breadth_pct < 50:
+            divergence = "Bearish divergence"
+        elif future_change < 0 and breadth_pct > 50:
+            divergence = "Bullish divergence"
+        st.caption(f"{snap.get('label', name)} • Futures move {future_change:+.2f}% • {divergence}")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        _render_snapshot_card("NQ Internals", breadth_data.get("NQ", {}), nq_day_change_pct)
+    with c2:
+        _render_snapshot_card("ES Internals", breadth_data.get("ES", {}), es_change_pct)
+
+    sectors = breadth_data.get("sectors", [])
+    if sectors:
+        sec_df = pd.DataFrame(sectors).head(8)
+        fig = go.Figure(
+            data=[
+                go.Bar(
+                    x=sec_df["avg_change_pct"],
+                    y=sec_df["sector"],
+                    orientation="h",
+                    marker_color=[
+                        "#34d399" if v > 0 else "#f87171" if v < 0 else "#94a3b8"
+                        for v in sec_df["avg_change_pct"]
+                    ],
+                    text=[f"{v:+.2f}%" for v in sec_df["avg_change_pct"]],
+                    textposition="outside",
+                )
+            ]
+        )
+        fig.update_layout(
+            template="plotly_dark",
+            height=260,
+            margin=dict(l=10, r=10, t=20, b=10),
+            xaxis_title="Avg % Change",
+            yaxis_title="Sector",
+        )
+        st.markdown("**Nasdaq Sector Pulse (equal-weight)**")
+        st.plotly_chart(fig, use_container_width=True)
+    st.markdown("</div></div>", unsafe_allow_html=True)
+
+
 def run_full_app():
     st.set_page_config(
         page_title="NQ Precision Map", layout="wide", initial_sidebar_state="expanded"
@@ -849,6 +1245,9 @@ def run_full_app():
         vix_level = market_data.get("vix", {}).get("price", 15)
         fg = get_fear_greed_index()
         sentiment_score = calculate_sentiment_score(data_0dte, nq_now, vix_level, fg["score"])
+        opening_structure = get_futures_opening_structure("NQ=F")
+        event_risk = get_event_risk_snapshot(finnhub_key, hours_ahead=24)
+        breadth_internals = get_futures_breadth_internals()
 
     level_interactions_df = None
     nq_data = None
@@ -967,6 +1366,35 @@ def run_full_app():
                 </div></div></div>
                 """,
                     unsafe_allow_html=True,
+                )
+
+                options_freshness = str((data_0dte.get("data_meta", {}) or {}).get("options_freshness", "unknown"))
+                econ_freshness = str(get_dataset_freshness("econ_calendar", max_age_sec=120).get("status", "unknown"))
+                breadth_freshness = str(get_dataset_freshness("breadth_internals", max_age_sec=90).get("status", "unknown"))
+                playbook = _build_morning_playbook(
+                    data_0dte=data_0dte,
+                    data_weekly=data_weekly,
+                    nq_now=nq_now,
+                    event_risk=event_risk,
+                )
+                _render_morning_playbook(
+                    playbook=playbook,
+                    nq_source=nq_source,
+                    options_freshness=options_freshness,
+                    econ_freshness=econ_freshness,
+                    breadth_freshness=breadth_freshness,
+                )
+                _render_level_quality_panel(
+                    data_0dte=data_0dte,
+                    data_weekly=data_weekly,
+                    nq_now=nq_now,
+                )
+                _render_opening_structure_panel(opening_structure)
+                _render_event_risk_panel(event_risk)
+                _render_breadth_internals_panel(
+                    breadth_data=breadth_internals,
+                    nq_day_change_pct=nq_day_change_pct,
+                    es_change_pct=float((market_data.get("es", {}) or {}).get("change_pct", 0.0)),
                 )
 
                 st.markdown(

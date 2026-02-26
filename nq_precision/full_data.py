@@ -1,6 +1,6 @@
 import re
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, time as dt_time
 import math
 from zoneinfo import ZoneInfo
 from urllib.parse import parse_qs, unquote, urlparse
@@ -1530,6 +1530,417 @@ NASDAQ_100_CORE = [
     "MRVL", "FTNT", "ADI", "KDP", "MNST", "WDAY", "NXPI", "TEAM", "CRWD", "ABNB",
 ]
 MAG_7 = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA"]
+
+# Large-cap SPX proxy basket for breadth/internals approximation.
+SP500_BREADTH_PROXY = [
+    "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AVGO", "JPM", "V",
+    "MA", "XOM", "LLY", "UNH", "JNJ", "PG", "COST", "HD", "WMT", "MRK",
+    "ABBV", "CVX", "PEP", "KO", "BAC", "CRM", "ADBE", "AMD", "NFLX", "ORCL",
+    "INTC", "CSCO", "QCOM", "AMAT", "TXN", "INTU", "PYPL", "DIS", "MCD", "NKE",
+    "GS", "MS", "CAT", "BA", "HON", "GE", "IBM", "AMGN", "DHR", "TMO",
+]
+
+
+def _to_et_index(df):
+    if df is None or df.empty:
+        return df
+    out = df.copy()
+    try:
+        idx = out.index
+        if getattr(idx, "tz", None) is None:
+            idx = idx.tz_localize("UTC")
+        out.index = idx.tz_convert("America/New_York")
+    except Exception:
+        pass
+    return out
+
+
+@st.cache_data(ttl=20)
+def get_futures_opening_structure(symbol="NQ=F"):
+    """Opening structure model for futures: overnight, globex VWAP, IB, and open classification."""
+    et = ZoneInfo("America/New_York")
+    try:
+        hist = yf.Ticker(symbol).history(period="3d", interval="5m")
+        if hist.empty:
+            return {}
+    except Exception:
+        return {}
+
+    hist = _to_et_index(hist)
+    if hist is None or hist.empty:
+        return {}
+
+    now_et = datetime.now(et)
+    today = now_et.date()
+    prev_day = today - timedelta(days=1)
+    start_overnight = datetime.combine(prev_day, dt_time(18, 0), tzinfo=et)
+    end_overnight = datetime.combine(today, dt_time(9, 29), tzinfo=et)
+    rth_open_dt = datetime.combine(today, dt_time(9, 30), tzinfo=et)
+    ib_end_dt = rth_open_dt + timedelta(minutes=60)
+
+    overnight_df = hist[(hist.index >= start_overnight) & (hist.index <= end_overnight)].copy()
+    prev_day_df = hist[hist.index.date == prev_day].copy()
+    rth_df = hist[hist.index >= rth_open_dt].copy()
+    ib_df = hist[(hist.index >= rth_open_dt) & (hist.index < ib_end_dt)].copy()
+
+    current_price = float(hist["Close"].iloc[-1]) if not hist.empty else None
+
+    def _safe_float(v):
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return None
+        try:
+            return float(v)
+        except Exception:
+            return None
+
+    overnight_high = _safe_float(overnight_df["High"].max()) if not overnight_df.empty else None
+    overnight_low = _safe_float(overnight_df["Low"].min()) if not overnight_df.empty else None
+
+    globex_vwap = None
+    if not overnight_df.empty:
+        vol = overnight_df["Volume"].fillna(0)
+        if float(vol.sum()) > 0:
+            globex_vwap = float((overnight_df["Close"] * vol).sum() / vol.sum())
+        else:
+            globex_vwap = _safe_float(overnight_df["Close"].mean())
+
+    prior_day_high = _safe_float(prev_day_df["High"].max()) if not prev_day_df.empty else None
+    prior_day_low = _safe_float(prev_day_df["Low"].min()) if not prev_day_df.empty else None
+    prior_day_close = _safe_float(prev_day_df["Close"].iloc[-1]) if not prev_day_df.empty else None
+
+    rth_open = _safe_float(rth_df["Open"].iloc[0]) if not rth_df.empty else None
+    ib_high = _safe_float(ib_df["High"].max()) if not ib_df.empty else None
+    ib_low = _safe_float(ib_df["Low"].min()) if not ib_df.empty else None
+    ib_mid = _safe_float(((ib_high + ib_low) / 2.0) if ib_high is not None and ib_low is not None else None)
+    ib_range = _safe_float((ib_high - ib_low) if ib_high is not None and ib_low is not None else None)
+
+    opening_type = "Rotation"
+    opening_note = "Inside overnight range."
+    if rth_open is not None and overnight_high is not None and rth_open > overnight_high:
+        opening_type = "Trend Up"
+        opening_note = "Opened above overnight high."
+    elif rth_open is not None and overnight_low is not None and rth_open < overnight_low:
+        opening_type = "Trend Down"
+        opening_note = "Opened below overnight low."
+    elif current_price is not None and ib_high is not None and ib_low is not None:
+        ib_rng = max(0.25, ib_high - ib_low)
+        if current_price > (ib_high + (0.10 * ib_rng)):
+            opening_type = "Trend Up"
+            opening_note = "Accepted above initial balance high."
+        elif current_price < (ib_low - (0.10 * ib_rng)):
+            opening_type = "Trend Down"
+            opening_note = "Accepted below initial balance low."
+        elif (
+            prior_day_high is not None
+            and rth_open is not None
+            and rth_open > prior_day_high
+            and current_price < prior_day_high
+        ):
+            opening_type = "Reversal Down"
+            opening_note = "Failed gap above prior day high."
+        elif (
+            prior_day_low is not None
+            and rth_open is not None
+            and rth_open < prior_day_low
+            and current_price > prior_day_low
+        ):
+            opening_type = "Reversal Up"
+            opening_note = "Failed gap below prior day low."
+        else:
+            opening_type = "Rotation"
+            opening_note = "Balanced around initial balance."
+
+    minutes_since_open = int((now_et - rth_open_dt).total_seconds() // 60)
+    if minutes_since_open < 0:
+        minutes_since_open = 0
+
+    out = {
+        "symbol": symbol,
+        "asof_et": now_et.strftime("%Y-%m-%d %I:%M:%S %p ET"),
+        "current_price": current_price,
+        "overnight_high": overnight_high,
+        "overnight_low": overnight_low,
+        "globex_vwap": globex_vwap,
+        "prior_day_high": prior_day_high,
+        "prior_day_low": prior_day_low,
+        "prior_day_close": prior_day_close,
+        "rth_open": rth_open,
+        "initial_balance_high": ib_high,
+        "initial_balance_low": ib_low,
+        "initial_balance_mid": ib_mid,
+        "initial_balance_range": ib_range,
+        "opening_type": opening_type,
+        "opening_note": opening_note,
+        "minutes_since_open": minutes_since_open,
+        "initial_balance_complete": bool(minutes_since_open >= 60 and ib_high is not None and ib_low is not None),
+    }
+    _set_dataset_meta(
+        f"opening_structure:{symbol}",
+        "Yahoo Finance",
+        timestamp_ms=int(time.time() * 1000),
+        max_age_sec=60,
+    )
+    return out
+
+
+def _extract_symbol_frame(raw_df, symbol):
+    try:
+        if isinstance(raw_df.columns, pd.MultiIndex):
+            if symbol in raw_df.columns.get_level_values(0):
+                return raw_df[symbol]
+            return None
+        return raw_df
+    except Exception:
+        return None
+
+
+def _calc_breadth_snapshot(symbols, label):
+    if not symbols:
+        return {}
+    symbols = list(dict.fromkeys(symbols))
+    try:
+        raw = yf.download(
+            tickers=symbols,
+            period="7d",
+            interval="1d",
+            auto_adjust=False,
+            progress=False,
+            group_by="ticker",
+            threads=True,
+        )
+    except Exception:
+        return {}
+
+    rows = []
+    for sym in symbols:
+        frame = _extract_symbol_frame(raw, sym)
+        if frame is None or frame.empty:
+            continue
+        close = frame.get("Close")
+        if close is None:
+            continue
+        close = close.dropna()
+        if len(close) < 2:
+            continue
+        last = float(close.iloc[-1])
+        prev = float(close.iloc[-2])
+        if prev == 0:
+            continue
+        change_pct = ((last - prev) / prev) * 100.0
+        vol = 0.0
+        try:
+            v = frame.get("Volume")
+            if v is not None and not v.dropna().empty:
+                vol = float(v.dropna().iloc[-1])
+        except Exception:
+            vol = 0.0
+        rows.append({"symbol": sym, "last": last, "change_pct": change_pct, "volume": vol})
+
+    if not rows:
+        return {}
+
+    df = pd.DataFrame(rows)
+    adv = int((df["change_pct"] > 0).sum())
+    dec = int((df["change_pct"] < 0).sum())
+    unchanged = int((df["change_pct"] == 0).sum())
+    total = int(len(df))
+    ad_line = int(adv - dec)
+    breadth_pct = float((adv / max(1, adv + dec)) * 100.0)
+
+    up_vol = float(df.loc[df["change_pct"] > 0, "volume"].sum())
+    down_vol = float(df.loc[df["change_pct"] < 0, "volume"].sum())
+    vold_ratio = float(up_vol / down_vol) if down_vol > 0 else None
+    trin_proxy = float((adv / max(1, dec)) / (up_vol / max(1.0, down_vol))) if up_vol > 0 else None
+    tick_proxy = float(((adv - dec) / max(1, adv + dec)) * 1000.0)
+
+    top_gainers = (
+        df.sort_values("change_pct", ascending=False)
+        .head(5)[["symbol", "change_pct"]]
+        .to_dict(orient="records")
+    )
+    top_losers = (
+        df.sort_values("change_pct", ascending=True)
+        .head(5)[["symbol", "change_pct"]]
+        .to_dict(orient="records")
+    )
+
+    return {
+        "label": label,
+        "advancers": adv,
+        "decliners": dec,
+        "unchanged": unchanged,
+        "total": total,
+        "ad_line": ad_line,
+        "breadth_pct": breadth_pct,
+        "up_volume": up_vol,
+        "down_volume": down_vol,
+        "vold_ratio": vold_ratio,
+        "trin_proxy": trin_proxy,
+        "tick_proxy": tick_proxy,
+        "top_gainers": top_gainers,
+        "top_losers": top_losers,
+    }
+
+
+@st.cache_data(ttl=45)
+def get_futures_breadth_internals():
+    nq_snapshot = _calc_breadth_snapshot(NASDAQ_100_CORE, "NQ Breadth (NQ100 proxy)")
+    es_snapshot = _calc_breadth_snapshot(SP500_BREADTH_PROXY, "ES Breadth (SPX proxy)")
+
+    sector_rows = []
+    heatmap = get_nasdaq_heatmap_data(
+        universe="Nasdaq 100",
+        size_mode="Equal Weight",
+        timeframe="1D",
+        custom_symbols="",
+    )
+    if heatmap is not None and not heatmap.empty:
+        for sector, grp in heatmap.groupby("sector"):
+            adv = int((grp["change_pct"] > 0).sum())
+            dec = int((grp["change_pct"] < 0).sum())
+            breadth = float((adv / max(1, adv + dec)) * 100.0)
+            sector_rows.append(
+                {
+                    "sector": sector,
+                    "avg_change_pct": float(grp["change_pct"].mean()),
+                    "breadth_pct": breadth,
+                    "adv": adv,
+                    "dec": dec,
+                }
+            )
+        sector_rows = sorted(sector_rows, key=lambda x: abs(x["avg_change_pct"]), reverse=True)
+
+    _set_dataset_meta(
+        "breadth_internals",
+        "Yahoo Finance",
+        timestamp_ms=int(time.time() * 1000),
+        max_age_sec=90,
+    )
+    return {
+        "NQ": nq_snapshot,
+        "ES": es_snapshot,
+        "sectors": sector_rows,
+        "asof_utc": _utc_iso_from_ms(int(time.time() * 1000)),
+    }
+
+
+def _earnings_to_event_dt_et(date_val, time_bucket):
+    et = ZoneInfo("America/New_York")
+    if date_val is None:
+        return None
+    if isinstance(date_val, str):
+        d = pd.to_datetime(date_val, errors="coerce")
+        if pd.isna(d):
+            return None
+        date_val = d.date()
+
+    bucket = str(time_bucket or "").lower()
+    if "before" in bucket:
+        tt = dt_time(8, 0)
+    elif "after" in bucket:
+        tt = dt_time(16, 5)
+    else:
+        tt = dt_time(12, 0)
+    return datetime.combine(date_val, tt, tzinfo=et)
+
+
+@st.cache_data(ttl=20)
+def get_event_risk_snapshot(finnhub_key, hours_ahead=24):
+    et = ZoneInfo("America/New_York")
+    now_et = datetime.now(et)
+    days = max(1, min(7, int(math.ceil(float(hours_ahead) / 24.0)) + 1))
+
+    events = []
+    econ_df = get_economic_calendar_window(finnhub_key, days=days)
+    if econ_df is not None and not econ_df.empty:
+        for _, r in econ_df.iterrows():
+            event_dt = _parse_event_dt_et(r.get("event_dt_iso")) or _parse_event_dt_et(
+                f"{r.get('date_et', '')} {r.get('time_et', '')}"
+            )
+            if event_dt is None:
+                continue
+            seconds_to = int((event_dt - now_et).total_seconds())
+            if seconds_to < -3600 or seconds_to > int(hours_ahead * 3600):
+                continue
+            impact = str(r.get("impact", "low")).lower()
+            weight = 3 if impact == "high" else 2 if impact == "medium" else 1
+            events.append(
+                {
+                    "kind": "economic",
+                    "event": str(r.get("event", "Unknown")),
+                    "impact": impact,
+                    "weight": weight,
+                    "time_et": event_dt.strftime("%I:%M %p").lstrip("0"),
+                    "date_et": event_dt.date().isoformat(),
+                    "event_dt_iso": event_dt.isoformat(),
+                    "seconds_to": seconds_to,
+                    "source": str(r.get("source", "multi-source")),
+                }
+            )
+
+    try:
+        earnings_df = get_earnings_calendar_multi(finnhub_key, days=2, major_only=True)
+    except Exception:
+        earnings_df = pd.DataFrame()
+    if earnings_df is not None and not earnings_df.empty:
+        for _, r in earnings_df.iterrows():
+            event_dt = _earnings_to_event_dt_et(r.get("date"), r.get("time"))
+            if event_dt is None:
+                continue
+            seconds_to = int((event_dt - now_et).total_seconds())
+            if seconds_to < -3600 or seconds_to > int(hours_ahead * 3600):
+                continue
+            events.append(
+                {
+                    "kind": "earnings",
+                    "event": f"{str(r.get('symbol', ''))} earnings ({str(r.get('time', 'Time TBA'))})",
+                    "impact": "medium",
+                    "weight": 2,
+                    "time_et": event_dt.strftime("%I:%M %p").lstrip("0"),
+                    "date_et": event_dt.date().isoformat(),
+                    "event_dt_iso": event_dt.isoformat(),
+                    "seconds_to": seconds_to,
+                    "source": str(r.get("source", "earnings")),
+                }
+            )
+
+    events = sorted(events, key=lambda x: x.get("seconds_to", 0))
+    next_events = [e for e in events if e.get("seconds_to", 0) >= 0][:14]
+    high_events = [e for e in events if e.get("impact") == "high" and e.get("seconds_to", 0) >= 0]
+    next_high = high_events[0] if high_events else None
+
+    # Risk lockout: 5 min before through 2 min after high-impact releases.
+    lockout_event = None
+    for e in events:
+        if e.get("impact") != "high":
+            continue
+        sec = int(e.get("seconds_to", 0))
+        if -120 <= sec <= 300:
+            lockout_event = e
+            break
+
+    today = now_et.date().isoformat()
+    today_events = [e for e in events if e.get("date_et") == today]
+    today_high = sum(1 for e in today_events if e.get("impact") == "high")
+    today_med = sum(1 for e in today_events if e.get("impact") == "medium")
+
+    out = {
+        "asof_et": now_et.strftime("%Y-%m-%d %I:%M:%S %p ET"),
+        "lockout_active": bool(lockout_event),
+        "lockout_event": lockout_event,
+        "next_high": next_high,
+        "next_events": next_events,
+        "today_high_count": int(today_high),
+        "today_medium_count": int(today_med),
+        "total_events": int(len(events)),
+    }
+    _set_dataset_meta(
+        "event_risk",
+        "multi-source",
+        timestamp_ms=int(time.time() * 1000),
+        max_age_sec=45,
+    )
+    return out
 
 
 @st.cache_data(ttl=3600)
