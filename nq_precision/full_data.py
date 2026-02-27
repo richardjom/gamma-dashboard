@@ -1840,6 +1840,213 @@ def _calc_breadth_snapshot(symbols, label):
     }
 
 
+def _calc_vwap_and_std(frame):
+    if frame is None or frame.empty:
+        return None, None
+    tp = ((frame["High"] + frame["Low"] + frame["Close"]) / 3.0).astype(float)
+    vol = frame["Volume"].fillna(0).astype(float)
+    if float(vol.sum()) <= 0:
+        vwap = float(tp.mean()) if not tp.empty else None
+        std = float(tp.std()) if len(tp) > 1 else None
+        return vwap, std
+    vwap = float((tp * vol).sum() / vol.sum())
+    var = float((((tp - vwap) ** 2) * vol).sum() / vol.sum())
+    std = math.sqrt(var) if var >= 0 else None
+    return vwap, std
+
+
+def _profile_bin_size(symbol, span):
+    s = str(symbol or "").upper()
+    if "NQ" in s:
+        return 5.0
+    if "ES" in s:
+        return 1.0
+    if "YM" in s:
+        return 10.0
+    if "RTY" in s:
+        return 1.0
+    raw = max(0.25, float(span) / 36.0 if span and span > 0 else 1.0)
+    for step in (0.25, 0.5, 1.0, 2.0, 5.0, 10.0):
+        if raw <= step:
+            return step
+    return 10.0
+
+
+def _calc_volume_profile_levels(frame, symbol, value_area=0.70):
+    if frame is None or frame.empty:
+        return {}
+    bars = frame.copy()
+    bars = bars[(bars["Volume"].fillna(0) > 0)].copy()
+    if bars.empty:
+        return {}
+
+    tp = ((bars["High"] + bars["Low"] + bars["Close"]) / 3.0).astype(float)
+    vol = bars["Volume"].fillna(0).astype(float)
+    span = float(tp.max() - tp.min()) if not tp.empty else 0.0
+    step = _profile_bin_size(symbol, span)
+    buckets = (tp / step).round() * step
+    prof = (
+        pd.DataFrame({"bucket": buckets, "vol": vol})
+        .groupby("bucket", as_index=False)["vol"]
+        .sum()
+        .sort_values("bucket")
+        .reset_index(drop=True)
+    )
+    if prof.empty:
+        return {}
+
+    poc_idx = int(prof["vol"].idxmax())
+    poc = float(prof.loc[poc_idx, "bucket"])
+    total_vol = float(prof["vol"].sum())
+    target = total_vol * float(value_area)
+
+    selected = {poc_idx}
+    cum = float(prof.loc[poc_idx, "vol"])
+    left = poc_idx - 1
+    right = poc_idx + 1
+    while cum < target and (left >= 0 or right < len(prof)):
+        left_vol = float(prof.loc[left, "vol"]) if left >= 0 else -1.0
+        right_vol = float(prof.loc[right, "vol"]) if right < len(prof) else -1.0
+        if right_vol > left_vol:
+            pick = right
+            right += 1
+        else:
+            pick = left
+            left -= 1
+        if pick is None or pick < 0 or pick >= len(prof):
+            break
+        if pick in selected:
+            continue
+        selected.add(pick)
+        cum += float(prof.loc[pick, "vol"])
+
+    prices = [float(prof.loc[i, "bucket"]) for i in selected]
+    vah = max(prices) if prices else poc
+    val = min(prices) if prices else poc
+    return {
+        "poc": poc,
+        "vah": vah,
+        "val": val,
+        "bin_size": step,
+        "rows": int(len(prof)),
+    }
+
+
+@st.cache_data(ttl=30)
+def get_futures_reference_levels(symbol="NQ=F", finnhub_key=""):
+    et = ZoneInfo("America/New_York")
+    now_et = datetime.now(et)
+    try:
+        hist = yf.Ticker(symbol).history(period="12d", interval="5m")
+    except Exception:
+        return {}
+    hist = _to_et_index(hist)
+    if hist is None or hist.empty:
+        return {}
+    hist = hist[hist.index <= now_et].copy()
+    if hist.empty:
+        return {}
+
+    rth_mask = (hist.index.time >= dt_time(9, 30)) & (hist.index.time <= dt_time(16, 0))
+    rth = hist[rth_mask].copy()
+    rth_dates = sorted(list(dict.fromkeys(rth.index.date.tolist())))
+    if not rth_dates:
+        return {}
+
+    session_date = rth_dates[-1]
+    prev_date = rth_dates[-2] if len(rth_dates) > 1 else rth_dates[-1]
+    session_rth = rth[rth.index.date == session_date].copy()
+    prev_rth = rth[rth.index.date == prev_date].copy()
+    if session_rth.empty:
+        return {}
+
+    session_vwap, session_std = _calc_vwap_and_std(session_rth)
+
+    week_start = session_date - timedelta(days=session_date.weekday())
+    week_rth = rth[rth.index.date >= week_start].copy()
+    week_vwap, _ = _calc_vwap_and_std(week_rth)
+
+    overnight_start = datetime.combine(session_date - timedelta(days=1), dt_time(18, 0), tzinfo=et)
+    overnight_end = datetime.combine(session_date, dt_time(9, 29), tzinfo=et)
+    overnight_df = hist[(hist.index >= overnight_start) & (hist.index <= overnight_end)].copy()
+    overnight_high = float(overnight_df["High"].max()) if not overnight_df.empty else None
+    overnight_low = float(overnight_df["Low"].min()) if not overnight_df.empty else None
+
+    profile = _calc_volume_profile_levels(prev_rth if not prev_rth.empty else session_rth, symbol=symbol)
+
+    # Event-anchored VWAP: latest high/medium release in the last 48h.
+    event_vwap = None
+    event_anchor = None
+    if finnhub_key:
+        try:
+            econ_df = get_economic_calendar_window(finnhub_key, days=2)
+            if econ_df is not None and not econ_df.empty:
+                events = []
+                for _, row in econ_df.iterrows():
+                    if str(row.get("impact", "")).lower() not in {"high", "medium"}:
+                        continue
+                    evt_dt = _parse_event_dt_et(row.get("event_dt_iso"))
+                    if evt_dt is None:
+                        evt_dt = _parse_event_dt_et(f"{row.get('date_et', '')} {row.get('time_et', '')}")
+                    if evt_dt is None:
+                        continue
+                    if evt_dt > now_et:
+                        continue
+                    if (now_et - evt_dt).total_seconds() > 48 * 3600:
+                        continue
+                    events.append((evt_dt, str(row.get("event", "Event"))))
+                if events:
+                    events.sort(key=lambda x: x[0], reverse=True)
+                    event_dt, event_name = events[0]
+                    slice_df = hist[hist.index >= event_dt].copy()
+                    event_vwap, _ = _calc_vwap_and_std(slice_df)
+                    event_anchor = {
+                        "event": event_name,
+                        "time_et": event_dt.strftime("%Y-%m-%d %I:%M %p ET"),
+                    }
+        except Exception:
+            pass
+
+    spot = float(hist["Close"].iloc[-1])
+    out = {
+        "symbol": symbol,
+        "asof_et": now_et.strftime("%Y-%m-%d %I:%M:%S %p ET"),
+        "spot": spot,
+        "session_date": session_date.isoformat(),
+        "prior_date": prev_date.isoformat(),
+        "profile": {
+            "poc": profile.get("poc"),
+            "vah": profile.get("vah"),
+            "val": profile.get("val"),
+            "bin_size": profile.get("bin_size"),
+        },
+        "vwap": {
+            "session": session_vwap,
+            "session_upper_1": (session_vwap + session_std) if session_vwap is not None and session_std is not None else None,
+            "session_lower_1": (session_vwap - session_std) if session_vwap is not None and session_std is not None else None,
+            "session_upper_2": (session_vwap + (2.0 * session_std)) if session_vwap is not None and session_std is not None else None,
+            "session_lower_2": (session_vwap - (2.0 * session_std)) if session_vwap is not None and session_std is not None else None,
+            "week": week_vwap,
+            "event": event_vwap,
+            "event_anchor": event_anchor,
+        },
+        "pools": {
+            "prior_day_high": float(prev_rth["High"].max()) if not prev_rth.empty else None,
+            "prior_day_low": float(prev_rth["Low"].min()) if not prev_rth.empty else None,
+            "prior_day_close": float(prev_rth["Close"].iloc[-1]) if not prev_rth.empty else None,
+            "overnight_high": overnight_high,
+            "overnight_low": overnight_low,
+        },
+    }
+    _set_dataset_meta(
+        f"reference_levels:{symbol}",
+        "Yahoo Finance + Econ",
+        timestamp_ms=int(time.time() * 1000),
+        max_age_sec=60,
+    )
+    return out
+
+
 @st.cache_data(ttl=45)
 def get_futures_breadth_internals():
     nq_snapshot = _calc_breadth_snapshot(NASDAQ_100_CORE, "NQ Breadth (NQ100 proxy)")

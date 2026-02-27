@@ -25,6 +25,7 @@ from nq_precision.full_data import (
     get_expirations_by_type,
     get_fear_greed_index,
     get_futures_breadth_internals,
+    get_futures_reference_levels,
     get_futures_opening_structure,
     get_market_overview_yahoo,
     get_nasdaq_heatmap_data,
@@ -1274,6 +1275,146 @@ def _render_level_quality_panel(data_0dte, data_weekly, nq_now, level_interactio
     st.markdown("</div></div>", unsafe_allow_html=True)
 
 
+def _render_reference_levels_panel(data_0dte, reference_levels, opening_structure, nq_now, event_risk):
+    st.markdown(
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧷 Day-Trader Reference Levels</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        unsafe_allow_html=True,
+    )
+    if not data_0dte:
+        st.info("Reference levels unavailable.")
+        st.markdown("</div></div>", unsafe_allow_html=True)
+        return
+
+    level_conf = data_0dte.get("level_confidence", {}) or {}
+    em_full = float(data_0dte.get("nq_em_full", 0) or 0)
+    inval_pad = max(8.0, em_full * 0.08)
+
+    rows = []
+
+    def add_level(name, price, group, base):
+        if price is None:
+            return
+        try:
+            px = float(price)
+        except Exception:
+            return
+        rows.append(
+            {
+                "Level": name,
+                "Type": group,
+                "Price": px,
+                "Base": int(max(0, min(100, base))),
+            }
+        )
+
+    # Options-derived levels.
+    add_level("Primary Wall", data_0dte.get("p_wall"), "Options", int((level_conf.get("Primary Wall", {}) or {}).get("score", 65)))
+    add_level("Secondary Wall", data_0dte.get("s_wall"), "Options", int((level_conf.get("Secondary Wall", {}) or {}).get("score", 55)))
+    add_level("Gamma Flip", data_0dte.get("g_flip_nq"), "Options", int((level_conf.get("Gamma Flip", {}) or {}).get("score", 58)))
+    add_level("Delta Neutral", data_0dte.get("dn_nq"), "Options", int((level_conf.get("Delta Neutral", {}) or {}).get("score", 60)))
+    add_level("Primary Floor", data_0dte.get("p_floor"), "Options", int((level_conf.get("Primary Floor", {}) or {}).get("score", 65)))
+    add_level("Secondary Floor", data_0dte.get("s_floor"), "Options", int((level_conf.get("Secondary Floor", {}) or {}).get("score", 55)))
+
+    # Profile + VWAP stack.
+    ref = reference_levels or {}
+    profile = ref.get("profile", {}) or {}
+    vwap = ref.get("vwap", {}) or {}
+    pools = ref.get("pools", {}) or {}
+    add_level("POC", profile.get("poc"), "Profile", 76)
+    add_level("VAH", profile.get("vah"), "Profile", 72)
+    add_level("VAL", profile.get("val"), "Profile", 72)
+    add_level("Session VWAP", vwap.get("session"), "VWAP", 74)
+    add_level("VWAP +1σ", vwap.get("session_upper_1"), "VWAP", 64)
+    add_level("VWAP -1σ", vwap.get("session_lower_1"), "VWAP", 64)
+    add_level("Weekly VWAP", vwap.get("week"), "VWAP", 68)
+    add_level("Event VWAP", vwap.get("event"), "VWAP", 66)
+
+    # Liquidity pools.
+    add_level("Prior Day High", pools.get("prior_day_high"), "Liquidity", 68)
+    add_level("Prior Day Low", pools.get("prior_day_low"), "Liquidity", 68)
+    add_level("Overnight High", pools.get("overnight_high"), "Liquidity", 62)
+    add_level("Overnight Low", pools.get("overnight_low"), "Liquidity", 62)
+
+    # Open-context levels.
+    op = opening_structure or {}
+    add_level("OR15 High", op.get("opening_range_15m_high"), "Opening", 66)
+    add_level("OR15 Low", op.get("opening_range_15m_low"), "Opening", 66)
+    add_level("IB High", op.get("initial_balance_high"), "Opening", 63)
+    add_level("IB Low", op.get("initial_balance_low"), "Opening", 63)
+
+    if not rows:
+        st.info("Reference levels unavailable.")
+        st.markdown("</div></div>", unsafe_allow_html=True)
+        return
+
+    df = pd.DataFrame(rows).drop_duplicates(subset=["Level", "Price"]).reset_index(drop=True)
+    cluster_threshold = max(8.0, nq_now * 0.00035)
+    final_rows = []
+    lockout_penalty = 6 if event_risk and event_risk.get("lockout_active") else 0
+    for i, row in df.iterrows():
+        px = float(row["Price"])
+        base = int(row["Base"])
+        dist = abs(px - nq_now)
+        if dist <= 35:
+            prox = 95
+        elif dist <= 90:
+            prox = 82
+        elif dist <= 180:
+            prox = 64
+        else:
+            prox = 42
+
+        near = df[(df.index != i) & ((df["Price"] - px).abs() <= cluster_threshold)]
+        cluster_score = min(96, 50 + (len(near) * 9))
+        final = int(round((0.58 * base) + (0.27 * prox) + (0.15 * cluster_score) - lockout_penalty))
+        final = int(max(0, min(100, final)))
+
+        if px > nq_now + 2:
+            side = "Resistance"
+            invalidation = px + inval_pad
+        elif px < nq_now - 2:
+            side = "Support"
+            invalidation = px - inval_pad
+        else:
+            side = "Pivot"
+            invalidation = px + inval_pad
+
+        final_rows.append(
+            {
+                "Level": row["Level"],
+                "Type": row["Type"],
+                "Side": side,
+                "Price": round(px, 2),
+                "Dist (pts)": round(px - nq_now, 1),
+                "Base": base,
+                "Confluence": int(cluster_score),
+                "Score": final,
+                "Invalidation": round(float(invalidation), 2),
+            }
+        )
+
+    out = pd.DataFrame(final_rows).sort_values(["Score", "Dist (pts)"], ascending=[False, True]).reset_index(drop=True)
+    top3 = out.head(3)
+    m1, m2, m3 = st.columns(3)
+    if not top3.empty:
+        m1.metric("Top 1", f"{top3.iloc[0]['Level']}", f"{int(top3.iloc[0]['Score'])} pts")
+    if len(top3) > 1:
+        m2.metric("Top 2", f"{top3.iloc[1]['Level']}", f"{int(top3.iloc[1]['Score'])} pts")
+    if len(top3) > 2:
+        m3.metric("Top 3", f"{top3.iloc[2]['Level']}", f"{int(top3.iloc[2]['Score'])} pts")
+
+    st.dataframe(out.head(12), width="stretch", hide_index=True)
+    anchor = (reference_levels or {}).get("vwap", {}).get("event_anchor")
+    anchor_txt = "None"
+    if anchor and anchor.get("event"):
+        anchor_txt = f"{anchor.get('event')} @ {anchor.get('time_et')}"
+    st.caption(
+        f"Score = 58% base + 27% usability (distance) + 15% nearby confluence. "
+        f"Cluster threshold: {cluster_threshold:.1f} pts. Event VWAP anchor: {anchor_txt}."
+    )
+    st.markdown("</div></div>", unsafe_allow_html=True)
+
+
 def _render_opening_structure_panel(opening):
     st.markdown(
         '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">⏱ Open Context (First 30–60m)</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
@@ -1695,6 +1836,7 @@ def run_full_app():
         fg = get_fear_greed_index()
         sentiment_score = calculate_sentiment_score(data_0dte, nq_now, vix_level, fg["score"])
         opening_structure = get_futures_opening_structure("NQ=F")
+        reference_levels = get_futures_reference_levels("NQ=F", finnhub_key)
         event_risk = get_event_risk_snapshot(finnhub_key, hours_ahead=24)
         breadth_internals = get_futures_breadth_internals()
 
@@ -1831,6 +1973,13 @@ def run_full_app():
                 _render_trade_plan_panel(
                     playbook=playbook,
                     data_0dte=data_0dte,
+                    nq_now=nq_now,
+                    event_risk=event_risk,
+                )
+                _render_reference_levels_panel(
+                    data_0dte=data_0dte,
+                    reference_levels=reference_levels,
+                    opening_structure=opening_structure,
                     nq_now=nq_now,
                     event_risk=event_risk,
                 )
