@@ -1,6 +1,8 @@
 import time
 from datetime import datetime, timedelta
 import html
+import math
+import re
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -748,6 +750,544 @@ def _countdown_label(seconds_to):
     return f"{direction}{ss}s"
 
 
+def _safe_float(v, default=None):
+    try:
+        if v is None:
+            return default
+        if isinstance(v, float) and pd.isna(v):
+            return default
+        return float(v)
+    except Exception:
+        return default
+
+
+def _parse_macro_number(raw):
+    if raw is None:
+        return None
+    s = str(raw).strip().upper().replace(",", "")
+    if s in {"", "-", "N/A", "NONE", "NAN", "NULL"}:
+        return None
+    neg_paren = s.startswith("(") and s.endswith(")")
+    if neg_paren:
+        s = s[1:-1].strip()
+    if s.endswith("%"):
+        s = s[:-1]
+    mult = 1.0
+    if s.endswith("K"):
+        mult = 1_000.0
+        s = s[:-1]
+    elif s.endswith("M"):
+        mult = 1_000_000.0
+        s = s[:-1]
+    elif s.endswith("B"):
+        mult = 1_000_000_000.0
+        s = s[:-1]
+    elif s.endswith("T"):
+        mult = 1_000_000_000_000.0
+        s = s[:-1]
+    m = re.search(r"[-+]?\d*\.?\d+", s)
+    if not m:
+        return None
+    v = float(m.group(0)) * mult
+    if neg_paren:
+        v = -abs(v)
+    return v
+
+
+def _build_regime_engine(data_0dte, data_weekly, nq_now, market_data, opening_structure, event_risk, nq_data):
+    if not data_0dte:
+        return {}
+
+    dn_distance = float(nq_now - data_0dte["dn_nq"])
+    gf_distance = float(nq_now - data_0dte["g_flip_nq"])
+
+    gamma_score = -24 if gf_distance > 0 else 16
+    if abs(dn_distance) > 280:
+        stretch_score = -12 if dn_distance > 0 else 9
+    elif abs(dn_distance) > 150:
+        stretch_score = -6 if dn_distance > 0 else 5
+    else:
+        stretch_score = 3
+
+    macro_score = 0
+    vix = _safe_float((market_data.get("vix", {}) or {}).get("price"), 0.0)
+    vvix = _safe_float((market_data.get("vvix", {}) or {}).get("price"), 0.0)
+    dxy_chg = _safe_float((market_data.get("dxy", {}) or {}).get("change_pct"), 0.0)
+    tnx_chg = _safe_float((market_data.get("10y", {}) or {}).get("change"), 0.0)
+    macro_score += 6 if vix < 16 else -10 if vix > 22 else 0
+    macro_score += 4 if vvix < 95 else -6 if vvix > 110 else 0
+    macro_score += 2 if dxy_chg <= 0 else -2
+    macro_score += 2 if tnx_chg <= 0 else -2
+
+    opening_score = 0
+    op_type = str((opening_structure or {}).get("opening_type", "")).lower()
+    vwap_rel = str((opening_structure or {}).get("vwap_relation", "")).lower()
+    if "trend up" in op_type:
+        opening_score += 6
+    elif "trend down" in op_type:
+        opening_score -= 6
+    elif "reversal up" in op_type:
+        opening_score += 4
+    elif "reversal down" in op_type:
+        opening_score -= 4
+    if "above" in vwap_rel:
+        opening_score += 2
+    elif "below" in vwap_rel:
+        opening_score -= 2
+
+    event_score = 2
+    if event_risk and event_risk.get("lockout_active"):
+        event_score = -14
+    else:
+        nh = (event_risk or {}).get("next_high")
+        if nh and int(nh.get("seconds_to", 999999)) <= 3600:
+            event_score = -8
+
+    trend_score = 0
+    rv_score = 0
+    if nq_data is not None and not nq_data.empty and len(nq_data) >= 14:
+        close = nq_data["Close"].astype(float)
+        rets = close.pct_change().dropna()
+        if not rets.empty:
+            rv_5m_pct = float(rets.tail(min(24, len(rets))).std() * 100.0)
+            rv_score = -6 if rv_5m_pct > 0.24 else 2 if rv_5m_pct < 0.12 else 0
+        ret_12 = float((close.iloc[-1] / close.iloc[-13] - 1.0) * 100.0) if len(close) >= 13 else 0.0
+        trend_score = 7 if ret_12 > 0.25 else -7 if ret_12 < -0.25 else 0
+
+    weekly_score = 0
+    if data_weekly:
+        weekly_dn = float(data_weekly.get("dn_nq", nq_now))
+        weekly_gf = float(data_weekly.get("g_flip_nq", nq_now))
+        weekly_bias = 1 if nq_now > weekly_gf else -1
+        intraday_bias = 1 if gf_distance > 0 else -1
+        weekly_score = 5 if weekly_bias == intraday_bias else -5
+        if abs(nq_now - weekly_dn) < 70:
+            weekly_score += 2
+
+    total = int(max(-100, min(100, gamma_score + stretch_score + macro_score + opening_score + event_score + trend_score + rv_score + weekly_score)))
+    if total >= 22:
+        regime = "Trend / Risk-On"
+        execution = "Favor momentum and buy pullbacks into validated support."
+    elif total <= -22:
+        regime = "Defensive / Volatile"
+        execution = "Use smaller size; fade extensions or scalp around hard levels."
+    else:
+        regime = "Balanced / Two-Way"
+        execution = "Lean mean-reversion until range breaks with acceptance."
+
+    comp_rows = [
+        {"Factor": "Gamma Regime", "Score": gamma_score},
+        {"Factor": "Stretch vs Delta Neutral", "Score": stretch_score},
+        {"Factor": "Macro (VIX/VVIX/DXY/US10Y)", "Score": macro_score},
+        {"Factor": "Opening Auction", "Score": opening_score},
+        {"Factor": "Event Risk", "Score": event_score},
+        {"Factor": "Intraday Trend/Vol", "Score": trend_score + rv_score},
+        {"Factor": "Weekly Alignment", "Score": weekly_score},
+    ]
+    return {
+        "score": total,
+        "regime": regime,
+        "execution": execution,
+        "dn_distance": dn_distance,
+        "gf_distance": gf_distance,
+        "components": comp_rows,
+    }
+
+
+def _build_dealer_forward_pressure(data_0dte, qqq_price, ratio):
+    if not data_0dte:
+        return {}
+    df = data_0dte.get("df")
+    if df is None or df.empty:
+        return {}
+
+    use = df.copy()
+    use["open_interest"] = use["open_interest"].fillna(0.0)
+    use["gamma"] = use["gamma"].fillna(0.0)
+    use["gamma_unit"] = use.apply(
+        lambda r: float(r["open_interest"]) * float(r["gamma"]) * 100.0 * (1.0 if r["type"] == "call" else -1.0),
+        axis=1,
+    )
+    ratio_safe = max(1e-6, float(ratio or 0.0))
+    qqq_safe = max(1e-6, float(qqq_price or 0.0))
+
+    scenarios = []
+    for move_pts in [25, 50, 100]:
+        d_qqq = float(move_pts / ratio_safe)
+        raw_delta_notional = float((use["gamma_unit"] * d_qqq * qqq_safe).sum())
+        # Hedge flow approximation: dealers hedge opposite the option delta change.
+        flow_up = -raw_delta_notional
+        flow_down = raw_delta_notional
+        scenarios.append(
+            {
+                "Move": f"+{move_pts} pts",
+                "Dealer Hedge Flow": flow_up,
+                "Action": "Buy" if flow_up > 0 else "Sell",
+            }
+        )
+        scenarios.append(
+            {
+                "Move": f"-{move_pts} pts",
+                "Dealer Hedge Flow": flow_down,
+                "Action": "Buy" if flow_down > 0 else "Sell",
+            }
+        )
+
+    strike_map = (
+        use.groupby("strike", as_index=False)
+        .agg(gamma_unit=("gamma_unit", "sum"), gex=("GEX", "sum"), oi=("open_interest", "sum"))
+        .sort_values("strike")
+    )
+    strike_map["nq_strike"] = strike_map["strike"] * ratio_safe
+    strike_map["abs_gamma"] = strike_map["gamma_unit"].abs()
+    strike_nodes = (
+        strike_map.sort_values("abs_gamma", ascending=False)
+        .head(8)
+        .sort_values("nq_strike")[["nq_strike", "gamma_unit", "gex", "oi"]]
+    )
+    lead_flow = float(scenarios[0]["Dealer Hedge Flow"]) if scenarios else 0.0
+    regime = "Short Gamma (chase moves)" if lead_flow > 0 else "Long Gamma (dampen moves)"
+    return {
+        "regime": regime,
+        "scenarios": scenarios,
+        "nodes": strike_nodes,
+    }
+
+
+def _build_microstructure_snapshot(nq_data, opening_structure):
+    if nq_data is None or nq_data.empty or len(nq_data) < 12:
+        return {}
+
+    use = nq_data.copy()
+    use = use.rename(columns=str.title)
+    close = use["Close"].astype(float)
+    high = use["High"].astype(float)
+    low = use["Low"].astype(float)
+    open_ = use["Open"].astype(float)
+    volume = use["Volume"].fillna(0.0).astype(float)
+
+    bar_range = high - low
+    avg_range_20 = float(bar_range.tail(min(20, len(bar_range))).mean())
+    cur_range = float(bar_range.iloc[-1])
+    range_ratio = float(cur_range / avg_range_20) if avg_range_20 > 0 else 1.0
+
+    rets = close.pct_change().dropna()
+    rv_5m_pct = float(rets.tail(min(24, len(rets))).std() * 100.0) if not rets.empty else 0.0
+    trend_12 = float((close.iloc[-1] / close.iloc[-13] - 1.0) * 100.0) if len(close) >= 13 else 0.0
+
+    vwap = float((close * volume).sum() / volume.sum()) if float(volume.sum()) > 0 else float(close.mean())
+    vwap_dev_pts = float(close.iloc[-1] - vwap)
+
+    up_vol = float(volume[(close >= open_)].sum())
+    down_vol = float(volume[(close < open_)].sum())
+    total_vol = up_vol + down_vol
+    vol_imb = float(((up_vol - down_vol) / total_vol) * 100.0) if total_vol > 0 else 0.0
+
+    vol_mean = float(volume.tail(min(20, len(volume))).mean())
+    vol_std = float(volume.tail(min(20, len(volume))).std()) if len(volume) > 2 else 0.0
+    vol_z = float((volume.iloc[-1] - vol_mean) / vol_std) if vol_std > 0 else 0.0
+
+    if range_ratio < 0.82 and abs(vol_imb) < 8:
+        state = "Compression"
+    elif trend_12 > 0.25 and vol_imb > 8:
+        state = "Up Impulse"
+    elif trend_12 < -0.25 and vol_imb < -8:
+        state = "Down Impulse"
+    else:
+        state = "Rotation"
+
+    drive = str((opening_structure or {}).get("open_drive_signal", "Balanced"))
+    return {
+        "state": state,
+        "rv_5m_pct": rv_5m_pct,
+        "range_ratio": range_ratio,
+        "trend_12_pct": trend_12,
+        "vwap_dev_pts": vwap_dev_pts,
+        "vol_imb_pct": vol_imb,
+        "vol_z": vol_z,
+        "open_drive": drive,
+    }
+
+
+def _build_cross_asset_driver_matrix(market_data, nq_day_change_pct):
+    cfg = [
+        ("ES", "es", 1.00, +1, "Risk Beta"),
+        ("RTY", "rty", 0.85, +1, "Risk Beta"),
+        ("YM", "ym", 0.70, +1, "Risk Beta"),
+        ("GC", "gc", 0.30, +1, "Commodity"),
+        ("DXY", "dxy", 0.75, -1, "USD"),
+        ("US10Y", "10y", 0.65, -1, "Rates"),
+        ("VIX", "vix", 1.10, -1, "Vol"),
+        ("VVIX", "vvix", 0.75, -1, "Vol"),
+    ]
+    rows = []
+    composite = 0.0
+    for label, key, weight, direction, bucket in cfg:
+        md = market_data.get(key, {}) or {}
+        if key == "10y":
+            raw_change = _safe_float(md.get("change"), 0.0) * 10.0
+        else:
+            raw_change = _safe_float(md.get("change_pct"), 0.0)
+        impact = float(direction * weight * raw_change)
+        composite += impact
+        rows.append(
+            {
+                "Driver": label,
+                "Bucket": bucket,
+                "Change": raw_change,
+                "Signed Impact": impact,
+                "Weight": weight,
+            }
+        )
+
+    rows.append(
+        {
+            "Driver": "NQ",
+            "Bucket": "Core",
+            "Change": float(nq_day_change_pct),
+            "Signed Impact": float(nq_day_change_pct),
+            "Weight": 1.0,
+        }
+    )
+    df = pd.DataFrame(rows).sort_values("Signed Impact", ascending=False)
+    regime = "Risk-On" if composite >= 0.8 else "Risk-Off" if composite <= -0.8 else "Mixed"
+    dominant = df.iloc[df["Signed Impact"].abs().idxmax()]["Driver"] if not df.empty else "N/A"
+    return {
+        "composite": composite,
+        "regime": regime,
+        "dominant": dominant,
+        "rows": df,
+    }
+
+
+def _build_event_surprise_engine(econ_df):
+    if econ_df is None or econ_df.empty:
+        return {}
+    now_et = datetime.now(ZoneInfo("America/New_York"))
+    past_cut = now_et - timedelta(hours=36)
+    future_cut = now_et + timedelta(hours=8)
+    impact_w = {"high": 3.0, "medium": 2.0, "low": 1.0}
+
+    releases = []
+    upcoming = []
+    for _, row in econ_df.iterrows():
+        try:
+            dt_raw = row.get("event_dt_iso")
+            evt_dt = datetime.fromisoformat(str(dt_raw).replace("Z", "+00:00"))
+            if evt_dt.tzinfo is None:
+                evt_dt = evt_dt.replace(tzinfo=ZoneInfo("America/New_York"))
+            evt_dt = evt_dt.astimezone(ZoneInfo("America/New_York"))
+        except Exception:
+            continue
+
+        impact = str(row.get("impact", "low")).lower()
+        w = float(impact_w.get(impact, 1.0))
+        if now_et < evt_dt <= future_cut and impact in {"high", "medium"}:
+            upcoming.append(
+                {
+                    "time_et": evt_dt.strftime("%I:%M %p").lstrip("0"),
+                    "event": str(row.get("event", "")),
+                    "impact": impact.upper(),
+                    "countdown": _countdown_label(int((evt_dt - now_et).total_seconds())),
+                }
+            )
+
+        if not (past_cut <= evt_dt <= now_et):
+            continue
+        actual = _parse_macro_number(row.get("actual"))
+        expected = _parse_macro_number(row.get("expected"))
+        prior = _parse_macro_number(row.get("prior"))
+        if actual is None or expected is None:
+            continue
+        surprise = float(actual - expected)
+        denom = abs(expected) if abs(expected) > 1e-9 else max(abs(actual), 1.0)
+        surprise_pct = float((surprise / denom) * 100.0)
+        shock = float(abs(surprise_pct) * w)
+        releases.append(
+            {
+                "When": evt_dt.strftime("%a %I:%M %p"),
+                "Event": str(row.get("event", "")),
+                "Impact": impact.upper(),
+                "Actual": _fmt_econ_value(row.get("actual")),
+                "Expected": _fmt_econ_value(row.get("expected")),
+                "Prior": _fmt_econ_value(row.get("prior")),
+                "Surprise %": surprise_pct,
+                "Shock": shock,
+                "Signed": surprise_pct * w,
+            }
+        )
+
+    if releases:
+        rel_df = pd.DataFrame(releases).sort_values("Shock", ascending=False)
+        net_signed = float(rel_df["Signed"].sum())
+        shock_avg = float(rel_df["Shock"].head(8).mean())
+        recent = rel_df.head(10).copy()
+    else:
+        rel_df = pd.DataFrame(columns=["When", "Event", "Impact", "Actual", "Expected", "Prior", "Surprise %", "Shock", "Signed"])
+        net_signed = 0.0
+        shock_avg = 0.0
+        recent = rel_df
+
+    shock_regime = "High Shock" if shock_avg >= 35 else "Moderate Shock" if shock_avg >= 15 else "Calm"
+    bias = "Upside Surprise" if net_signed >= 8 else "Downside Surprise" if net_signed <= -8 else "Balanced Surprise"
+    return {
+        "shock_regime": shock_regime,
+        "bias": bias,
+        "net_signed": net_signed,
+        "recent": recent,
+        "upcoming": upcoming[:6],
+    }
+
+
+def _render_regime_engine_panel(regime):
+    st.markdown(
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧠 Regime Engine</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        unsafe_allow_html=True,
+    )
+    if not regime:
+        st.info("Regime engine unavailable.")
+        st.markdown("</div></div>", unsafe_allow_html=True)
+        return
+
+    score = int(regime.get("score", 0))
+    r1, r2, r3 = st.columns([1, 1, 2])
+    r1.metric("Regime Score", f"{score:+d}")
+    r2.metric("State", regime.get("regime", "N/A"))
+    r3.markdown(f"**Execution:** {regime.get('execution', 'N/A')}")
+    st.progress(max(0.0, min(1.0, (score + 100) / 200)))
+
+    comp = pd.DataFrame(regime.get("components", []))
+    if not comp.empty:
+        st.dataframe(comp, width="stretch", hide_index=True)
+    st.caption(
+        f"NQ vs DN: {regime.get('dn_distance', 0):+.0f} pts | "
+        f"NQ vs GF: {regime.get('gf_distance', 0):+.0f} pts"
+    )
+    st.markdown("</div></div>", unsafe_allow_html=True)
+
+
+def _render_dealer_forward_pressure_panel(payload):
+    st.markdown(
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧮 Dealer Forward Pressure</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        unsafe_allow_html=True,
+    )
+    if not payload:
+        st.info("Forward pressure unavailable.")
+        st.markdown("</div></div>", unsafe_allow_html=True)
+        return
+
+    def _fmt_mm(v):
+        av = abs(float(v))
+        sign = "-" if float(v) < 0 else "+"
+        return f"{sign}${av/1_000_000:.2f}M"
+
+    scenarios = pd.DataFrame(payload.get("scenarios", []))
+    if not scenarios.empty:
+        show = scenarios.copy()
+        show["Dealer Hedge Flow"] = show["Dealer Hedge Flow"].map(_fmt_mm)
+        st.markdown(f"**Flow Regime:** `{payload.get('regime', 'N/A')}`")
+        st.dataframe(show, width="stretch", hide_index=True)
+
+    nodes = payload.get("nodes")
+    if nodes is not None and not nodes.empty:
+        nd = nodes.copy()
+        nd["nq_strike"] = nd["nq_strike"].map(lambda v: round(float(v), 2))
+        nd["gamma_unit"] = nd["gamma_unit"].map(lambda v: round(float(v), 2))
+        nd["gex"] = nd["gex"].map(lambda v: round(float(v), 2))
+        nd["oi"] = nd["oi"].map(lambda v: int(float(v)))
+        nd = nd.rename(
+            columns={
+                "nq_strike": "NQ Strike",
+                "gamma_unit": "Gamma Unit",
+                "gex": "Net GEX",
+                "oi": "Open Interest",
+            }
+        )
+        st.markdown("**Highest-impact strike nodes**")
+        st.dataframe(nd, width="stretch", hide_index=True)
+    st.markdown("</div></div>", unsafe_allow_html=True)
+
+
+def _render_microstructure_panel(payload):
+    st.markdown(
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🔬 Microstructure Panel</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        unsafe_allow_html=True,
+    )
+    if not payload:
+        st.info("Microstructure unavailable.")
+        st.markdown("</div></div>", unsafe_allow_html=True)
+        return
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("State", payload.get("state", "N/A"))
+    m2.metric("5m RV", f"{payload.get('rv_5m_pct', 0):.3f}%")
+    m3.metric("Range Ratio", f"{payload.get('range_ratio', 0):.2f}x")
+    m4.metric("Vol Imbalance", f"{payload.get('vol_imb_pct', 0):+.1f}%")
+
+    n1, n2, n3 = st.columns(3)
+    n1.metric("12-bar Trend", f"{payload.get('trend_12_pct', 0):+.2f}%")
+    n2.metric("VWAP Dev", f"{payload.get('vwap_dev_pts', 0):+.2f} pts")
+    n3.metric("Volume z-score", f"{payload.get('vol_z', 0):+.2f}")
+    st.caption(f"Open drive: {payload.get('open_drive', 'N/A')}")
+    st.markdown("</div></div>", unsafe_allow_html=True)
+
+
+def _render_cross_asset_driver_matrix_panel(payload):
+    st.markdown(
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🌐 Cross-Asset Driver Matrix</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        unsafe_allow_html=True,
+    )
+    if not payload:
+        st.info("Driver matrix unavailable.")
+        st.markdown("</div></div>", unsafe_allow_html=True)
+        return
+
+    d1, d2, d3 = st.columns(3)
+    d1.metric("Composite Pressure", f"{payload.get('composite', 0):+.2f}")
+    d2.metric("Regime", payload.get("regime", "N/A"))
+    d3.metric("Dominant Driver", payload.get("dominant", "N/A"))
+
+    df = payload.get("rows")
+    if df is not None and not df.empty:
+        show = df.copy()
+        show["Change"] = show["Change"].map(lambda v: f"{float(v):+.2f}")
+        show["Signed Impact"] = show["Signed Impact"].map(lambda v: f"{float(v):+.2f}")
+        show["Weight"] = show["Weight"].map(lambda v: f"{float(v):.2f}")
+        st.dataframe(show[["Driver", "Bucket", "Change", "Weight", "Signed Impact"]], width="stretch", hide_index=True)
+    st.markdown("</div></div>", unsafe_allow_html=True)
+
+
+def _render_event_surprise_panel(payload):
+    st.markdown(
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">⚡ Event Surprise Engine</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        unsafe_allow_html=True,
+    )
+    if not payload:
+        st.info("Event surprise data unavailable.")
+        st.markdown("</div></div>", unsafe_allow_html=True)
+        return
+
+    e1, e2, e3 = st.columns(3)
+    e1.metric("Shock Regime", payload.get("shock_regime", "N/A"))
+    e2.metric("Surprise Bias", payload.get("bias", "N/A"))
+    e3.metric("Net Signed Surprise", f"{payload.get('net_signed', 0):+.1f}")
+
+    recent = payload.get("recent")
+    if recent is not None and not recent.empty:
+        show = recent.copy()
+        show["Surprise %"] = show["Surprise %"].map(lambda v: f"{float(v):+.2f}%")
+        show["Shock"] = show["Shock"].map(lambda v: f"{float(v):.1f}")
+        st.markdown("**Recent releases (last ~36h)**")
+        st.dataframe(show[["When", "Event", "Impact", "Actual", "Expected", "Prior", "Surprise %", "Shock"]], width="stretch", hide_index=True)
+    else:
+        st.caption("No releases with both Actual and Expected in the recent window.")
+
+    upcoming = payload.get("upcoming", [])
+    if upcoming:
+        st.markdown("**Upcoming high/medium releases (next ~8h)**")
+        st.dataframe(pd.DataFrame(upcoming), width="stretch", hide_index=True)
+    st.markdown("</div></div>", unsafe_allow_html=True)
+
+
 def _freshness_class(status):
     s = str(status or "").lower()
     if s == "fresh":
@@ -1417,7 +1957,7 @@ def _render_reference_levels_panel(data_0dte, reference_levels, opening_structur
 
 def _render_opening_structure_panel(opening):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">⏱ Open Context (First 30–60m)</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">⏱ Opening Auction Context</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not opening:
@@ -1451,10 +1991,23 @@ def _render_opening_structure_panel(opening):
         else "N/A"
     )
     setup_hint = opening.get("setup_hint", "Wait")
+    auction_score = 50
+    if str(opening.get("opening_type", "")).lower().startswith("trend"):
+        auction_score += 16
+    elif str(opening.get("opening_type", "")).lower().startswith("reversal"):
+        auction_score += 8
+    if str(opening.get("vwap_relation", "")).lower().startswith("above"):
+        auction_score += 8
+    elif str(opening.get("vwap_relation", "")).lower().startswith("below"):
+        auction_score -= 8
+    if str(opening.get("opening_range_15m_state", "")).lower().startswith("breakout"):
+        auction_score += 8
+    auction_score = int(max(0, min(100, auction_score)))
     st.markdown(
         f"**Gap Type:** `{opening.get('gap_type', 'N/A')}` • "
         f"**IB:** `{ib_status}` ({ib_txt}) • "
-        f"**Setup Hint:** `{setup_hint}`"
+        f"**Setup Hint:** `{setup_hint}` • "
+        f"**Auction Quality:** `{auction_score}/100`"
     )
     st.caption(f"{opening.get('opening_note', '')} • asof {opening.get('asof_et', 'n/a')}")
     st.markdown("</div></div>", unsafe_allow_html=True)
@@ -1847,6 +2400,31 @@ def run_full_app():
         if nq_data is not None and not nq_data.empty:
             level_interactions_df = _build_level_interactions(nq_data, data_0dte)
 
+    econ_window = get_economic_calendar_window(finnhub_key, days=7)
+    regime_engine = _build_regime_engine(
+        data_0dte=data_0dte,
+        data_weekly=data_weekly,
+        nq_now=nq_now,
+        market_data=market_data,
+        opening_structure=opening_structure,
+        event_risk=event_risk,
+        nq_data=nq_data,
+    )
+    dealer_forward_pressure = _build_dealer_forward_pressure(
+        data_0dte=data_0dte,
+        qqq_price=qqq_price,
+        ratio=ratio,
+    )
+    microstructure_snapshot = _build_microstructure_snapshot(
+        nq_data=nq_data,
+        opening_structure=opening_structure,
+    )
+    cross_asset_matrix = _build_cross_asset_driver_matrix(
+        market_data=market_data,
+        nq_day_change_pct=nq_day_change_pct,
+    )
+    event_surprise_engine = _build_event_surprise_engine(econ_window)
+
     nav_sections = {
         "Workspace": [
             ("🏠 Overview", "📈 Market Overview"),
@@ -1976,6 +2554,12 @@ def run_full_app():
                     nq_now=nq_now,
                     event_risk=event_risk,
                 )
+                _render_regime_engine_panel(regime_engine)
+                _render_opening_structure_panel(opening_structure)
+                _render_dealer_forward_pressure_panel(dealer_forward_pressure)
+                _render_microstructure_panel(microstructure_snapshot)
+                _render_cross_asset_driver_matrix_panel(cross_asset_matrix)
+                _render_event_surprise_panel(event_surprise_engine)
                 _render_reference_levels_panel(
                     data_0dte=data_0dte,
                     reference_levels=reference_levels,
@@ -1989,7 +2573,6 @@ def run_full_app():
                     nq_now=nq_now,
                     level_interactions_df=level_interactions_df,
                 )
-                _render_opening_structure_panel(opening_structure)
                 _render_event_risk_panel(event_risk)
                 _render_breadth_internals_panel(
                     breadth_data=breadth_internals,
