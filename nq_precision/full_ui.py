@@ -2112,6 +2112,24 @@ def _render_breadth_internals_panel(breadth_data, nq_day_change_pct, es_change_p
     )
     macro_cols[4].metric("Macro Regime", risk_regime, f"score {risk_score:+d}")
 
+    nq_snap = breadth_data.get("NQ", {}) or {}
+    es_snap = breadth_data.get("ES", {}) or {}
+    p1, p2 = st.columns(2)
+    nq_part = float(nq_snap.get("participation_score", 0.0) or 0.0)
+    es_part = float(es_snap.get("participation_score", 0.0) or 0.0)
+    p1.metric(
+        "NQ Participation (-2..+2)",
+        f"{nq_part:+.2f}",
+        f"{float(nq_snap.get('up_pct', 0.0) or 0.0):.0f}% up / {float(nq_snap.get('down_pct', 0.0) or 0.0):.0f}% down",
+    )
+    p1.caption(str(nq_snap.get("participation_label", "Balanced Participation")))
+    p2.metric(
+        "ES Participation (-2..+2)",
+        f"{es_part:+.2f}",
+        f"{float(es_snap.get('up_pct', 0.0) or 0.0):.0f}% up / {float(es_snap.get('down_pct', 0.0) or 0.0):.0f}% down",
+    )
+    p2.caption(str(es_snap.get("participation_label", "Balanced Participation")))
+
     def _render_snapshot_card(name, snap, future_change):
         if not snap:
             st.info(f"{name}: unavailable")

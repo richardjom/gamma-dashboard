@@ -1804,6 +1804,21 @@ def _calc_breadth_snapshot(symbols, label):
     total = int(len(df))
     ad_line = int(adv - dec)
     breadth_pct = float((adv / max(1, adv + dec)) * 100.0)
+    up_pct = float((adv / max(1, total)) * 100.0)
+    down_pct = float((dec / max(1, total)) * 100.0)
+    unchanged_pct = float((unchanged / max(1, total)) * 100.0)
+    # Continuous participation scale in [-2, +2].
+    participation_score = float(2.0 * ((adv - dec) / max(1, total)))
+    if participation_score >= 1.2:
+        participation_label = "Strong Bullish Participation"
+    elif participation_score >= 0.4:
+        participation_label = "Bullish Participation"
+    elif participation_score <= -1.2:
+        participation_label = "Strong Bearish Participation"
+    elif participation_score <= -0.4:
+        participation_label = "Bearish Participation"
+    else:
+        participation_label = "Balanced Participation"
 
     up_vol = float(df.loc[df["change_pct"] > 0, "volume"].sum())
     down_vol = float(df.loc[df["change_pct"] < 0, "volume"].sum())
@@ -1830,6 +1845,11 @@ def _calc_breadth_snapshot(symbols, label):
         "total": total,
         "ad_line": ad_line,
         "breadth_pct": breadth_pct,
+        "up_pct": up_pct,
+        "down_pct": down_pct,
+        "unchanged_pct": unchanged_pct,
+        "participation_score": participation_score,
+        "participation_label": participation_label,
         "up_volume": up_vol,
         "down_volume": down_vol,
         "vold_ratio": vold_ratio,
