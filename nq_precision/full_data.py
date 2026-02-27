@@ -2665,46 +2665,156 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
     puts = df[df["type"] == "put"].copy()
     call_strikes = (
         calls.groupby("strike", as_index=False)
-        .agg(GEX=("GEX", "sum"), OI=("open_interest", "sum"), VOL=("volume", "sum"))
+        .agg(GEX=("GEX", "sum"), OI=("open_interest", "sum"), VOL=("volume", "sum"), LIQ=("liquidity", "sum"))
     )
     put_strikes = (
         puts.groupby("strike", as_index=False)
-        .agg(GEX=("GEX", "sum"), OI=("open_interest", "sum"), VOL=("volume", "sum"))
+        .agg(GEX=("GEX", "sum"), OI=("open_interest", "sum"), VOL=("volume", "sum"), LIQ=("liquidity", "sum"))
     )
-    call_strikes["score"] = call_strikes["GEX"].abs() * (1 + call_strikes["OI"].map(lambda v: math.log1p(max(v, 0))))
-    put_strikes["score"] = put_strikes["GEX"].abs() * (1 + put_strikes["OI"].map(lambda v: math.log1p(max(v, 0))))
     calls = calls.sort_values("GEX", ascending=False)
     puts = puts.sort_values("GEX", ascending=True)
 
-    calls_above = call_strikes[call_strikes["strike"] > qqq_price].sort_values("score", ascending=False)
-    if len(calls_above) > 0:
-        p_wall_strike = calls_above.iloc[0]["strike"]
-    else:
-        p_wall_strike = call_strikes.sort_values("score", ascending=False).iloc[0]["strike"] if len(call_strikes) > 0 else qqq_price * 1.01
+    etf_em_full = abs(float(nq_em_full / ratio)) if ratio not in (None, 0) else qqq_price * 0.012
+    em_pct = max(0.0025, float(etf_em_full / max(1.0, qqq_price)))
+    dist_cap_pct = max(0.03, min(0.12, em_pct * 3.0))
+    dist_decay = max(0.004, min(0.035, em_pct * 1.8))
+    min_separation = max(0.5, qqq_price * 0.0015)
 
-    puts_below = put_strikes[put_strikes["strike"] < qqq_price].sort_values("score", ascending=False)
-    if len(puts_below) > 0:
-        p_floor_strike = puts_below.iloc[0]["strike"]
-    else:
-        p_floor_strike = put_strikes.sort_values("score", ascending=False).iloc[0]["strike"] if len(put_strikes) > 0 else qqq_price * 0.99
+    def _prepare_strike_scores(frame, side):
+        if frame is None or frame.empty:
+            return pd.DataFrame(columns=["strike", "GEX", "OI", "VOL", "LIQ", "score", "confidence_score"])
+        out = frame.copy().sort_values("strike")
+        out["gex_abs"] = out["GEX"].abs()
+        out["dist_pct"] = (out["strike"] - qqq_price).abs() / max(1.0, qqq_price)
+        out["distance_score"] = out["dist_pct"].map(lambda d: math.exp(-float(d) / dist_decay))
+        out["prev_gex_abs"] = out["gex_abs"].shift(1).fillna(0.0)
+        out["next_gex_abs"] = out["gex_abs"].shift(-1).fillna(0.0)
+        out["cluster_gex_abs"] = out["gex_abs"] + (0.35 * out["prev_gex_abs"]) + (0.35 * out["next_gex_abs"])
 
+        max_gex = max(1.0, float(out["gex_abs"].max()))
+        max_cluster = max(1.0, float(out["cluster_gex_abs"].max()))
+        max_oi = max(1.0, float(out["OI"].max()))
+        max_vol = max(1.0, float(out["VOL"].max()))
+        max_liq = max(1.0, float(out["LIQ"].max()))
+
+        out["gex_strength"] = out["gex_abs"] / max_gex
+        out["cluster_strength"] = out["cluster_gex_abs"] / max_cluster
+        out["oi_strength"] = out["OI"] / max_oi
+        out["vol_strength"] = out["VOL"] / max_vol
+        out["liq_strength"] = out["LIQ"] / max_liq
+
+        if side == "call":
+            out["dir_factor"] = out["GEX"].map(lambda x: 1.0 if float(x) > 0 else 0.75)
+        else:
+            out["dir_factor"] = out["GEX"].map(lambda x: 1.0 if float(x) < 0 else 0.75)
+
+        base = (
+            (0.34 * out["gex_strength"])
+            + (0.24 * out["cluster_strength"])
+            + (0.20 * out["liq_strength"])
+            + (0.14 * out["oi_strength"])
+            + (0.08 * out["vol_strength"])
+        )
+        out["score"] = 100.0 * base * (0.80 + (0.20 * out["distance_score"])) * out["dir_factor"]
+        out["score"] = out["score"].fillna(0.0)
+        out["confidence_score"] = (
+            100.0
+            * (
+                (0.30 * out["gex_strength"])
+                + (0.24 * out["cluster_strength"])
+                + (0.20 * out["liq_strength"])
+                + (0.14 * out["distance_score"])
+                + (0.12 * out["oi_strength"])
+            )
+            * out["dir_factor"]
+        )
+        out["confidence_score"] = out["confidence_score"].fillna(0.0).clip(lower=0.0, upper=100.0)
+        return out.sort_values(["confidence_score", "score"], ascending=[False, False]).reset_index(drop=True)
+
+    call_scored = _prepare_strike_scores(call_strikes, "call")
+    put_scored = _prepare_strike_scores(put_strikes, "put")
+
+    def _pick_primary(frame, prefer_above):
+        if frame is None or frame.empty:
+            return None
+        primary_pool = frame[frame["dist_pct"] <= dist_cap_pct]
+        directional = (
+            primary_pool[primary_pool["strike"] > qqq_price]
+            if prefer_above
+            else primary_pool[primary_pool["strike"] < qqq_price]
+        )
+        if directional.empty:
+            directional = (
+                frame[frame["strike"] > qqq_price]
+                if prefer_above
+                else frame[frame["strike"] < qqq_price]
+            )
+        if directional.empty:
+            directional = frame
+        directional = directional.sort_values(["confidence_score", "score"], ascending=[False, False])
+        return float(directional.iloc[0]["strike"])
+
+    def _pick_secondary(frame, primary_strike, direction):
+        if frame is None or frame.empty or primary_strike is None:
+            return primary_strike
+        if direction == "up":
+            pool = frame[
+                (frame["strike"] > (primary_strike + min_separation))
+                & (frame["dist_pct"] <= (dist_cap_pct * 1.35))
+            ]
+            if pool.empty:
+                pool = frame[frame["strike"] > (primary_strike + min_separation)]
+        else:
+            pool = frame[
+                (frame["strike"] < (primary_strike - min_separation))
+                & (frame["dist_pct"] <= (dist_cap_pct * 1.35))
+            ]
+            if pool.empty:
+                pool = frame[frame["strike"] < (primary_strike - min_separation)]
+        if pool.empty:
+            return primary_strike
+        pool = pool.sort_values(["confidence_score", "score"], ascending=[False, False])
+        return float(pool.iloc[0]["strike"])
+
+    def _score_for_strike(frame, strike_val):
+        if frame is None or frame.empty or strike_val is None:
+            return 0.0
+        idx = (frame["strike"] - float(strike_val)).abs().idxmin()
+        try:
+            return float(frame.loc[idx, "confidence_score"])
+        except Exception:
+            return 0.0
+
+    p_wall_strike = _pick_primary(call_scored, prefer_above=True)
+    p_floor_strike = _pick_primary(put_scored, prefer_above=False)
+    if p_wall_strike is None:
+        p_wall_strike = qqq_price * 1.01
+    if p_floor_strike is None:
+        p_floor_strike = qqq_price * 0.99
+
+    # Guardrail: keep floor below wall; if violated, force directional picks.
     if p_floor_strike >= p_wall_strike:
-        p_floor_strike = min(puts["strike"]) if len(puts) > 0 else qqq_price * 0.99
-        p_wall_strike = max(calls["strike"]) if len(calls) > 0 else qqq_price * 1.01
+        alt_wall = call_scored[call_scored["strike"] > qqq_price]
+        alt_floor = put_scored[put_scored["strike"] < qqq_price]
+        if not alt_wall.empty:
+            p_wall_strike = float(alt_wall.iloc[0]["strike"])
+        if not alt_floor.empty:
+            p_floor_strike = float(alt_floor.iloc[0]["strike"])
+        if p_floor_strike >= p_wall_strike:
+            p_floor_strike = min(float(puts["strike"].min()), qqq_price * 0.995) if len(puts) > 0 else qqq_price * 0.99
+            p_wall_strike = max(float(calls["strike"].max()), qqq_price * 1.005) if len(calls) > 0 else qqq_price * 1.01
 
-    s_wall_strike = p_wall_strike
-    wall_candidates = call_strikes[call_strikes["strike"] > p_wall_strike].sort_values("score", ascending=False)
-    if not wall_candidates.empty:
-        s_wall_strike = wall_candidates.iloc[0]["strike"]
-
-    s_floor_strike = p_floor_strike
-    floor_candidates = put_strikes[put_strikes["strike"] < p_floor_strike].sort_values("score", ascending=False)
-    if not floor_candidates.empty:
-        s_floor_strike = floor_candidates.iloc[0]["strike"]
+    s_wall_strike = _pick_secondary(call_scored, p_wall_strike, direction="up")
+    s_floor_strike = _pick_secondary(put_scored, p_floor_strike, direction="down")
 
     if s_floor_strike >= s_wall_strike:
         s_floor_strike = p_floor_strike * 0.995
         s_wall_strike = p_wall_strike * 1.005
+
+    primary_wall_conf_sel = _score_for_strike(call_scored, p_wall_strike)
+    secondary_wall_conf_sel = _score_for_strike(call_scored, s_wall_strike)
+    primary_floor_conf_sel = _score_for_strike(put_scored, p_floor_strike)
+    secondary_floor_conf_sel = _score_for_strike(put_scored, s_floor_strike)
 
     gex_by_strike = df.groupby("strike", as_index=False)["GEX"].sum().sort_values("strike")
     g_flip_strike = None
@@ -2729,7 +2839,17 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
         min_idx = gex_by_strike["GEX"].abs().idxmin()
         g_flip_strike = float(gex_by_strike.loc[min_idx, "strike"])
 
-    # Confidence scoring for actionable levels based on nearby liquidity and gamma strength.
+    # Confidence scoring for actionable levels based on nearby liquidity, gamma strength, and strike-structure score.
+    structure_score_by_strike = {}
+    for scored in (call_scored, put_scored):
+        if scored is None or scored.empty:
+            continue
+        for _, row in scored.iterrows():
+            strike_key = float(row["strike"])
+            prev = structure_score_by_strike.get(strike_key, 0.0)
+            structure_score_by_strike[strike_key] = max(prev, float(row.get("confidence_score", row.get("score", 0.0))))
+    max_structure_score = max(1.0, max(structure_score_by_strike.values())) if structure_score_by_strike else 1.0
+
     strike_liq = df.groupby("strike")["liquidity"].sum()
     strike_oi = df.groupby("strike")["open_interest"].sum()
     max_liq = max(1.0, float(strike_liq.max())) if not strike_liq.empty else 1.0
@@ -2740,6 +2860,12 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
         if len(values) == 0:
             return None
         return min(range(len(values)), key=lambda i: abs(values[i] - x))
+
+    def _nearest_structure_strength(strike_val):
+        if not structure_score_by_strike:
+            return 0.0
+        nearest = min(structure_score_by_strike.keys(), key=lambda s: abs(float(s) - float(strike_val)))
+        return float(structure_score_by_strike.get(nearest, 0.0)) / max_structure_score
 
     gex_strikes = gex_by_strike["strike"].tolist()
     gex_values = gex_by_strike["GEX"].tolist()
@@ -2756,8 +2882,19 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
         gex_strength = abs(float(gex_values[g_i])) / max_abs_gex
         liq_strength = float(strike_liq.iloc[l_i]) / max_liq
         oi_strength = float(strike_oi.iloc[o_i]) / max_oi
+        structure_strength = _nearest_structure_strength(strike_val)
 
-        score = int(round(100 * ((0.45 * liq_strength) + (0.30 * gex_strength) + (0.25 * oi_strength))))
+        score = int(
+            round(
+                100
+                * (
+                    (0.35 * liq_strength)
+                    + (0.25 * gex_strength)
+                    + (0.20 * oi_strength)
+                    + (0.20 * structure_strength)
+                )
+            )
+        )
         score = max(0, min(100, score))
         label = "High" if score >= 70 else "Medium" if score >= 45 else "Low"
         return {"score": score, "label": label}
@@ -2776,6 +2913,34 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
     level_confidence["Upper 0.25σ"] = {"score": 45, "label": "Medium"}
     level_confidence["Lower 0.25σ"] = {"score": 45, "label": "Medium"}
     level_confidence["Lower 0.50σ"] = {"score": 40, "label": "Low"}
+
+    # Blend in direct strike-selection confidence and enforce primary > secondary.
+    level_confidence["Primary Wall"]["score"] = int(
+        round((0.60 * level_confidence["Primary Wall"]["score"]) + (0.40 * primary_wall_conf_sel))
+    )
+    level_confidence["Secondary Wall"]["score"] = int(
+        round((0.60 * level_confidence["Secondary Wall"]["score"]) + (0.40 * secondary_wall_conf_sel))
+    )
+    level_confidence["Primary Floor"]["score"] = int(
+        round((0.60 * level_confidence["Primary Floor"]["score"]) + (0.40 * primary_floor_conf_sel))
+    )
+    level_confidence["Secondary Floor"]["score"] = int(
+        round((0.60 * level_confidence["Secondary Floor"]["score"]) + (0.40 * secondary_floor_conf_sel))
+    )
+
+    if level_confidence["Primary Wall"]["score"] <= level_confidence["Secondary Wall"]["score"]:
+        level_confidence["Primary Wall"]["score"] = min(
+            100, level_confidence["Secondary Wall"]["score"] + 3
+        )
+    if level_confidence["Primary Floor"]["score"] <= level_confidence["Secondary Floor"]["score"]:
+        level_confidence["Primary Floor"]["score"] = min(
+            100, level_confidence["Secondary Floor"]["score"] + 3
+        )
+
+    for key in ["Primary Wall", "Secondary Wall", "Primary Floor", "Secondary Floor"]:
+        score_i = int(max(0, min(100, level_confidence[key]["score"])))
+        level_confidence[key]["score"] = score_i
+        level_confidence[key]["label"] = "High" if score_i >= 70 else "Medium" if score_i >= 45 else "Low"
 
     # Freshness penalty so stale options chains cannot present high confidence.
     options_health = get_dataset_freshness(
