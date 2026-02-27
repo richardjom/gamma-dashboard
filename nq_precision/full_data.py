@@ -596,6 +596,7 @@ def get_market_overview_yahoo():
     data = {}
     symbols = {
         "vix": "^VIX",
+        "vvix": "^VVIX",
         "es": "ES=F",
         "ym": "YM=F",
         "rty": "RTY=F",
@@ -1582,6 +1583,8 @@ def get_futures_opening_structure(symbol="NQ=F"):
     prev_day_df = hist[hist.index.date == prev_day].copy()
     rth_df = hist[hist.index >= rth_open_dt].copy()
     ib_df = hist[(hist.index >= rth_open_dt) & (hist.index < ib_end_dt)].copy()
+    or15_end_dt = rth_open_dt + timedelta(minutes=15)
+    or15_df = hist[(hist.index >= rth_open_dt) & (hist.index < or15_end_dt)].copy()
 
     current_price = float(hist["Close"].iloc[-1]) if not hist.empty else None
 
@@ -1613,6 +1616,42 @@ def get_futures_opening_structure(symbol="NQ=F"):
     ib_low = _safe_float(ib_df["Low"].min()) if not ib_df.empty else None
     ib_mid = _safe_float(((ib_high + ib_low) / 2.0) if ib_high is not None and ib_low is not None else None)
     ib_range = _safe_float((ib_high - ib_low) if ib_high is not None and ib_low is not None else None)
+    or15_high = _safe_float(or15_df["High"].max()) if not or15_df.empty else None
+    or15_low = _safe_float(or15_df["Low"].min()) if not or15_df.empty else None
+
+    gap_points = _safe_float((rth_open - prior_day_close) if rth_open is not None and prior_day_close is not None else None)
+    gap_pct = _safe_float(((gap_points / prior_day_close) * 100.0) if gap_points is not None and prior_day_close not in (None, 0) else None)
+    if gap_points is None:
+        gap_type = "Unknown"
+    elif abs(gap_points) < 0.25:
+        gap_type = "Flat"
+    elif gap_points > 0:
+        gap_type = "Gap Up"
+    else:
+        gap_type = "Gap Down"
+
+    if current_price is None or globex_vwap is None:
+        vwap_relation = "N/A"
+    elif current_price >= globex_vwap:
+        vwap_relation = "Above VWAP"
+    else:
+        vwap_relation = "Below VWAP"
+
+    if current_price is None or or15_high is None or or15_low is None:
+        or15_state = "N/A"
+    elif current_price > or15_high:
+        or15_state = "Breakout Up"
+    elif current_price < or15_low:
+        or15_state = "Breakout Down"
+    else:
+        or15_state = "Inside 15m OR"
+
+    open_drive_signal = "Balanced"
+    if current_price is not None and rth_open is not None and globex_vwap is not None:
+        if current_price > max(rth_open, globex_vwap):
+            open_drive_signal = "Bull Drive"
+        elif current_price < min(rth_open, globex_vwap):
+            open_drive_signal = "Bear Drive"
 
     opening_type = "Rotation"
     opening_note = "Inside overnight range."
@@ -1650,6 +1689,16 @@ def get_futures_opening_structure(symbol="NQ=F"):
             opening_type = "Rotation"
             opening_note = "Balanced around initial balance."
 
+    setup_hint = "Wait"
+    if opening_type in {"Trend Up", "Reversal Up"} and vwap_relation == "Above VWAP":
+        setup_hint = "Buy pullback to VWAP/IB-mid"
+    elif opening_type in {"Trend Down", "Reversal Down"} and vwap_relation == "Below VWAP":
+        setup_hint = "Sell bounce to VWAP/IB-mid"
+    elif or15_state == "Breakout Up":
+        setup_hint = "Momentum long above OR15 high"
+    elif or15_state == "Breakout Down":
+        setup_hint = "Momentum short below OR15 low"
+
     minutes_since_open = int((now_et - rth_open_dt).total_seconds() // 60)
     if minutes_since_open < 0:
         minutes_since_open = 0
@@ -1669,6 +1718,15 @@ def get_futures_opening_structure(symbol="NQ=F"):
         "initial_balance_low": ib_low,
         "initial_balance_mid": ib_mid,
         "initial_balance_range": ib_range,
+        "opening_range_15m_high": or15_high,
+        "opening_range_15m_low": or15_low,
+        "opening_range_15m_state": or15_state,
+        "gap_points": gap_points,
+        "gap_pct": gap_pct,
+        "gap_type": gap_type,
+        "vwap_relation": vwap_relation,
+        "open_drive_signal": open_drive_signal,
+        "setup_hint": setup_hint,
         "opening_type": opening_type,
         "opening_note": opening_note,
         "minutes_since_open": minutes_since_open,
@@ -2316,6 +2374,12 @@ def get_rss_news():
             continue
 
     all_news.sort(key=lambda x: x.get("published_ts", 0), reverse=True)
+    _set_dataset_meta(
+        "rss_news",
+        "RSS Multi-source",
+        timestamp_ms=int(time.time() * 1000),
+        max_age_sec=45,
+    )
     return all_news[:60]
 
 
@@ -2877,7 +2941,16 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
         l_i = _nearest_idx(liq_strikes, strike_val)
         o_i = _nearest_idx(oi_strikes, strike_val)
         if g_i is None or l_i is None or o_i is None:
-            return {"score": 0, "label": "Low"}
+            return {
+                "score": 0,
+                "label": "Low",
+                "components": {
+                    "liq_strength": 0.0,
+                    "gex_strength": 0.0,
+                    "oi_strength": 0.0,
+                    "structure_strength": 0.0,
+                },
+            }
 
         gex_strength = abs(float(gex_values[g_i])) / max_abs_gex
         liq_strength = float(strike_liq.iloc[l_i]) / max_liq
@@ -2897,7 +2970,16 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
         )
         score = max(0, min(100, score))
         label = "High" if score >= 70 else "Medium" if score >= 45 else "Low"
-        return {"score": score, "label": label}
+        return {
+            "score": score,
+            "label": label,
+            "components": {
+                "liq_strength": round(float(liq_strength), 4),
+                "gex_strength": round(float(gex_strength), 4),
+                "oi_strength": round(float(oi_strength), 4),
+                "structure_strength": round(float(structure_strength), 4),
+            },
+        }
 
     level_confidence = {
         "Delta Neutral": _level_confidence(dn_strike),
