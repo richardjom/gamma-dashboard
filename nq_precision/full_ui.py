@@ -814,14 +814,12 @@ def _render_data_health_strip(nq_source, data_0dte, market_data):
     for item in items:
         s_class = _freshness_class(item.get("status"))
         html_rows.append(
-            f"""
-            <div class="health-card">
-                <p class="title">{html.escape(str(item.get('title', '')))}</p>
-                <p class="value">{html.escape(str(item.get('value', '')))}</p>
-                <span class="status-pill {s_class}">{html.escape(str(item.get('status', 'unknown')).upper())}</span>
-                <p class="sub">{html.escape(str(item.get('sub', '')))}</p>
-            </div>
-            """
+            f'<div class="health-card">'
+            f'<p class="title">{html.escape(str(item.get("title", "")))}</p>'
+            f'<p class="value">{html.escape(str(item.get("value", "")))}</p>'
+            f'<span class="status-pill {s_class}">{html.escape(str(item.get("status", "unknown")).upper())}</span>'
+            f'<p class="sub">{html.escape(str(item.get("sub", "")))}</p>'
+            f"</div>"
         )
     html_rows.append("</div>")
     st.markdown("".join(html_rows), unsafe_allow_html=True)
