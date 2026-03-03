@@ -2255,12 +2255,21 @@ def _render_overview_event_strip(event_risk):
         else:
             st.success("No high-impact releases in near horizon.")
 
-    nxt = pd.DataFrame(event_risk.get("next_events", [])[:3])
-    if not nxt.empty:
+    next_events = event_risk.get("next_events", [])[:3]
+    rows = []
+    for ev in next_events:
+        sec_to = ev.get("seconds_to")
+        rows.append(
+            {
+                "Time": ev.get("time_et") or ev.get("date_et") or "N/A",
+                "Impact": str(ev.get("impact", "unknown")).upper(),
+                "Event": ev.get("event", "Unknown"),
+                "Countdown": ev.get("countdown") or _countdown_label(sec_to if sec_to is not None else 0),
+            }
+        )
+    if rows:
         st.dataframe(
-            nxt[["time_et", "impact", "event", "countdown"]].rename(
-                columns={"time_et": "Time", "impact": "Impact", "event": "Event", "countdown": "Countdown"}
-            ),
+            pd.DataFrame(rows),
             width="stretch",
             hide_index=True,
         )
