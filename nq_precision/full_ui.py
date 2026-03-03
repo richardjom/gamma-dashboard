@@ -2196,6 +2196,223 @@ def _render_breadth_internals_panel(breadth_data, nq_day_change_pct, es_change_p
     st.markdown("</div></div>", unsafe_allow_html=True)
 
 
+def _render_overview_reference_snapshot(data_0dte, nq_now):
+    st.markdown(
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📍 Key References (Compact)</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        unsafe_allow_html=True,
+    )
+    if not data_0dte:
+        st.info("Reference levels unavailable.")
+        st.markdown("</div></div>", unsafe_allow_html=True)
+        return
+    rows = [
+        ("Primary Wall", float(data_0dte.get("p_wall", nq_now))),
+        ("Gamma Flip", float(data_0dte.get("g_flip_nq", nq_now))),
+        ("Delta Neutral", float(data_0dte.get("dn_nq", nq_now))),
+        ("Primary Floor", float(data_0dte.get("p_floor", nq_now))),
+        ("Secondary Wall", float(data_0dte.get("s_wall", nq_now))),
+        ("Secondary Floor", float(data_0dte.get("s_floor", nq_now))),
+    ]
+    out = []
+    for name, px in rows:
+        dist = float(px - nq_now)
+        side = "Resistance" if dist > 0 else "Support" if dist < 0 else "Pivot"
+        out.append(
+            {
+                "Level": name,
+                "Price": round(px, 2),
+                "Dist (pts)": round(dist, 1),
+                "Side": side,
+            }
+        )
+    st.dataframe(pd.DataFrame(out), width="stretch", hide_index=True)
+    st.markdown("</div></div>", unsafe_allow_html=True)
+
+
+def _render_overview_event_strip(event_risk):
+    st.markdown(
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">⏰ Event Risk (Next)</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        unsafe_allow_html=True,
+    )
+    if not event_risk:
+        st.info("Event risk unavailable.")
+        st.markdown("</div></div>", unsafe_allow_html=True)
+        return
+
+    if event_risk.get("lockout_active"):
+        lock = event_risk.get("lockout_event", {}) or {}
+        st.error(
+            f"Lockout active: {lock.get('event', 'High-impact event')} "
+            f"({lock.get('time_et', '')}, {_countdown_label(lock.get('seconds_to', 0))})"
+        )
+    else:
+        nh = event_risk.get("next_high")
+        if nh:
+            st.warning(
+                f"Next high-impact: {nh.get('event', 'N/A')} @ {nh.get('time_et', 'N/A')} "
+                f"({_countdown_label(nh.get('seconds_to', 0))})"
+            )
+        else:
+            st.success("No high-impact releases in near horizon.")
+
+    nxt = pd.DataFrame(event_risk.get("next_events", [])[:3])
+    if not nxt.empty:
+        st.dataframe(
+            nxt[["time_et", "impact", "event", "countdown"]].rename(
+                columns={"time_et": "Time", "impact": "Impact", "event": "Event", "countdown": "Countdown"}
+            ),
+            width="stretch",
+            hide_index=True,
+        )
+    st.markdown("</div></div>", unsafe_allow_html=True)
+
+
+def _render_futures_indices_panel(market_data, nq_now, nq_day_change_pct, nq_source, data_0dte, level_interactions_df):
+    if not market_data:
+        return
+    st.markdown(
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧭 Futures & Indices</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        unsafe_allow_html=True,
+    )
+    c1, c2, c3, c4, c5 = st.columns(5)
+    es = market_data.get("es", {})
+    ym = market_data.get("ym", {})
+    rty = market_data.get("rty", {})
+    gc = market_data.get("gc", {})
+    c1.metric("S&P 500 (ES)", f"{es.get('price', 0):.2f}" if es.get("price") else "N/A", f"{es.get('change', 0):+.2f} ({es.get('change_pct', 0):+.2f}%)")
+    c1.caption(f"Source: {es.get('source', 'unknown')} | Age: {get_quote_age_label('ES=F')}")
+    nq_change = nq_now * (nq_day_change_pct / 100)
+    c2.metric("Nasdaq (NQ)", f"{nq_now:.2f}", f"{nq_change:+.2f} ({nq_day_change_pct:+.2f}%)")
+    c2.caption(f"Source: {nq_source} | Age: {get_quote_age_label('NQ=F')}")
+    c3.metric("Dow (YM)", f"{ym.get('price', 0):.2f}" if ym.get("price") else "N/A", f"{ym.get('change', 0):+.2f} ({ym.get('change_pct', 0):+.2f}%)")
+    c3.caption(f"Source: {ym.get('source', 'unknown')} | Age: {get_quote_age_label('YM=F')}")
+    c4.metric("Russell (RTY)", f"{rty.get('price', 0):.2f}" if rty.get("price") else "N/A", f"{rty.get('change', 0):+.2f} ({rty.get('change_pct', 0):+.2f}%)")
+    c4.caption(f"Source: {rty.get('source', 'unknown')} | Age: {get_quote_age_label('RTY=F')}")
+    c5.metric("Gold (GC)", f"{gc.get('price', 0):.2f}" if gc.get("price") else "N/A", f"{gc.get('change', 0):+.2f} ({gc.get('change_pct', 0):+.2f}%)")
+    c5.caption(f"Source: {gc.get('source', 'unknown')} | Age: {get_quote_age_label('GC=F')}")
+    st.markdown("### Market Signals")
+    if data_0dte:
+        st.info(
+            f"NQ vs Gamma Flip: {nq_now - data_0dte['g_flip_nq']:+.0f} pts | "
+            f"NQ vs Delta Neutral: {nq_now - data_0dte['dn_nq']:+.0f} pts | "
+            f"Net Delta: {data_0dte['net_delta']:,.0f}"
+        )
+    if level_interactions_df is not None and not level_interactions_df.empty:
+        st.dataframe(level_interactions_df, width="stretch", hide_index=True)
+    st.markdown("</div></div>", unsafe_allow_html=True)
+
+
+def _render_heatmap_panel():
+    st.markdown(
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧩 Nasdaq Stocks Heat Map</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        unsafe_allow_html=True,
+    )
+    st.markdown("**Heatmap Controls**")
+    hc1, hc2, hc3 = st.columns([1.2, 1, 1])
+    with hc1:
+        st.selectbox(
+            "Universe",
+            ["Nasdaq 100", "Magnificent 7", "Custom Watchlist"],
+            key="heatmap_universe",
+        )
+    with hc2:
+        st.selectbox(
+            "Sizing",
+            ["Market Cap", "Volume", "Equal Weight"],
+            key="heatmap_size_mode",
+        )
+    with hc3:
+        st.selectbox(
+            "Timeframe",
+            ["1D", "5D", "1M"],
+            key="heatmap_timeframe",
+        )
+
+    if st.session_state.heatmap_universe == "Custom Watchlist":
+        st.text_input(
+            "Custom Symbols (comma-separated)",
+            key="heatmap_custom_symbols",
+            help="Example: AAPL,MSFT,NVDA,AMZN",
+        )
+
+    skeleton = st.empty()
+    skeleton.markdown('<div class="skeleton-box"></div>', unsafe_allow_html=True)
+    heatmap_df = get_nasdaq_heatmap_data(
+        universe=st.session_state.heatmap_universe,
+        size_mode=st.session_state.heatmap_size_mode,
+        timeframe=st.session_state.heatmap_timeframe,
+        custom_symbols=st.session_state.heatmap_custom_symbols,
+    )
+    skeleton.empty()
+    if heatmap_df is not None and not heatmap_df.empty:
+        heatmap_df = heatmap_df.copy()
+        size_cut = heatmap_df["size"].quantile(0.18)
+        small_mask = heatmap_df["size"] < size_cut
+        if small_mask.any():
+            small = heatmap_df[small_mask]
+            rolled = (
+                small.groupby("sector", as_index=False)
+                .apply(
+                    lambda g: pd.Series(
+                        {
+                            "symbol": "Basket",
+                            "price": 0.0,
+                            "change_pct": (
+                                (g["change_pct"] * g["size"]).sum() / g["size"].sum()
+                                if g["size"].sum() > 0
+                                else 0.0
+                            ),
+                            "size": g["size"].sum(),
+                        }
+                    )
+                )
+                .reset_index(drop=True)
+            )
+            heatmap_df = pd.concat([heatmap_df[~small_mask], rolled], ignore_index=True)
+
+        heatmap_df["pct_label"] = heatmap_df["change_pct"].map(lambda x: f"{x:+.2f}%")
+        fig = px.treemap(
+            heatmap_df,
+            path=["sector", "symbol"],
+            values="size",
+            color="change_pct",
+            color_continuous_scale=[
+                [0.0, "#7a1f2b"],
+                [0.25, "#b33d4b"],
+                [0.5, "#2b3038"],
+                [0.75, "#2f7d4f"],
+                [1.0, "#2dc46c"],
+            ],
+            color_continuous_midpoint=0,
+            custom_data=["price", "change_pct", "pct_label"],
+        )
+        fig.update_traces(
+            texttemplate="<b>%{label}</b><br>%{customdata[2]}",
+            hovertemplate="<b>%{label}</b><br>Price: $%{customdata[0]:,.2f}<br>Change: %{customdata[1]:+.2f}%<extra></extra>",
+            marker_line=dict(width=1, color="#1f2630"),
+            textfont=dict(size=18, color="#e8eef8"),
+            insidetextfont=dict(size=18, color="#e8eef8"),
+            textposition="middle center",
+        )
+        fig.update_layout(
+            template="plotly_dark" if st.session_state.theme == "dark" else "plotly_white",
+            height=390,
+            margin=dict(l=8, r=8, t=8, b=8),
+            coloraxis_showscale=False,
+            uniformtext=dict(minsize=9, mode="hide"),
+            coloraxis=dict(cmin=-4, cmax=4),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        st.caption(
+            f"Mode: {st.session_state.heatmap_universe} • "
+            f"Sizing: {st.session_state.heatmap_size_mode} • "
+            f"Timeframe: {st.session_state.heatmap_timeframe}"
+        )
+    else:
+        st.info("Heat map data is temporarily unavailable.")
+    st.markdown("</div></div>", unsafe_allow_html=True)
+
+
 def run_full_app():
     st.set_page_config(
         page_title="NQ Precision Map", layout="wide", initial_sidebar_state="expanded"
@@ -2452,6 +2669,9 @@ def run_full_app():
         ],
         "Resources": [],
         "Analytics": [
+            ("🧪 Execution Lab", "🧪 Execution Lab"),
+            ("🌐 Macro & Breadth", "🌐 Macro & Breadth"),
+            ("🚨 Event Intel", "🚨 Event Intel"),
             ("🍞 Daily Bread", "🍞 Daily Bread"),
             ("📈 GEX Charts", "📈 GEX Charts"),
             ("⚖️ Delta Charts", "⚖️ Delta Charts"),
@@ -2572,32 +2792,8 @@ def run_full_app():
                     nq_now=nq_now,
                     event_risk=event_risk,
                 )
-                _render_regime_engine_panel(regime_engine)
-                _render_opening_structure_panel(opening_structure)
-                _render_dealer_forward_pressure_panel(dealer_forward_pressure)
-                _render_microstructure_panel(microstructure_snapshot)
-                _render_cross_asset_driver_matrix_panel(cross_asset_matrix)
-                _render_event_surprise_panel(event_surprise_engine)
-                _render_reference_levels_panel(
-                    data_0dte=data_0dte,
-                    reference_levels=reference_levels,
-                    opening_structure=opening_structure,
-                    nq_now=nq_now,
-                    event_risk=event_risk,
-                )
-                _render_level_quality_panel(
-                    data_0dte=data_0dte,
-                    data_weekly=data_weekly,
-                    nq_now=nq_now,
-                    level_interactions_df=level_interactions_df,
-                )
-                _render_event_risk_panel(event_risk)
-                _render_breadth_internals_panel(
-                    breadth_data=breadth_internals,
-                    nq_day_change_pct=nq_day_change_pct,
-                    es_change_pct=float((market_data.get("es", {}) or {}).get("change_pct", 0.0)),
-                    market_data=market_data,
-                )
+                _render_overview_reference_snapshot(data_0dte, nq_now)
+                _render_overview_event_strip(event_risk)
 
                 st.markdown(
                     '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📊 Market Sentiment</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
@@ -2647,200 +2843,82 @@ def run_full_app():
                         """,
                         unsafe_allow_html=True,
                     )
+                    fg_score = int(_safe_float((fg or {}).get("score"), 50) or 50)
+                    fg_rating_raw = str((fg or {}).get("rating", "Neutral"))
+                    fg_rating = html.escape(fg_rating_raw.title())
+                    fg_lower = fg_rating_raw.lower()
+                    if "fear" in fg_lower and "extreme" in fg_lower:
+                        fg_badge = "bull"
+                        fg_arrow = "↑"
+                    elif "fear" in fg_lower:
+                        fg_badge = "neutral"
+                        fg_arrow = "→"
+                    elif "greed" in fg_lower and "extreme" in fg_lower:
+                        fg_badge = "bear"
+                        fg_arrow = "↓"
+                    elif "greed" in fg_lower:
+                        fg_badge = "neutral"
+                        fg_arrow = "→"
+                    else:
+                        fg_badge = "neutral"
+                        fg_arrow = "→"
+                    st.markdown(
+                        f"""
+                        <div class="score-panel" style="margin-top:10px;">
+                            <p class="score-kicker">Fear &amp; Greed</p>
+                            <p class="score-value">{fg_score}/100</p>
+                            <span class="score-badge {fg_badge}">{fg_arrow} {fg_rating}</span>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
                 st.markdown("</div></div>", unsafe_allow_html=True)
+            else:
+                st.info("No 0DTE data available for compact overview.")
 
-                st.markdown(
-                    '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧩 Nasdaq Stocks Heat Map</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
-                    unsafe_allow_html=True,
+        elif active_view == "🧪 Execution Lab":
+            if not data_0dte:
+                st.info("Execution Lab requires options data.")
+            else:
+                _render_regime_engine_panel(regime_engine)
+                _render_opening_structure_panel(opening_structure)
+                _render_dealer_forward_pressure_panel(dealer_forward_pressure)
+                _render_microstructure_panel(microstructure_snapshot)
+                _render_reference_levels_panel(
+                    data_0dte=data_0dte,
+                    reference_levels=reference_levels,
+                    opening_structure=opening_structure,
+                    nq_now=nq_now,
+                    event_risk=event_risk,
                 )
-                st.markdown("**Heatmap Controls**")
-                hc1, hc2, hc3 = st.columns([1.2, 1, 1])
-                with hc1:
-                    st.selectbox(
-                        "Universe",
-                        ["Nasdaq 100", "Magnificent 7", "Custom Watchlist"],
-                        key="heatmap_universe",
-                    )
-                with hc2:
-                    st.selectbox(
-                        "Sizing",
-                        ["Market Cap", "Volume", "Equal Weight"],
-                        key="heatmap_size_mode",
-                    )
-                with hc3:
-                    st.selectbox(
-                        "Timeframe",
-                        ["1D", "5D", "1M"],
-                        key="heatmap_timeframe",
-                    )
-
-                if st.session_state.heatmap_universe == "Custom Watchlist":
-                    st.text_input(
-                        "Custom Symbols (comma-separated)",
-                        key="heatmap_custom_symbols",
-                        help="Example: AAPL,MSFT,NVDA,AMZN",
-                    )
-
-                skeleton = st.empty()
-                skeleton.markdown('<div class="skeleton-box"></div>', unsafe_allow_html=True)
-                heatmap_df = get_nasdaq_heatmap_data(
-                    universe=st.session_state.heatmap_universe,
-                    size_mode=st.session_state.heatmap_size_mode,
-                    timeframe=st.session_state.heatmap_timeframe,
-                    custom_symbols=st.session_state.heatmap_custom_symbols,
+                _render_level_quality_panel(
+                    data_0dte=data_0dte,
+                    data_weekly=data_weekly,
+                    nq_now=nq_now,
+                    level_interactions_df=level_interactions_df,
                 )
-                skeleton.empty()
-                if heatmap_df is not None and not heatmap_df.empty:
-                    heatmap_df = heatmap_df.copy()
-                    size_cut = heatmap_df["size"].quantile(0.18)
-                    small_mask = heatmap_df["size"] < size_cut
-                    if small_mask.any():
-                        small = heatmap_df[small_mask]
-                        rolled = (
-                            small.groupby("sector", as_index=False)
-                            .apply(
-                                lambda g: pd.Series(
-                                    {
-                                        "symbol": "Basket",
-                                        "price": 0.0,
-                                        "change_pct": (
-                                            (g["change_pct"] * g["size"]).sum() / g["size"].sum()
-                                            if g["size"].sum() > 0
-                                            else 0.0
-                                        ),
-                                        "size": g["size"].sum(),
-                                    }
-                                )
-                            )
-                            .reset_index(drop=True)
-                        )
-                        heatmap_df = pd.concat([heatmap_df[~small_mask], rolled], ignore_index=True)
 
-                    heatmap_df["pct_label"] = heatmap_df["change_pct"].map(lambda x: f"{x:+.2f}%")
-                    fig = px.treemap(
-                        heatmap_df,
-                        path=["sector", "symbol"],
-                        values="size",
-                        color="change_pct",
-                        color_continuous_scale=[
-                            [0.0, "#7a1f2b"],
-                            [0.25, "#b33d4b"],
-                            [0.5, "#2b3038"],
-                            [0.75, "#2f7d4f"],
-                            [1.0, "#2dc46c"],
-                        ],
-                        color_continuous_midpoint=0,
-                        custom_data=["price", "change_pct", "pct_label"],
-                    )
-                    fig.update_traces(
-                        texttemplate="<b>%{label}</b><br>%{customdata[2]}",
-                        hovertemplate="<b>%{label}</b><br>Price: $%{customdata[0]:,.2f}<br>Change: %{customdata[1]:+.2f}%<extra></extra>",
-                        marker_line=dict(width=1, color="#1f2630"),
-                        textfont=dict(size=18, color="#e8eef8"),
-                        insidetextfont=dict(size=18, color="#e8eef8"),
-                        textposition="middle center",
-                    )
-                    fig.update_layout(
-                        template="plotly_dark" if st.session_state.theme == "dark" else "plotly_white",
-                        height=390,
-                        margin=dict(l=8, r=8, t=8, b=8),
-                        coloraxis_showscale=False,
-                        uniformtext=dict(minsize=9, mode="hide"),
-                        coloraxis=dict(cmin=-4, cmax=4),
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-                    st.caption(
-                        f"Mode: {st.session_state.heatmap_universe} • "
-                        f"Sizing: {st.session_state.heatmap_size_mode} • "
-                        f"Timeframe: {st.session_state.heatmap_timeframe}"
-                    )
-                else:
-                    st.info("Heat map data is temporarily unavailable.")
-                st.markdown("</div></div>", unsafe_allow_html=True)
+        elif active_view == "🌐 Macro & Breadth":
+            _render_futures_indices_panel(
+                market_data=market_data,
+                nq_now=nq_now,
+                nq_day_change_pct=nq_day_change_pct,
+                nq_source=nq_source,
+                data_0dte=data_0dte,
+                level_interactions_df=level_interactions_df,
+            )
+            _render_cross_asset_driver_matrix_panel(cross_asset_matrix)
+            _render_breadth_internals_panel(
+                breadth_data=breadth_internals,
+                nq_day_change_pct=nq_day_change_pct,
+                es_change_pct=float((market_data.get("es", {}) or {}).get("change_pct", 0.0)),
+                market_data=market_data,
+            )
+            _render_heatmap_panel()
 
-                hd1, hd2, hd3 = st.columns(3)
-                hd1.metric("NQ Price", f"{nq_now:.2f}", f"↑ {nq_source}")
-                hd2.metric("QQQ Price", f"${qqq_price:.2f}")
-                hd3.metric("Ratio", f"{ratio:.4f}")
-
-                st.markdown(
-                    '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🎯 Multi-Timeframe Key Levels</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
-                    unsafe_allow_html=True,
-                )
-                overview_data = []
-                if data_0dte:
-                    days = (exp_0dte.date() - datetime.now().date()).days
-                    overview_data.append(
-                        {
-                            "Timeframe": "0DTE" if days == 0 else f"{days}DTE",
-                            "Expiration": exp_0dte.strftime("%Y-%m-%d"),
-                            "Delta Neutral": data_0dte["dn_nq"],
-                            "Gamma Flip": data_0dte["g_flip_nq"],
-                            "Primary Wall": data_0dte["p_wall"],
-                            "Primary Floor": data_0dte["p_floor"],
-                            "Net Delta": data_0dte["net_delta"],
-                        }
-                    )
-                if data_weekly:
-                    days = (exp_weekly.date() - datetime.now().date()).days
-                    overview_data.append(
-                        {
-                            "Timeframe": f"Weekly ({days}D)",
-                            "Expiration": exp_weekly.strftime("%Y-%m-%d"),
-                            "Delta Neutral": data_weekly["dn_nq"],
-                            "Gamma Flip": data_weekly["g_flip_nq"],
-                            "Primary Wall": data_weekly["p_wall"],
-                            "Primary Floor": data_weekly["p_floor"],
-                            "Net Delta": data_weekly["net_delta"],
-                        }
-                    )
-                if data_monthly:
-                    days = (exp_monthly.date() - datetime.now().date()).days
-                    overview_data.append(
-                        {
-                            "Timeframe": f"Monthly ({days}D)",
-                            "Expiration": exp_monthly.strftime("%Y-%m-%d"),
-                            "Delta Neutral": data_monthly["dn_nq"],
-                            "Gamma Flip": data_monthly["g_flip_nq"],
-                            "Primary Wall": data_monthly["p_wall"],
-                            "Primary Floor": data_monthly["p_floor"],
-                            "Net Delta": data_monthly["net_delta"],
-                        }
-                    )
-                if overview_data:
-                    st.dataframe(pd.DataFrame(overview_data), width="stretch", hide_index=True)
-                st.markdown("</div></div>", unsafe_allow_html=True)
-            if market_data:
-                st.markdown(
-                    '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧭 Futures & Indices</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
-                    unsafe_allow_html=True,
-                )
-                c1, c2, c3, c4, c5 = st.columns(5)
-                es = market_data.get("es", {})
-                ym = market_data.get("ym", {})
-                rty = market_data.get("rty", {})
-                gc = market_data.get("gc", {})
-                c1.metric("S&P 500 (ES)", f"{es.get('price', 0):.2f}" if es.get("price") else "N/A", f"{es.get('change', 0):+.2f} ({es.get('change_pct', 0):+.2f}%)")
-                c1.caption(f"Source: {es.get('source', 'unknown')} | Age: {get_quote_age_label('ES=F')}")
-                nq_change = nq_now * (nq_day_change_pct / 100)
-                c2.metric("Nasdaq (NQ)", f"{nq_now:.2f}", f"{nq_change:+.2f} ({nq_day_change_pct:+.2f}%)")
-                c2.caption(f"Source: {nq_source} | Age: {get_quote_age_label('NQ=F')}")
-                c3.metric("Dow (YM)", f"{ym.get('price', 0):.2f}" if ym.get("price") else "N/A", f"{ym.get('change', 0):+.2f} ({ym.get('change_pct', 0):+.2f}%)")
-                c3.caption(f"Source: {ym.get('source', 'unknown')} | Age: {get_quote_age_label('YM=F')}")
-                c4.metric("Russell (RTY)", f"{rty.get('price', 0):.2f}" if rty.get("price") else "N/A", f"{rty.get('change', 0):+.2f} ({rty.get('change_pct', 0):+.2f}%)")
-                c4.caption(f"Source: {rty.get('source', 'unknown')} | Age: {get_quote_age_label('RTY=F')}")
-                c5.metric("Gold (GC)", f"{gc.get('price', 0):.2f}" if gc.get("price") else "N/A", f"{gc.get('change', 0):+.2f} ({gc.get('change_pct', 0):+.2f}%)")
-                c5.caption(f"Source: {gc.get('source', 'unknown')} | Age: {get_quote_age_label('GC=F')}")
-                st.markdown("### Market Signals")
-                if data_0dte:
-                    st.info(
-                        f"NQ vs Gamma Flip: {nq_now - data_0dte['g_flip_nq']:+.0f} pts | "
-                        f"NQ vs Delta Neutral: {nq_now - data_0dte['dn_nq']:+.0f} pts | "
-                        f"Net Delta: {data_0dte['net_delta']:,.0f}"
-                    )
-                if level_interactions_df is not None and not level_interactions_df.empty:
-                    st.dataframe(level_interactions_df, width="stretch", hide_index=True)
-                st.markdown("</div></div>", unsafe_allow_html=True)
+        elif active_view == "🚨 Event Intel":
+            _render_event_risk_panel(event_risk)
+            _render_event_surprise_panel(event_surprise_engine)
 
         elif active_view == "🌐 Multi-Asset":
             st.subheader("🌐 Multi-Asset Comparison Dashboard")
