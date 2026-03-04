@@ -34,7 +34,7 @@ from nq_precision.full_data import (
     get_nq_intraday_data,
     get_nq_price_auto,
     get_quote_age_label,
-    get_qqq_price,
+    get_qqq_price_with_source,
     get_runtime_health,
     get_rss_news,
     get_top_movers,
@@ -161,7 +161,7 @@ def _theme_css(bg_color, card_bg, text_color, accent_color, border_color, compac
     }}
     .health-strip {{
         display: grid;
-        grid-template-columns: repeat(6, minmax(0, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
         gap: 8px;
         margin-bottom: 10px;
     }}
@@ -761,6 +761,113 @@ def _safe_float(v, default=None):
         return default
 
 
+def _ratio_health_status(conf_label):
+    lbl = str(conf_label or "").lower()
+    if lbl == "high":
+        return "fresh"
+    if lbl == "medium":
+        return "stale_soft"
+    return "stale_hard"
+
+
+def _compute_tight_ratio(nq_now, qqq_price, nq_source="", qqq_source=""):
+    raw_ratio = float(nq_now / qqq_price) if qqq_price and qqq_price > 0 else 0.0
+    now_ts = float(time.time())
+    hist_key = "ratio_history::NQ_QQQ"
+    history = list(st.session_state.get(hist_key, []))
+
+    if raw_ratio > 0 and math.isfinite(raw_ratio):
+        history.append(
+            {
+                "ts": now_ts,
+                "ratio": float(raw_ratio),
+                "nq": float(nq_now),
+                "qqq": float(qqq_price),
+                "nq_source": str(nq_source or ""),
+                "qqq_source": str(qqq_source or ""),
+            }
+        )
+    cutoff = now_ts - (3 * 3600)
+    history = [h for h in history if float(h.get("ts", 0.0)) >= cutoff and float(h.get("ratio", 0.0)) > 0]
+    if len(history) > 240:
+        history = history[-240:]
+    st.session_state[hist_key] = history
+
+    if raw_ratio <= 0:
+        return {
+            "ratio": 0.0,
+            "raw_ratio": 0.0,
+            "median_ratio": 0.0,
+            "mad_ratio": 0.0,
+            "samples": 0,
+            "confidence_score": 0,
+            "confidence_label": "Low",
+            "outlier_clamped": False,
+            "deviation_bps": 0.0,
+            "uncertainty_pts": 0.0,
+            "source_pair": f"{nq_source} / {qqq_source}",
+        }
+
+    ratio_series = pd.Series([float(h["ratio"]) for h in history], dtype="float64")
+    recent_series = ratio_series.tail(min(30, len(ratio_series)))
+    med_ratio = float(recent_series.median()) if len(recent_series) > 0 else raw_ratio
+    abs_dev_series = (recent_series - med_ratio).abs()
+    mad_ratio = float(abs_dev_series.median()) if len(abs_dev_series) > 0 else 0.0
+
+    # Prevent overreaction when history is thin or noise is tiny.
+    floor_band = max(0.00020, med_ratio * 0.00020)  # 2 bps floor
+    dyn_band = max(floor_band, 4.0 * mad_ratio)
+    low_band = med_ratio - dyn_band
+    high_band = med_ratio + dyn_band
+    clamped_ratio = min(max(raw_ratio, low_band), high_band)
+    outlier_clamped = abs(raw_ratio - clamped_ratio) > 1e-12
+
+    if len(recent_series) >= 8:
+        tight_ratio = (0.72 * clamped_ratio) + (0.28 * med_ratio)
+    elif len(recent_series) >= 3:
+        tight_ratio = (0.84 * raw_ratio) + (0.16 * med_ratio)
+    else:
+        tight_ratio = raw_ratio
+
+    dev_bps = abs(raw_ratio - tight_ratio) / max(1e-9, tight_ratio) * 10000.0
+    uncertainty_ratio = max((mad_ratio * 2.0), (floor_band * 1.25))
+    uncertainty_pts = float(qqq_price) * uncertainty_ratio
+
+    conf = 92.0
+    nq_src_l = str(nq_source or "").lower()
+    qqq_src_l = str(qqq_source or "").lower()
+    conf += 4.0 if "schwab" in nq_src_l else -6.0
+    if "schwab" in qqq_src_l:
+        conf += 4.0
+    elif "finnhub" in qqq_src_l:
+        conf += 1.0
+    else:
+        conf -= 4.0
+    if len(recent_series) < 10:
+        conf -= 12.0
+    if outlier_clamped:
+        conf -= 14.0
+    if dev_bps > 4.0:
+        conf -= min(30.0, (dev_bps - 4.0) * 2.2)
+    conf = max(20.0, min(99.0, conf))
+    conf_i = int(round(conf))
+    conf_label = "High" if conf_i >= 78 else "Medium" if conf_i >= 55 else "Low"
+
+    return {
+        "ratio": float(tight_ratio),
+        "raw_ratio": float(raw_ratio),
+        "median_ratio": float(med_ratio),
+        "mad_ratio": float(mad_ratio),
+        "samples": int(len(recent_series)),
+        "confidence_score": conf_i,
+        "confidence_label": conf_label,
+        "outlier_clamped": bool(outlier_clamped),
+        "deviation_bps": float(dev_bps),
+        "uncertainty_pts": float(uncertainty_pts),
+        "source_pair": f"{nq_source} / {qqq_source}",
+    }
+
+
 def _parse_macro_number(raw):
     if raw is None:
         return None
@@ -1297,7 +1404,7 @@ def _freshness_class(status):
     return "bad"
 
 
-def _render_data_health_strip(nq_source, data_0dte, market_data):
+def _render_data_health_strip(nq_source, qqq_source, ratio_meta, data_0dte, market_data):
     try:
         get_rss_news()
     except Exception:
@@ -1311,6 +1418,13 @@ def _render_data_health_strip(nq_source, data_0dte, market_data):
     conf_mult = 1.0
     if data_0dte:
         conf_mult = float((data_0dte.get("data_meta", {}) or {}).get("confidence_multiplier", 1.0))
+    ratio_meta = ratio_meta or {}
+    ratio_val = float(ratio_meta.get("ratio", 0.0) or 0.0)
+    ratio_raw = float(ratio_meta.get("raw_ratio", ratio_val) or ratio_val)
+    ratio_unc = float(ratio_meta.get("uncertainty_pts", 0.0) or 0.0)
+    ratio_conf = int(ratio_meta.get("confidence_score", 0) or 0)
+    ratio_label = str(ratio_meta.get("confidence_label", "Low"))
+    ratio_status = _ratio_health_status(ratio_label)
 
     items = [
         {
@@ -1326,6 +1440,18 @@ def _render_data_health_strip(nq_source, data_0dte, market_data):
             "status": options_health.get("status", "unknown"),
         },
         {
+            "title": "QQQ Feed",
+            "value": qqq_source,
+            "sub": f"age {get_quote_age_label('QQQ')}",
+            "status": "fresh" if "schwab" in str(qqq_source).lower() else "stale_soft",
+        },
+        {
+            "title": "NQ↔QQQ Ratio",
+            "value": f"{ratio_val:.4f}",
+            "sub": f"raw {ratio_raw:.4f} • ±{ratio_unc:.0f} pts • {ratio_conf}%",
+            "status": ratio_status,
+        },
+        {
             "title": "Economic Feed",
             "value": str(econ_health.get("status", "unknown")).replace("_", " ").title(),
             "sub": f"age {econ_health.get('latency_s', 'n/a')}s",
@@ -1338,16 +1464,16 @@ def _render_data_health_strip(nq_source, data_0dte, market_data):
             "status": breadth_health.get("status", "unknown"),
         },
         {
-            "title": "Opening Model",
-            "value": str(opening_health.get("status", "unknown")).replace("_", " ").title(),
-            "sub": f"age {opening_health.get('latency_s', 'n/a')}s",
-            "status": opening_health.get("status", "unknown"),
-        },
-        {
             "title": "News Feed",
             "value": str(news_health.get("status", "unknown")).replace("_", " ").title(),
             "sub": f"age {news_health.get('latency_s', 'n/a')}s • VIX {float((market_data.get('vix', {}) or {}).get('price', 0) or 0):.2f}",
             "status": news_health.get("status", "unknown"),
+        },
+        {
+            "title": "Opening Model",
+            "value": str(opening_health.get("status", "unknown")).replace("_", " ").title(),
+            "sub": f"age {opening_health.get('latency_s', 'n/a')}s",
+            "status": opening_health.get("status", "unknown"),
         },
     ]
 
@@ -2559,7 +2685,7 @@ def run_full_app():
         st.stop()
 
     with st.spinner("🔄 Loading multi-timeframe data..."):
-        qqq_price = get_qqq_price(finnhub_key)
+        qqq_price, qqq_source = get_qqq_price_with_source(finnhub_key)
         if not qqq_price:
             st.error("Could not fetch QQQ price")
             st.stop()
@@ -2587,7 +2713,13 @@ def run_full_app():
                 )
                 nq_source = "Manual Fallback"
 
-        ratio = nq_now / qqq_price if qqq_price > 0 else 0
+        ratio_meta = _compute_tight_ratio(
+            nq_now=nq_now,
+            qqq_price=qqq_price,
+            nq_source=nq_source,
+            qqq_source=qqq_source,
+        )
+        ratio = float(ratio_meta.get("ratio", 0.0) or 0.0)
         nq_day_change_pct = 0.0
         try:
             nq_hist = yf.Ticker("NQ=F").history(period="1d")
@@ -2606,6 +2738,14 @@ def run_full_app():
 
         if qqq_price == 0:
             qqq_price = cboe_price
+            qqq_source = "CBOE Spot"
+            ratio_meta = _compute_tight_ratio(
+                nq_now=nq_now,
+                qqq_price=qqq_price,
+                nq_source=nq_source,
+                qqq_source=qqq_source,
+            )
+            ratio = float(ratio_meta.get("ratio", 0.0) or 0.0)
 
         exp_0dte, exp_weekly, exp_monthly = get_expirations_by_type(df_raw)
 
@@ -2727,6 +2867,8 @@ def run_full_app():
         if active_view == "📈 Market Overview":
             _render_data_health_strip(
                 nq_source=nq_source,
+                qqq_source=qqq_source,
+                ratio_meta=ratio_meta,
                 data_0dte=data_0dte,
                 market_data=market_data,
             )
@@ -2751,6 +2893,9 @@ def run_full_app():
                 em_points = data_0dte.get("nq_em_full", 0)
                 level_gap = abs(data_0dte["p_wall"] - data_0dte["p_floor"])
                 source_age = get_quote_age_label("NQ=F")
+                ratio_conf = int(ratio_meta.get("confidence_score", 0) or 0)
+                ratio_lbl = str(ratio_meta.get("confidence_label", "Low"))
+                ratio_unc = float(ratio_meta.get("uncertainty_pts", 0.0) or 0.0)
 
                 st.markdown(
                     f"""
@@ -2783,6 +2928,7 @@ def run_full_app():
                         <div class="quick-stat"><p class="label">EXPECTED MOVE</p><p class="value">±{em_points:.0f}</p><p class="sub">0DTE implied range</p></div>
                         <div class="quick-stat"><p class="label">WALL-FLOOR SPAN</p><p class="value">{level_gap:.0f} pts</p><p class="sub">{data_0dte['p_floor']:.0f} → {data_0dte['p_wall']:.0f}</p></div>
                         <div class="quick-stat"><p class="label">DATA HEALTH</p><p class="value">{source_age}</p><p class="sub">{nq_source}</p></div>
+                        <div class="quick-stat"><p class="label">RATIO QUALITY</p><p class="value">{ratio_conf}%</p><p class="sub">{ratio_lbl} • ±{ratio_unc:.0f} pts map error</p></div>
                     </div>
                 </div></div></div>
                 """,

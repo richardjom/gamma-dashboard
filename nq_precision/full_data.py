@@ -579,16 +579,47 @@ def get_nq_intraday_data():
 
 
 @st.cache_data(ttl=10)
-def get_qqq_price(finnhub_key):
+def get_qqq_price_with_source(finnhub_key):
+    # Prefer Schwab so NQ and QQQ can come from the same venue/timebase.
+    quotes = _get_schwab_quotes(["QQQ"])
+    if quotes:
+        for key in ("QQQ", "/QQQ"):
+            if key in quotes:
+                price = _extract_quote_price(quotes[key])
+                ts = _extract_quote_timestamp_ms(quotes[key])
+                if price and _validate_stale_quote(ts):
+                    if _validate_jump("QQQ", price):
+                        _set_quote_meta("QQQ", f"Schwab ({key})", ts or int(time.time() * 1000))
+                        return float(price), f"Schwab ({key})"
+        for quote_key, value in quotes.items():
+            price = _extract_quote_price(value)
+            ts = _extract_quote_timestamp_ms(value)
+            if price and _validate_stale_quote(ts):
+                if _validate_jump("QQQ", price):
+                    _set_quote_meta("QQQ", f"Schwab ({quote_key})", ts or int(time.time() * 1000))
+                    return float(price), f"Schwab ({quote_key})"
+
     try:
         client = finnhub.Client(api_key=finnhub_key)
         quote = client.quote("QQQ")
         price = quote.get("c", 0)
         if price > 0:
-            return float(price)
+            _set_quote_meta("QQQ", "Finnhub")
+            return float(price), "Finnhub"
     except Exception:
         pass
-    return None
+
+    yahoo_price = _get_yahoo_chart_price("QQQ", min_price=1)
+    if yahoo_price:
+        return float(yahoo_price), "Yahoo Finance"
+
+    return None, "unavailable"
+
+
+@st.cache_data(ttl=10)
+def get_qqq_price(finnhub_key):
+    price, _src = get_qqq_price_with_source(finnhub_key)
+    return price
 
 
 @st.cache_data(ttl=30)
@@ -2903,30 +2934,27 @@ def get_earnings_detail(symbol, finnhub_key):
 
 @st.cache_data(ttl=90)
 def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_ticker="QQQ"):
-    df = df_raw[df_raw["expiration"] == target_exp].copy()
-    df = df[df["open_interest"] > 0].copy()
-    df = df[df["iv"] > 0].copy()
-    # Use a wider strike window, then filter by liquidity to avoid noisy tails.
-    df = df[(df["strike"] > qqq_price * 0.90) & (df["strike"] < qqq_price * 1.10)].copy()
-    df["volume"] = df["volume"].fillna(0)
-    df["liquidity"] = df["open_interest"] + (0.35 * df["volume"])
-    liq_cut = df["liquidity"].quantile(0.25) if len(df) > 8 else 0
-    df = df[df["liquidity"] >= liq_cut].copy()
+    try:
+        exp_date = target_exp.date() if hasattr(target_exp, "date") else target_exp
+        dte_days = max(0, int((exp_date - datetime.now().date()).days))
+    except Exception:
+        dte_days = 0
 
-    if len(df) == 0:
+    df_exp = df_raw[df_raw["expiration"] == target_exp].copy()
+    df_exp = df_exp[df_exp["open_interest"] > 0].copy()
+    df_exp = df_exp[df_exp["iv"] > 0].copy()
+    if len(df_exp) == 0:
         return None
 
-    dn_strike, strike_delta, df = calculate_delta_neutral(df, qqq_price)
-    dn_nq = dn_strike * ratio
+    df_exp["volume"] = df_exp["volume"].fillna(0)
+    liq_vol_weight = 0.55 if dte_days == 0 else 0.45 if dte_days <= 7 else 0.35
+    df_exp["liquidity"] = df_exp["open_interest"] + (liq_vol_weight * df_exp["volume"])
 
-    total_call_delta = df[df["type"] == "call"]["delta_exposure"].sum()
-    total_put_delta = df[df["type"] == "put"]["delta_exposure"].sum()
-    net_delta = total_call_delta + total_put_delta
-
-    atm_strike = df.iloc[(df["strike"] - qqq_price).abs().argsort()[:1]]["strike"].values[0]
-    atm_opts = df[(df["strike"] >= qqq_price * 0.995) & (df["strike"] <= qqq_price * 1.005)].copy()
+    # Expected move first, then make strike window adaptive to current regime.
+    atm_strike = df_exp.iloc[(df_exp["strike"] - qqq_price).abs().argsort()[:1]]["strike"].values[0]
+    atm_opts = df_exp[(df_exp["strike"] >= qqq_price * 0.995) & (df_exp["strike"] <= qqq_price * 1.005)].copy()
     if atm_opts.empty:
-        atm_opts = df[df["strike"] == atm_strike]
+        atm_opts = df_exp[df_exp["strike"] == atm_strike]
     atm_call = atm_opts[atm_opts["type"] == "call"]
     atm_put = atm_opts[atm_opts["type"] == "put"]
 
@@ -2942,6 +2970,45 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
     nq_em_full = (straddle * 1.25 if straddle > 0 else qqq_price * 0.012) * ratio
     nq_em_050 = nq_em_full * 0.50
     nq_em_025 = nq_em_full * 0.25
+
+    etf_em_full = abs(float(nq_em_full / ratio)) if ratio not in (None, 0) else qqq_price * 0.012
+    em_pct = max(0.0025, float(etf_em_full / max(1.0, qqq_price)))
+    base_window_pct = max(0.025, min(0.12, (em_pct * 3.2) + 0.006))
+    if dte_days == 0:
+        strike_window_pct = max(0.02, min(0.07, base_window_pct))
+        liq_q = 0.40
+    elif dte_days <= 7:
+        strike_window_pct = max(0.03, min(0.095, base_window_pct))
+        liq_q = 0.35
+    else:
+        strike_window_pct = max(0.04, min(0.12, base_window_pct))
+        liq_q = 0.30
+
+    df = df_exp[
+        (df_exp["strike"] > qqq_price * (1.0 - strike_window_pct))
+        & (df_exp["strike"] < qqq_price * (1.0 + strike_window_pct))
+    ].copy()
+    if len(df) < 20:
+        widen_pct = min(0.14, strike_window_pct * 1.35)
+        df = df_exp[
+            (df_exp["strike"] > qqq_price * (1.0 - widen_pct))
+            & (df_exp["strike"] < qqq_price * (1.0 + widen_pct))
+        ].copy()
+        strike_window_pct = widen_pct
+    liq_cut = df["liquidity"].quantile(liq_q) if len(df) > 8 else 0
+    df = df[df["liquidity"] >= liq_cut].copy()
+
+    if len(df) == 0:
+        df = df_exp.sort_values("liquidity", ascending=False).head(120).copy()
+    if len(df) == 0:
+        return None
+
+    dn_strike, strike_delta, df = calculate_delta_neutral(df, qqq_price)
+    dn_nq = dn_strike * ratio
+
+    total_call_delta = df[df["type"] == "call"]["delta_exposure"].sum()
+    total_put_delta = df[df["type"] == "put"]["delta_exposure"].sum()
+    net_delta = total_call_delta + total_put_delta
 
     df["GEX"] = df.apply(
         lambda x: x["open_interest"]
@@ -2965,15 +3032,33 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
     calls = calls.sort_values("GEX", ascending=False)
     puts = puts.sort_values("GEX", ascending=True)
 
-    etf_em_full = abs(float(nq_em_full / ratio)) if ratio not in (None, 0) else qqq_price * 0.012
-    em_pct = max(0.0025, float(etf_em_full / max(1.0, qqq_price)))
-    dist_cap_pct = max(0.03, min(0.12, em_pct * 3.0))
-    dist_decay = max(0.004, min(0.035, em_pct * 1.8))
-    min_separation = max(0.5, qqq_price * 0.0015)
+    dist_cap_pct = max(
+        0.02,
+        min(0.12, strike_window_pct * (1.10 if dte_days == 0 else 1.25)),
+    )
+    dist_decay = max(0.003, min(0.03, dist_cap_pct * 0.55))
+    uniq_strikes = sorted(df["strike"].dropna().unique().tolist())
+    if len(uniq_strikes) >= 2:
+        diffs = [b - a for a, b in zip(uniq_strikes[:-1], uniq_strikes[1:]) if (b - a) > 0]
+        strike_step = float(pd.Series(diffs).median()) if diffs else 0.5
+    else:
+        strike_step = 0.5
+    min_separation = max(strike_step, qqq_price * 0.0012)
 
     def _prepare_strike_scores(frame, side):
         if frame is None or frame.empty:
-            return pd.DataFrame(columns=["strike", "GEX", "OI", "VOL", "LIQ", "score", "confidence_score"])
+            return pd.DataFrame(
+                columns=[
+                    "strike",
+                    "GEX",
+                    "OI",
+                    "VOL",
+                    "LIQ",
+                    "score",
+                    "confidence_score",
+                    "zone_confidence_score",
+                ]
+            )
         out = frame.copy().sort_values("strike")
         out["gex_abs"] = out["GEX"].abs()
         out["dist_pct"] = (out["strike"] - qqq_price).abs() / max(1.0, qqq_price)
@@ -2981,46 +3066,79 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
         out["prev_gex_abs"] = out["gex_abs"].shift(1).fillna(0.0)
         out["next_gex_abs"] = out["gex_abs"].shift(-1).fillna(0.0)
         out["cluster_gex_abs"] = out["gex_abs"] + (0.35 * out["prev_gex_abs"]) + (0.35 * out["next_gex_abs"])
+        out["zone_gex_abs"] = out["gex_abs"].rolling(window=5, min_periods=1, center=True).sum()
+        out["zone_liq"] = out["LIQ"].rolling(window=5, min_periods=1, center=True).sum()
+        out["zone_oi"] = out["OI"].rolling(window=5, min_periods=1, center=True).sum()
+        out["zone_signed_gex"] = out["GEX"].rolling(window=5, min_periods=1, center=True).sum()
 
         max_gex = max(1.0, float(out["gex_abs"].max()))
         max_cluster = max(1.0, float(out["cluster_gex_abs"].max()))
         max_oi = max(1.0, float(out["OI"].max()))
         max_vol = max(1.0, float(out["VOL"].max()))
         max_liq = max(1.0, float(out["LIQ"].max()))
+        max_zone_gex = max(1.0, float(out["zone_gex_abs"].max()))
+        max_zone_oi = max(1.0, float(out["zone_oi"].max()))
+        max_zone_liq = max(1.0, float(out["zone_liq"].max()))
 
         out["gex_strength"] = out["gex_abs"] / max_gex
         out["cluster_strength"] = out["cluster_gex_abs"] / max_cluster
         out["oi_strength"] = out["OI"] / max_oi
         out["vol_strength"] = out["VOL"] / max_vol
         out["liq_strength"] = out["LIQ"] / max_liq
+        out["zone_gex_strength"] = out["zone_gex_abs"] / max_zone_gex
+        out["zone_oi_strength"] = out["zone_oi"] / max_zone_oi
+        out["zone_liq_strength"] = out["zone_liq"] / max_zone_liq
 
         if side == "call":
-            out["dir_factor"] = out["GEX"].map(lambda x: 1.0 if float(x) > 0 else 0.75)
+            out["dir_factor"] = out["GEX"].map(lambda x: 1.0 if float(x) > 0 else 0.50)
+            out["zone_dir_factor"] = out["zone_signed_gex"].map(lambda x: 1.0 if float(x) > 0 else 0.50)
         else:
-            out["dir_factor"] = out["GEX"].map(lambda x: 1.0 if float(x) < 0 else 0.75)
+            out["dir_factor"] = out["GEX"].map(lambda x: 1.0 if float(x) < 0 else 0.50)
+            out["zone_dir_factor"] = out["zone_signed_gex"].map(lambda x: 1.0 if float(x) < 0 else 0.50)
 
         base = (
-            (0.34 * out["gex_strength"])
+            (0.30 * out["gex_strength"])
             + (0.24 * out["cluster_strength"])
-            + (0.20 * out["liq_strength"])
-            + (0.14 * out["oi_strength"])
+            + (0.22 * out["liq_strength"])
+            + (0.16 * out["oi_strength"])
             + (0.08 * out["vol_strength"])
         )
-        out["score"] = 100.0 * base * (0.80 + (0.20 * out["distance_score"])) * out["dir_factor"]
+        out["raw_score"] = 100.0 * base * out["dir_factor"]
+        out["zone_score"] = 100.0 * (
+            (0.46 * out["zone_gex_strength"])
+            + (0.34 * out["zone_liq_strength"])
+            + (0.20 * out["zone_oi_strength"])
+        ) * out["zone_dir_factor"]
+        out["score"] = ((0.58 * out["raw_score"]) + (0.42 * out["zone_score"])) * (
+            0.78 + (0.22 * out["distance_score"])
+        )
         out["score"] = out["score"].fillna(0.0)
-        out["confidence_score"] = (
+        out["raw_confidence_score"] = (
             100.0
             * (
-                (0.30 * out["gex_strength"])
+                (0.28 * out["gex_strength"])
                 + (0.24 * out["cluster_strength"])
                 + (0.20 * out["liq_strength"])
-                + (0.14 * out["distance_score"])
-                + (0.12 * out["oi_strength"])
+                + (0.18 * out["distance_score"])
+                + (0.10 * out["oi_strength"])
             )
             * out["dir_factor"]
         )
+        out["zone_confidence_score"] = (
+            (0.55 * out["raw_confidence_score"]) + (0.45 * out["zone_score"])
+        )
+        out["confidence_score"] = (
+            (0.60 * out["raw_confidence_score"]) + (0.40 * out["zone_score"])
+        )
+        out["zone_confidence_score"] = out["zone_confidence_score"].fillna(0.0).clip(lower=0.0, upper=100.0)
         out["confidence_score"] = out["confidence_score"].fillna(0.0).clip(lower=0.0, upper=100.0)
-        return out.sort_values(["confidence_score", "score"], ascending=[False, False]).reset_index(drop=True)
+        return (
+            out.sort_values(
+                ["zone_confidence_score", "confidence_score", "score", "dist_pct"],
+                ascending=[False, False, False, True],
+            )
+            .reset_index(drop=True)
+        )
 
     call_scored = _prepare_strike_scores(call_strikes, "call")
     put_scored = _prepare_strike_scores(put_strikes, "put")
@@ -3042,8 +3160,20 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
             )
         if directional.empty:
             directional = frame
-        directional = directional.sort_values(["confidence_score", "score"], ascending=[False, False])
-        return float(directional.iloc[0]["strike"])
+        directional = directional.sort_values(
+            ["zone_confidence_score", "confidence_score", "score", "dist_pct"],
+            ascending=[False, False, False, True],
+        )
+        top = directional.head(3).copy()
+        if len(top) >= 2:
+            gap = float(top.iloc[0]["zone_confidence_score"] - top.iloc[1]["zone_confidence_score"])
+            if gap < 2.5:
+                top = top.sort_values(
+                    ["dist_pct", "zone_confidence_score", "confidence_score"],
+                    ascending=[True, False, False],
+                )
+                return float(top.iloc[0]["strike"])
+        return float(top.iloc[0]["strike"])
 
     def _pick_secondary(frame, primary_strike, direction):
         if frame is None or frame.empty or primary_strike is None:
@@ -3064,15 +3194,20 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
                 pool = frame[frame["strike"] < (primary_strike - min_separation)]
         if pool.empty:
             return primary_strike
-        pool = pool.sort_values(["confidence_score", "score"], ascending=[False, False])
+        pool = pool.sort_values(
+            ["zone_confidence_score", "confidence_score", "score", "dist_pct"],
+            ascending=[False, False, False, True],
+        )
         return float(pool.iloc[0]["strike"])
 
-    def _score_for_strike(frame, strike_val):
+    def _score_for_strike(frame, strike_val, field="zone_confidence_score"):
         if frame is None or frame.empty or strike_val is None:
             return 0.0
         idx = (frame["strike"] - float(strike_val)).abs().idxmin()
+        if field not in frame.columns:
+            field = "confidence_score"
         try:
-            return float(frame.loc[idx, "confidence_score"])
+            return float(frame.loc[idx, field])
         except Exception:
             return 0.0
 
@@ -3092,8 +3227,10 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
         if not alt_floor.empty:
             p_floor_strike = float(alt_floor.iloc[0]["strike"])
         if p_floor_strike >= p_wall_strike:
-            p_floor_strike = min(float(puts["strike"].min()), qqq_price * 0.995) if len(puts) > 0 else qqq_price * 0.99
-            p_wall_strike = max(float(calls["strike"].max()), qqq_price * 1.005) if len(calls) > 0 else qqq_price * 1.01
+            below = sorted([float(s) for s in puts["strike"].dropna().unique().tolist() if float(s) < qqq_price])
+            above = sorted([float(s) for s in calls["strike"].dropna().unique().tolist() if float(s) > qqq_price])
+            p_floor_strike = (below[-1] if below else (qqq_price * 0.995))
+            p_wall_strike = (above[0] if above else (qqq_price * 1.005))
 
     s_wall_strike = _pick_secondary(call_scored, p_wall_strike, direction="up")
     s_floor_strike = _pick_secondary(put_scored, p_floor_strike, direction="down")
@@ -3106,6 +3243,9 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
     secondary_wall_conf_sel = _score_for_strike(call_scored, s_wall_strike)
     primary_floor_conf_sel = _score_for_strike(put_scored, p_floor_strike)
     secondary_floor_conf_sel = _score_for_strike(put_scored, s_floor_strike)
+    min_primary_gap = 4.0 if dte_days == 0 else 3.0
+    wall_structure_compressed = (primary_wall_conf_sel - secondary_wall_conf_sel) < min_primary_gap
+    floor_structure_compressed = (primary_floor_conf_sel - secondary_floor_conf_sel) < min_primary_gap
 
     gex_by_strike = df.groupby("strike", as_index=False)["GEX"].sum().sort_values("strike")
     g_flip_strike = None
@@ -3237,14 +3377,21 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
         round((0.60 * level_confidence["Secondary Floor"]["score"]) + (0.40 * secondary_floor_conf_sel))
     )
 
+    margin = int(max(3, round(min_primary_gap)))
     if level_confidence["Primary Wall"]["score"] <= level_confidence["Secondary Wall"]["score"]:
         level_confidence["Primary Wall"]["score"] = min(
-            100, level_confidence["Secondary Wall"]["score"] + 3
+            100, level_confidence["Secondary Wall"]["score"] + margin
         )
     if level_confidence["Primary Floor"]["score"] <= level_confidence["Secondary Floor"]["score"]:
         level_confidence["Primary Floor"]["score"] = min(
-            100, level_confidence["Secondary Floor"]["score"] + 3
+            100, level_confidence["Secondary Floor"]["score"] + margin
         )
+    if wall_structure_compressed:
+        level_confidence["Primary Wall"]["score"] = min(level_confidence["Primary Wall"]["score"], 68)
+        level_confidence["Secondary Wall"]["score"] = min(level_confidence["Secondary Wall"]["score"], 66)
+    if floor_structure_compressed:
+        level_confidence["Primary Floor"]["score"] = min(level_confidence["Primary Floor"]["score"], 68)
+        level_confidence["Secondary Floor"]["score"] = min(level_confidence["Secondary Floor"]["score"], 66)
 
     for key in ["Primary Wall", "Secondary Wall", "Primary Floor", "Secondary Floor"]:
         score_i = int(max(0, min(100, level_confidence[key]["score"])))
@@ -3308,6 +3455,10 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
             "options_latency_s": options_health.get("latency_s"),
             "options_freshness": options_health.get("status", "unknown"),
             "confidence_multiplier": conf_mult,
+            "wall_model": "zone_v2",
+            "strike_window_pct": round(float(strike_window_pct), 4),
+            "liq_quantile": float(liq_q),
+            "structure_compressed": bool(wall_structure_compressed or floor_structure_compressed),
         },
         "straddle": straddle,
         "nq_em_full": nq_em_full,
