@@ -27,6 +27,7 @@ from nq_precision.full_data import (
     get_expirations_by_type,
     get_fear_greed_index,
     get_futures_breadth_internals,
+    get_cot_dealer_positioning,
     get_futures_reference_levels,
     get_futures_opening_structure,
     get_market_overview_yahoo,
@@ -2322,6 +2323,59 @@ def _render_breadth_internals_panel(breadth_data, nq_day_change_pct, es_change_p
     st.markdown("</div></div>", unsafe_allow_html=True)
 
 
+def _render_cot_dealer_panel(cot_payload):
+    st.markdown(
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🏦 COT Dealer/Intermediary Positioning (Weekly)</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        unsafe_allow_html=True,
+    )
+    if not cot_payload or not cot_payload.get("markets"):
+        st.info("COT dealer data unavailable.")
+        st.caption("Source: CFTC weekly financial futures (TFF).")
+        st.markdown("</div></div>", unsafe_allow_html=True)
+        return
+
+    age_days = cot_payload.get("age_days")
+    asof = cot_payload.get("asof_date", "n/a")
+    status = cot_payload.get("status", "unknown")
+    st.caption(
+        f"As-of (report date): {asof} | age: {age_days if age_days is not None else 'n/a'} days | "
+        f"status: {status} | source: {cot_payload.get('source', 'CFTC')}"
+    )
+
+    rows = []
+    for code in ["NQ", "ES", "YM", "RTY"]:
+        m = (cot_payload.get("markets", {}) or {}).get(code)
+        if not m:
+            continue
+        rows.append(
+            {
+                "Market": f"{m.get('label', code)} ({code})",
+                "Dealer Net": f"{int(m.get('net', 0)):+,}",
+                "Net % OI": f"{float(m.get('net_pct_oi', 0.0)):+.2f}%" if m.get("net_pct_oi") is not None else "n/a",
+                "WoW Δ": f"{int(m.get('wow_change', 0)):+,}" if m.get("wow_change") is not None else "n/a",
+                "Bias": str(m.get("bias", "n/a")),
+                "Score (-2..+2)": f"{float(m.get('score', 0.0)):+.2f}",
+            }
+        )
+    if rows:
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+
+    nqs = (cot_payload.get("markets", {}) or {}).get("NQ", {}).get("score")
+    ess = (cot_payload.get("markets", {}) or {}).get("ES", {}).get("score")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("NQ Dealer Score", f"{float(nqs):+.2f}" if nqs is not None else "n/a")
+    c2.metric("ES Dealer Score", f"{float(ess):+.2f}" if ess is not None else "n/a")
+    if nqs is not None and ess is not None:
+        blend = (float(nqs) + float(ess)) / 2.0
+        regime = "Supportive" if blend > 0.35 else "Defensive" if blend < -0.35 else "Neutral"
+        c3.metric("Dealer Risk Regime", regime, f"{blend:+.2f}")
+    else:
+        c3.metric("Dealer Risk Regime", "n/a")
+
+    st.caption("Interpretation: positive score = dealers net long, negative = net short. Weekly, not intraday.")
+    st.markdown("</div></div>", unsafe_allow_html=True)
+
+
 def _render_overview_reference_snapshot(data_0dte, nq_now):
     st.markdown(
         '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📍 Key References (Compact)</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
@@ -2776,6 +2830,7 @@ def run_full_app():
         reference_levels = get_futures_reference_levels("NQ=F", finnhub_key)
         event_risk = get_event_risk_snapshot(finnhub_key, hours_ahead=24)
         breadth_internals = get_futures_breadth_internals()
+        cot_dealer = get_cot_dealer_positioning()
 
     level_interactions_df = None
     nq_data = None
@@ -3063,6 +3118,7 @@ def run_full_app():
                 level_interactions_df=level_interactions_df,
             )
             _render_cross_asset_driver_matrix_panel(cross_asset_matrix)
+            _render_cot_dealer_panel(cot_dealer)
             _render_breadth_internals_panel(
                 breadth_data=breadth_internals,
                 nq_day_change_pct=nq_day_change_pct,

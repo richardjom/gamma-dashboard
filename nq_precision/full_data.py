@@ -2,6 +2,7 @@ import re
 import time
 from datetime import datetime, timezone, timedelta, time as dt_time
 import math
+import io
 from zoneinfo import ZoneInfo
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -2140,6 +2141,210 @@ def get_futures_breadth_internals():
     }
 
 
+@st.cache_data(ttl=1800)
+def get_cot_dealer_positioning():
+    fetch_ms = int(time.time() * 1000)
+    urls = [
+        "https://www.cftc.gov/dea/newcot/FinFutWk.txt",
+        "https://www.cftc.gov/dea/newcot/FinComWk.txt",
+    ]
+
+    def _norm(name):
+        return str(name).strip().lower().replace(" ", "_")
+
+    def _find_col(cols, patterns):
+        for c in cols:
+            n = _norm(c)
+            for p in patterns:
+                if p in n:
+                    return c
+        return None
+
+    df = None
+    source_url = None
+    for url in urls:
+        try:
+            resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+            if resp.status_code != 200 or not resp.text or len(resp.text) < 200:
+                continue
+            raw_text = resp.text
+            sep = "," if raw_text.count(",") >= raw_text.count("\t") else "\t"
+            cand = pd.read_csv(io.StringIO(raw_text), sep=sep)
+            if cand is not None and not cand.empty:
+                df = cand
+                source_url = url
+                break
+        except Exception:
+            continue
+
+    if df is None or df.empty:
+        _set_dataset_meta(
+            "cot_dealer",
+            "CFTC unavailable",
+            timestamp_ms=fetch_ms,
+            max_age_sec=86400 * 10,
+        )
+        return {
+            "asof_date": None,
+            "source": "CFTC",
+            "status": "unavailable",
+            "markets": {},
+        }
+
+    cols = list(df.columns)
+    market_col = _find_col(cols, ["market_and_exchange_names", "market_and_exchange_name"])
+    date_col = _find_col(
+        cols,
+        [
+            "report_date_as_yyyy-mm-dd",
+            "as_of_date_in_form_yyyy-mm-dd",
+            "report_date",
+            "as_of_date",
+        ],
+    )
+    dealer_long_col = _find_col(
+        cols,
+        [
+            "dealer_positions_long_all",
+            "dealer_intermediary_positions_long_all",
+            "dealer_intermediary_long_all",
+            "dealer_positions_long",
+        ],
+    )
+    dealer_short_col = _find_col(
+        cols,
+        [
+            "dealer_positions_short_all",
+            "dealer_intermediary_positions_short_all",
+            "dealer_intermediary_short_all",
+            "dealer_positions_short",
+        ],
+    )
+    oi_col = _find_col(cols, ["open_interest_all", "open_interest"])
+
+    if not market_col or not date_col or not dealer_long_col or not dealer_short_col:
+        _set_dataset_meta(
+            "cot_dealer",
+            "CFTC schema mismatch",
+            timestamp_ms=fetch_ms,
+            max_age_sec=86400 * 10,
+        )
+        return {
+            "asof_date": None,
+            "source": "CFTC",
+            "status": "schema_mismatch",
+            "markets": {},
+        }
+
+    d = df.copy()
+    d[date_col] = pd.to_datetime(d[date_col], errors="coerce")
+    d = d.dropna(subset=[date_col, market_col]).copy()
+    if d.empty:
+        _set_dataset_meta(
+            "cot_dealer",
+            "CFTC empty",
+            timestamp_ms=fetch_ms,
+            max_age_sec=86400 * 10,
+        )
+        return {
+            "asof_date": None,
+            "source": "CFTC",
+            "status": "empty",
+            "markets": {},
+        }
+
+    for c in [dealer_long_col, dealer_short_col, oi_col]:
+        if c and c in d.columns:
+            d[c] = pd.to_numeric(d[c], errors="coerce")
+
+    targets = {
+        "NQ": {"label": "Nasdaq 100", "patterns": [r"NASDAQ[- ]?100", r"NASD[AQ]+[- ]?100"]},
+        "ES": {"label": "S&P 500", "patterns": [r"S&P[- ]?500", r"SP[- ]?500"]},
+        "YM": {"label": "Dow Jones", "patterns": [r"DOW JONES", r"DJIA"]},
+        "RTY": {"label": "Russell 2000", "patterns": [r"RUSSELL[- ]?2000"]},
+    }
+
+    def _match_market(series, patterns):
+        mask = pd.Series(False, index=series.index)
+        for p in patterns:
+            mask = mask | series.astype(str).str.contains(p, flags=re.IGNORECASE, regex=True)
+        return mask
+
+    out_markets = {}
+    latest_global = d[date_col].max()
+    for code, cfg in targets.items():
+        sub = d[_match_market(d[market_col], cfg["patterns"])].copy()
+        if sub.empty:
+            continue
+        sub = sub.dropna(subset=[dealer_long_col, dealer_short_col]).copy()
+        if sub.empty:
+            continue
+
+        # If multiple contracts match (e.g., mini/micro variants), keep the one with biggest latest OI.
+        latest_date = sub[date_col].max()
+        latest_rows = sub[sub[date_col] == latest_date].copy()
+        if latest_rows.empty:
+            continue
+        if oi_col and oi_col in latest_rows.columns:
+            latest_rows = latest_rows.sort_values(oi_col, ascending=False)
+        chosen_market_name = str(latest_rows.iloc[0][market_col])
+        chosen = sub[sub[market_col].astype(str) == chosen_market_name].copy().sort_values(date_col)
+        if chosen.empty:
+            continue
+
+        last_row = chosen.iloc[-1]
+        prev_row = chosen.iloc[-2] if len(chosen) > 1 else None
+        dealer_long = float(last_row.get(dealer_long_col, 0.0) or 0.0)
+        dealer_short = float(last_row.get(dealer_short_col, 0.0) or 0.0)
+        net = dealer_long - dealer_short
+        prev_net = None
+        if prev_row is not None:
+            prev_net = float(prev_row.get(dealer_long_col, 0.0) or 0.0) - float(
+                prev_row.get(dealer_short_col, 0.0) or 0.0
+            )
+        wow_change = (net - prev_net) if prev_net is not None else None
+        oi_val = float(last_row.get(oi_col, 0.0) or 0.0) if oi_col and oi_col in chosen.columns else None
+        net_pct_oi = (net / oi_val * 100.0) if oi_val and oi_val > 0 else None
+        score = float(max(-2.0, min(2.0, (net_pct_oi / 5.0)))) if net_pct_oi is not None else 0.0
+        bias = "Net Long" if net > 0 else "Net Short" if net < 0 else "Flat"
+
+        out_markets[code] = {
+            "label": cfg["label"],
+            "market_name": chosen_market_name,
+            "asof_date": str(pd.to_datetime(last_row[date_col]).date()),
+            "dealer_long": int(round(dealer_long)),
+            "dealer_short": int(round(dealer_short)),
+            "net": int(round(net)),
+            "wow_change": int(round(wow_change)) if wow_change is not None else None,
+            "open_interest": int(round(oi_val)) if oi_val is not None else None,
+            "net_pct_oi": float(net_pct_oi) if net_pct_oi is not None else None,
+            "score": round(score, 2),
+            "bias": bias,
+        }
+
+    age_days = None
+    try:
+        if pd.notna(latest_global):
+            age_days = max(0, (datetime.now(timezone.utc).date() - latest_global.date()).days)
+    except Exception:
+        age_days = None
+    status = "fresh" if age_days is not None and age_days <= 5 else "stale_soft" if age_days is not None and age_days <= 12 else "stale_hard"
+    _set_dataset_meta(
+        "cot_dealer",
+        "CFTC TFF",
+        timestamp_ms=fetch_ms,
+        max_age_sec=86400 * 10,
+    )
+    return {
+        "asof_date": str(latest_global.date()) if pd.notna(latest_global) else None,
+        "source": "CFTC TFF",
+        "source_url": source_url,
+        "status": status,
+        "age_days": age_days,
+        "markets": out_markets,
+    }
+
+
 def _earnings_to_event_dt_et(date_val, time_bucket):
     et = ZoneInfo("America/New_York")
     if date_val is None:
@@ -3419,7 +3624,6 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
         val["label"] = adj_label
 
     results = [
-        ("Delta Neutral", dn_nq, 5.0, "⚖️"),
         ("Target Resistance", (p_wall_strike * ratio) + 35, 3.0, "🎯"),
         ("Primary Wall", p_wall_strike * ratio, 5.0, "🔴"),
         ("Primary Floor", p_floor_strike * ratio, 5.0, "🟢"),
@@ -3427,6 +3631,7 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
         ("Secondary Wall", s_wall_strike * ratio, 3.0, "🟠"),
         ("Secondary Floor", s_floor_strike * ratio, 3.0, "🟡"),
         ("Gamma Flip", g_flip_strike * ratio, 10.0, "⚡"),
+        ("Delta Neutral", dn_nq, 5.0, "⚖️"),
         ("Upper 0.50σ", nq_now + nq_em_050, 5.0, "📊"),
         ("Upper 0.25σ", nq_now + nq_em_025, 3.0, "📊"),
         ("Lower 0.25σ", nq_now - nq_em_025, 3.0, "📊"),
