@@ -107,10 +107,7 @@ def _theme_css(bg_color, card_bg, text_color, accent_color, border_color, compac
         gap: 6px;
     }}
     .toolbar-dots {{
-        color: #aeb8c6;
-        letter-spacing: 0.5px;
-        font-size: 11px;
-        opacity: 0.9;
+        display: none;
     }}
     .terminal-body {{
         padding: 10px;
@@ -450,18 +447,6 @@ def _theme_css(bg_color, card_bg, text_color, accent_color, border_color, compac
         top: -4px;
         border-radius: 2px;
     }}
-    .keyboard-hint {{
-        position: fixed;
-        bottom: 20px;
-        right: 20px;
-        background: #1a212b;
-        padding: 10px;
-        border-radius: 8px;
-        font-size: 12px;
-        color: #888;
-        border: 1px solid #2f3845;
-        z-index: 5;
-    }}
     .news-rail {{
         position: sticky;
         top: 6px;
@@ -574,18 +559,6 @@ def _theme_css(bg_color, card_bg, text_color, accent_color, border_color, compac
         font-weight: 700;
         background: #2f7d56;
         color: #b6ffd8;
-    }}
-    .skeleton-box {{
-        border: 1px solid #2f3947;
-        border-radius: 10px;
-        height: 390px;
-        background: linear-gradient(90deg, #151d2a 25%, #1e2837 37%, #151d2a 63%);
-        background-size: 400% 100%;
-        animation: shimmer 1.3s ease-in-out infinite;
-    }}
-    @keyframes shimmer {{
-        0% {{ background-position: 100% 0; }}
-        100% {{ background-position: 0 0; }}
     }}
     {compact_css}
 </style>
@@ -1249,7 +1222,7 @@ def _build_event_surprise_engine(econ_df):
 
 def _render_regime_engine_panel(regime):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧠 Regime Engine</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧠 Regime Engine</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not regime:
@@ -1276,7 +1249,7 @@ def _render_regime_engine_panel(regime):
 
 def _render_dealer_forward_pressure_panel(payload):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧮 Dealer Forward Pressure</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧮 Dealer Forward Pressure</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not payload:
@@ -1318,7 +1291,7 @@ def _render_dealer_forward_pressure_panel(payload):
 
 def _render_microstructure_panel(payload):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🔬 Microstructure Panel</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🔬 Microstructure Panel</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not payload:
@@ -1341,7 +1314,7 @@ def _render_microstructure_panel(payload):
 
 def _render_cross_asset_driver_matrix_panel(payload):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🌐 Cross-Asset Driver Matrix</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🌐 Cross-Asset Driver Matrix</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not payload:
@@ -1366,7 +1339,7 @@ def _render_cross_asset_driver_matrix_panel(payload):
 
 def _render_event_surprise_panel(payload):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">⚡ Event Surprise Engine</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">⚡ Event Surprise Engine</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not payload:
@@ -1478,24 +1451,35 @@ def _render_data_health_strip(nq_source, qqq_source, ratio_meta, data_0dte, mark
         },
     ]
 
-    html_rows = ['<div class="health-strip">']
-    for item in items:
-        s_class = _freshness_class(item.get("status"))
-        html_rows.append(
-            f'<div class="health-card">'
-            f'<p class="title">{html.escape(str(item.get("title", "")))}</p>'
-            f'<p class="value">{html.escape(str(item.get("value", "")))}</p>'
-            f'<span class="status-pill {s_class}">{html.escape(str(item.get("status", "unknown")).upper())}</span>'
-            f'<p class="sub">{html.escape(str(item.get("sub", "")))}</p>'
-            f"</div>"
-        )
-    html_rows.append("</div>")
-    st.markdown("".join(html_rows), unsafe_allow_html=True)
+    for i in range(0, len(items), 4):
+        row = items[i : i + 4]
+        cols = st.columns(4)
+        for c_idx, col in enumerate(cols):
+            if c_idx >= len(row):
+                continue
+            item = row[c_idx]
+            status_text = html.escape(str(item.get("status", "unknown")).upper())
+            value_text = html.escape(str(item.get("value", "")))
+            sub_text = html.escape(str(item.get("sub", "")))
+            title_text = html.escape(str(item.get("title", "")))
+            s_class = _freshness_class(item.get("status"))
+            with col:
+                st.markdown(
+                    f"""
+                    <div class="health-card">
+                        <p class="title">{title_text}</p>
+                        <p class="value">{value_text}</p>
+                        <span class="status-pill {s_class}">{status_text}</span>
+                        <p class="sub">{sub_text}</p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
 
 def _render_trade_plan_panel(playbook, data_0dte, nq_now, event_risk):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧭 Trade Plan (Session)</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧭 Trade Plan (Session)</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not playbook or not data_0dte:
@@ -1779,7 +1763,7 @@ def _render_morning_playbook(playbook, nq_source, options_freshness, econ_freshn
         st.info("Morning playbook unavailable.")
         return
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">☀️ Morning Playbook</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">☀️ Morning Playbook</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     c1, c2, c3 = st.columns([1.05, 1.2, 1.2])
@@ -1826,7 +1810,7 @@ def _render_morning_playbook(playbook, nq_source, options_freshness, econ_freshn
 
 def _render_level_quality_panel(data_0dte, data_weekly, nq_now, level_interactions_df=None):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🎯 Level Quality Engine</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🎯 Level Quality Engine</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not data_0dte:
@@ -1944,7 +1928,7 @@ def _render_level_quality_panel(data_0dte, data_weekly, nq_now, level_interactio
 
 def _render_reference_levels_panel(data_0dte, reference_levels, opening_structure, nq_now, event_risk):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧷 Day-Trader Reference Levels</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧷 Day-Trader Reference Levels</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not data_0dte:
@@ -2084,7 +2068,7 @@ def _render_reference_levels_panel(data_0dte, reference_levels, opening_structur
 
 def _render_opening_structure_panel(opening):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">⏱ Opening Auction Context</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">⏱ Opening Auction Context</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not opening:
@@ -2142,7 +2126,7 @@ def _render_opening_structure_panel(opening):
 
 def _render_event_risk_panel(event_risk):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🚨 Event-Risk Engine</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🚨 Event-Risk Engine</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not event_risk:
@@ -2194,7 +2178,7 @@ def _render_event_risk_panel(event_risk):
 
 def _render_breadth_internals_panel(breadth_data, nq_day_change_pct, es_change_pct, market_data):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📡 Breadth & Internals (Futures Context)</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📡 Breadth & Internals (Futures Context)</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not breadth_data:
@@ -2325,7 +2309,7 @@ def _render_breadth_internals_panel(breadth_data, nq_day_change_pct, es_change_p
 
 def _render_cot_dealer_panel(cot_payload):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🏦 COT Dealer/Intermediary Positioning (Weekly)</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🏦 COT Dealer/Intermediary Positioning (Weekly)</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not cot_payload or not cot_payload.get("markets"):
@@ -2378,7 +2362,7 @@ def _render_cot_dealer_panel(cot_payload):
 
 def _render_overview_reference_snapshot(data_0dte, nq_now):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📍 Key References (Compact)</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📍 Key References (Compact)</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not data_0dte:
@@ -2411,7 +2395,7 @@ def _render_overview_reference_snapshot(data_0dte, nq_now):
 
 def _render_overview_event_strip(event_risk):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">⏰ Event Risk (Next)</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">⏰ Event Risk (Next)</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not event_risk:
@@ -2460,7 +2444,7 @@ def _render_futures_indices_panel(market_data, nq_now, nq_day_change_pct, nq_sou
     if not market_data:
         return
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧭 Futures & Indices</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧭 Futures & Indices</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     c1, c2, c3, c4, c5 = st.columns(5)
@@ -2493,7 +2477,7 @@ def _render_futures_indices_panel(market_data, nq_now, nq_day_change_pct, nq_sou
 
 def _render_heatmap_panel():
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧩 Nasdaq Stocks Heat Map</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧩 Nasdaq Stocks Heat Map</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     st.markdown("**Heatmap Controls**")
@@ -2524,15 +2508,12 @@ def _render_heatmap_panel():
             help="Example: AAPL,MSFT,NVDA,AMZN",
         )
 
-    skeleton = st.empty()
-    skeleton.markdown('<div class="skeleton-box"></div>', unsafe_allow_html=True)
     heatmap_df = get_nasdaq_heatmap_data(
         universe=st.session_state.heatmap_universe,
         size_mode=st.session_state.heatmap_size_mode,
         timeframe=st.session_state.heatmap_timeframe,
         custom_symbols=st.session_state.heatmap_custom_symbols,
     )
-    skeleton.empty()
     if heatmap_df is not None and not heatmap_df.empty:
         heatmap_df = heatmap_df.copy()
         size_cut = heatmap_df["size"].quantile(0.18)
@@ -2646,15 +2627,6 @@ def run_full_app():
         accent_color,
         border_color,
         compact_mode=st.session_state.compact_mode,
-    )
-
-    st.markdown(
-        """
-<div class="keyboard-hint">
-⌨️ Shortcuts: R=Refresh | 1-6=Tabs | T=Theme
-</div>
-""",
-        unsafe_allow_html=True,
     )
 
     st.title("📊 NQ Precision Map")
@@ -2954,7 +2926,7 @@ def run_full_app():
 
                 st.markdown(
                     f"""
-                <div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🎯 Session Quick Glance</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body"><div class="quick-glance">
+                <div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🎯 Session Quick Glance</div></div><div class="terminal-body"><div class="quick-glance">
                     <div class="quick-grid">
                         <div>
                             <p style="color: #888; margin: 0; font-size: 14px;">CURRENT PRICE</p>
@@ -3006,7 +2978,7 @@ def run_full_app():
                 _render_overview_event_strip(event_risk)
 
                 st.markdown(
-                    '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📊 Market Sentiment</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+                    '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📊 Market Sentiment</div></div><div class="terminal-body">',
                     unsafe_allow_html=True,
                 )
                 sc1, sc2 = st.columns([3, 1])
@@ -3694,7 +3666,7 @@ def run_full_app():
     with right_col:
         if active_view == "📅 Earnings Calendar":
             st.markdown(
-                '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📊 Earnings Detail</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+                '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📊 Earnings Detail</div></div><div class="terminal-body">',
                 unsafe_allow_html=True,
             )
             selected = st.session_state.get("selected_earnings")
@@ -3735,14 +3707,19 @@ def run_full_app():
             st.markdown("</div></div>", unsafe_allow_html=True)
         else:
             st.markdown(
-                '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📰 Live News Feed</div><div class="toolbar-dots">⟳ ⊞ ⚙</div></div><div class="terminal-body">',
+                '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📰 Live News Feed</div></div><div class="terminal-body">',
                 unsafe_allow_html=True,
             )
             rss_news = get_rss_news()
+            visible_news = [
+                article
+                for article in (rss_news or [])
+                if str(article.get("headline", "")).strip()
+            ]
             st.markdown('<div class="news-rail-title">Headlines</div>', unsafe_allow_html=True)
             st.markdown('<div class="news-rail">', unsafe_allow_html=True)
-            if rss_news:
-                for article in rss_news[:32]:
+            if visible_news:
+                for article in visible_news[:32]:
                     headline = html.escape(article.get("headline", "No title"))
                     source = html.escape(article.get("source", "Unknown"))
                     link = article.get("link", "#")
