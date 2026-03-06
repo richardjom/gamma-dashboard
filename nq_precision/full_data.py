@@ -2769,79 +2769,282 @@ def process_multi_asset():
     return results
 
 
-@st.cache_data(ttl=30)
-def get_rss_news():
-    et_tz = ZoneInfo("America/New_York")
-    feeds = {
-        "Reuters Business": "http://feeds.reuters.com/reuters/businessNews",
-        "Reuters World": "http://feeds.reuters.com/reuters/worldNews",
-        "Reuters Markets": "http://feeds.reuters.com/news/wealth",
-        "MarketWatch Top Stories": "http://feeds.marketwatch.com/marketwatch/topstories",
-        "MarketWatch Market Pulse": "http://feeds.marketwatch.com/marketwatch/marketpulse/",
-        "CNBC Top News": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664",
-        "CNBC Finance": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114",
-        "WSJ Markets": "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
-    }
-
-    all_news = []
-    seen = set()
-
-    for source_name, feed_url in feeds.items():
+@st.cache_data(ttl=15)
+def get_rss_news(finnhub_key=""):
+    def _parse_news_dt_et(raw_value):
+        if raw_value is None:
+            return None
+        dt = _parse_event_dt_et(raw_value)
+        if dt is not None:
+            return dt
         try:
-            feed = feedparser.parse(feed_url)
-
-            for entry in feed.entries[:12]:
-                try:
-                    headline = entry.get("title", "No title").strip()
-                    link = entry.get("link", "#")
-                    dedupe_key = (source_name, headline)
-                    if dedupe_key in seen:
-                        continue
-                    seen.add(dedupe_key)
-
-                    published_struct = entry.get("published_parsed") or entry.get("updated_parsed")
-                    published_dt = None
-                    if published_struct:
-                        try:
-                            published_dt = datetime(
-                                published_struct.tm_year,
-                                published_struct.tm_mon,
-                                published_struct.tm_mday,
-                                published_struct.tm_hour,
-                                published_struct.tm_min,
-                                published_struct.tm_sec,
-                                tzinfo=timezone.utc,
-                            ).astimezone(et_tz)
-                        except Exception:
-                            published_dt = None
-
-                    pub_date = (
-                        published_dt.strftime("%a, %b %d %Y %I:%M %p ET")
-                        if published_dt
-                        else "Time unavailable (ET)"
-                    )
-                    all_news.append(
-                        {
-                            "headline": headline,
-                            "source": source_name,
-                            "link": link,
-                            "published": pub_date,
-                            "published_ts": int(published_dt.timestamp()) if published_dt else 0,
-                            "summary": entry.get("summary", "")[:200],
-                        }
-                    )
-                except Exception:
-                    continue
-
+            parsed = pd.to_datetime(raw_value, errors="coerce", utc=True)
+            if not pd.isna(parsed):
+                return parsed.to_pydatetime().astimezone(ZoneInfo("America/New_York"))
         except Exception:
-            continue
+            return None
+        return None
 
-    all_news.sort(key=lambda x: x.get("published_ts", 0), reverse=True)
+    def _priority_score(headline, source_name):
+        h = str(headline or "").lower()
+        s = str(source_name or "").lower()
+        score = 0
+        high_kw = [
+            "fomc", "fed", "powell", "cpi", "pce", "ppi", "nfp", "jobs report",
+            "treasury", "yield", "inflation", "rate decision", "minutes",
+            "guidance", "downgrade", "upgrade", "earnings", "sec filing",
+        ]
+        medium_kw = [
+            "nasdaq", "s&p", "dow", "futures", "volatility", "vix",
+            "bond", "consumer spending", "gdp", "unemployment", "claims",
+        ]
+        for kw in high_kw:
+            if kw in h:
+                score += 3
+        for kw in medium_kw:
+            if kw in h:
+                score += 1
+        if any(src in s for src in ["reuters", "cnbc", "wsj", "marketwatch", "benzinga", "dow jones"]):
+            score += 1
+        return score
+
+    def _build_item(headline, source_name, link, published_raw=None, summary="", provider=""):
+        clean_headline = re.sub(r"\s+", " ", str(headline or "")).strip()
+        if not clean_headline:
+            return None
+        published_dt = _parse_news_dt_et(published_raw)
+        published_ts = int(published_dt.timestamp()) if published_dt else 0
+        published_str = (
+            published_dt.strftime("%a, %b %d %Y %I:%M %p ET")
+            if published_dt
+            else "Time unavailable (ET)"
+        )
+        clean_source = re.sub(r"\s+", " ", str(source_name or "")).strip() or "Unknown"
+        return {
+            "headline": clean_headline,
+            "source": clean_source,
+            "link": str(link or "#").strip() or "#",
+            "published": published_str,
+            "published_ts": published_ts,
+            "summary": str(summary or "")[:240],
+            "provider": provider or clean_source,
+            "priority_score": _priority_score(clean_headline, clean_source),
+        }
+
+    def _dedupe_key(item):
+        h = re.sub(r"[^a-z0-9]+", " ", str(item.get("headline", "")).lower()).strip()
+        h = re.sub(r"\s+", " ", h)
+        return h[:180]
+
+    def _fetch_finnhub_news_items(api_key):
+        if not api_key:
+            return []
+        out = []
+        try:
+            client = finnhub.Client(api_key=api_key)
+            news = client.general_news("general", min_id=0)
+            if not isinstance(news, list):
+                return out
+            for n in news[:120]:
+                item = _build_item(
+                    headline=n.get("headline"),
+                    source_name=n.get("source") or "Finnhub",
+                    link=n.get("url"),
+                    published_raw=n.get("datetime") or n.get("time"),
+                    summary=n.get("summary"),
+                    provider="Finnhub",
+                )
+                if item:
+                    out.append(item)
+        except Exception:
+            return out
+        return out
+
+    def _fetch_marketaux_items():
+        api_key = _get_secret("MARKETAUX_API_KEY", "")
+        if not api_key:
+            return []
+        out = []
+        params = {
+            "api_token": api_key,
+            "language": "en",
+            "filter_entities": "true",
+            "sort": "published_desc",
+            "limit": 80,
+        }
+        try:
+            res = requests.get(
+                "https://api.marketaux.com/v1/news/all",
+                params=params,
+                timeout=10,
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
+            if res.status_code != 200:
+                return out
+            payload = res.json()
+            rows = payload.get("data", []) if isinstance(payload, dict) else []
+            for row in rows[:120]:
+                src = row.get("source")
+                if isinstance(src, dict):
+                    src = src.get("name") or src.get("domain")
+                item = _build_item(
+                    headline=row.get("title"),
+                    source_name=src or "Marketaux",
+                    link=row.get("url"),
+                    published_raw=row.get("published_at"),
+                    summary=row.get("description") or row.get("snippet"),
+                    provider="Marketaux",
+                )
+                if item:
+                    out.append(item)
+        except Exception:
+            return out
+        return out
+
+    def _fetch_thenewsapi_items():
+        api_key = (
+            _get_secret("THENEWSAPI_API_TOKEN", "")
+            or _get_secret("THENEWSAPI_KEY", "")
+            or _get_secret("THE_NEWS_API_KEY", "")
+        )
+        if not api_key:
+            return []
+        out = []
+        params = {
+            "api_token": api_key,
+            "locale": "us",
+            "language": "en",
+            "categories": "business,tech",
+            "limit": 80,
+        }
+        try:
+            res = requests.get(
+                "https://api.thenewsapi.com/v1/news/top",
+                params=params,
+                timeout=10,
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
+            if res.status_code != 200:
+                return out
+            payload = res.json()
+            rows = payload.get("data", []) if isinstance(payload, dict) else []
+            for row in rows[:120]:
+                src = row.get("source")
+                if isinstance(src, dict):
+                    src = src.get("name") or src.get("domain")
+                item = _build_item(
+                    headline=row.get("title"),
+                    source_name=src or "TheNewsAPI",
+                    link=row.get("url"),
+                    published_raw=row.get("published_at"),
+                    summary=row.get("description") or row.get("snippet"),
+                    provider="TheNewsAPI",
+                )
+                if item:
+                    out.append(item)
+        except Exception:
+            return out
+        return out
+
+    def _fetch_fmp_news_items():
+        api_key = _get_secret("FMP_API_KEY", "")
+        if not api_key:
+            return []
+        out = []
+        try:
+            res = requests.get(
+                "https://financialmodelingprep.com/api/v3/stock_news",
+                params={"limit": 100, "apikey": api_key},
+                timeout=10,
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
+            if res.status_code == 200:
+                payload = res.json()
+                if isinstance(payload, list):
+                    for row in payload[:120]:
+                        item = _build_item(
+                            headline=row.get("title"),
+                            source_name=row.get("site") or "FMP",
+                            link=row.get("url"),
+                            published_raw=row.get("publishedDate"),
+                            summary=row.get("text"),
+                            provider="FMP",
+                        )
+                        if item:
+                            out.append(item)
+        except Exception:
+            return out
+        return out
+
+    def _fetch_rss_items():
+        out = []
+        feeds = {
+            "Reuters Business": "http://feeds.reuters.com/reuters/businessNews",
+            "Reuters World": "http://feeds.reuters.com/reuters/worldNews",
+            "Reuters Markets": "http://feeds.reuters.com/news/wealth",
+            "MarketWatch Top Stories": "http://feeds.marketwatch.com/marketwatch/topstories",
+            "MarketWatch Market Pulse": "http://feeds.marketwatch.com/marketwatch/marketpulse/",
+            "CNBC Top News": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664",
+            "CNBC Finance": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114",
+            "WSJ Markets": "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
+        }
+        for source_name, feed_url in feeds.items():
+            try:
+                feed = feedparser.parse(feed_url)
+                for entry in feed.entries[:15]:
+                    item = _build_item(
+                        headline=entry.get("title", "No title"),
+                        source_name=source_name,
+                        link=entry.get("link", "#"),
+                        published_raw=entry.get("published") or entry.get("updated"),
+                        summary=entry.get("summary", ""),
+                        provider="RSS",
+                    )
+                    if item:
+                        out.append(item)
+            except Exception:
+                continue
+        return out
+
+    if not finnhub_key:
+        finnhub_key = _get_secret("FINNHUB_KEY", "")
+
+    provider_rows = []
+    provider_rows.extend(_fetch_finnhub_news_items(finnhub_key))
+    provider_rows.extend(_fetch_marketaux_items())
+    provider_rows.extend(_fetch_thenewsapi_items())
+    provider_rows.extend(_fetch_fmp_news_items())
+    provider_rows.extend(_fetch_rss_items())
+
+    # Dedupe by normalized headline while keeping the newest row.
+    deduped = {}
+    for row in provider_rows:
+        key = _dedupe_key(row)
+        if not key:
+            continue
+        existing = deduped.get(key)
+        if existing is None:
+            deduped[key] = row
+            continue
+        if int(row.get("published_ts", 0) or 0) > int(existing.get("published_ts", 0) or 0):
+            deduped[key] = row
+
+    all_news = list(deduped.values())
+    all_news.sort(
+        key=lambda x: (
+            int(x.get("published_ts", 0) or 0),
+            int(x.get("priority_score", 0) or 0),
+        ),
+        reverse=True,
+    )
+
+    providers_used = sorted({str(x.get("provider", "")).strip() for x in all_news if x.get("provider")})
+    provider_label = ", ".join(providers_used[:4]) if providers_used else "RSS Multi-source"
     _set_dataset_meta(
         "rss_news",
-        "RSS Multi-source",
+        provider_label,
         timestamp_ms=int(time.time() * 1000),
-        max_age_sec=45,
+        max_age_sec=20,
     )
     return all_news[:60]
 

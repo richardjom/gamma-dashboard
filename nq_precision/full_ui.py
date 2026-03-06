@@ -1378,9 +1378,9 @@ def _freshness_class(status):
     return "bad"
 
 
-def _render_data_health_strip(nq_source, qqq_source, ratio_meta, data_0dte, market_data):
+def _render_data_health_strip(nq_source, qqq_source, ratio_meta, data_0dte, market_data, finnhub_key):
     try:
-        get_rss_news()
+        get_rss_news(finnhub_key)
     except Exception:
         pass
     options_health = get_dataset_freshness("options:QQQ", max_age_sec=180)
@@ -2898,6 +2898,7 @@ def run_full_app():
                 ratio_meta=ratio_meta,
                 data_0dte=data_0dte,
                 market_data=market_data,
+                finnhub_key=finnhub_key,
             )
             if data_0dte:
                 dn_distance = nq_now - data_0dte["dn_nq"]
@@ -3366,7 +3367,7 @@ def run_full_app():
             st.subheader("🍞 Daily Bread")
             if data_0dte:
                 events = get_economic_calendar(finnhub_key)
-                news = get_rss_news()
+                news = get_rss_news(finnhub_key)
                 daily_bread = generate_daily_bread(data_0dte, data_weekly, nq_now, market_data, fg, events, news)
                 st.markdown(f"**{daily_bread.get('session', '')}**")
                 st.caption(daily_bread.get("timestamp", ""))
@@ -3710,7 +3711,7 @@ def run_full_app():
                 '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📰 Live News Feed</div></div><div class="terminal-body">',
                 unsafe_allow_html=True,
             )
-            rss_news = get_rss_news()
+            rss_news = get_rss_news(finnhub_key)
             visible_news = [
                 article
                 for article in (rss_news or [])
