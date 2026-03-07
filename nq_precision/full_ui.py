@@ -80,23 +80,23 @@ def _theme_css(bg_color, card_bg, text_color, accent_color, border_color, compac
         gap: 0.55rem !important;
     }}
     .terminal-shell {{
-        background: linear-gradient(180deg, #151a23 0%, #10151d 100%);
-        border: 1px solid #2f3540;
-        border-radius: 8px;
-        box-shadow: 0 8px 26px rgba(0, 0, 0, 0.35);
+        background: linear-gradient(180deg, #141922 0%, #0f141c 100%);
+        border: 1px solid #2a313d;
+        border-radius: 5px;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
         overflow: hidden;
-        margin-bottom: 10px;
+        margin-bottom: 8px;
     }}
     .terminal-header {{
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 8px;
-        padding: 7px 10px;
-        background: linear-gradient(180deg, #222933 0%, #1a2029 100%);
-        border-bottom: 1px solid #313946;
-        color: #d6dbe4;
-        font-size: 12px;
+        padding: 6px 9px;
+        background: linear-gradient(180deg, #1f2631 0%, #181f28 100%);
+        border-bottom: 1px solid #2c3441;
+        color: #cfd7e5;
+        font-size: 11px;
         letter-spacing: 0.25px;
         text-transform: uppercase;
         font-weight: 700;
@@ -110,8 +110,80 @@ def _theme_css(bg_color, card_bg, text_color, accent_color, border_color, compac
         display: none;
     }}
     .terminal-body {{
-        padding: 10px;
+        padding: 8px;
     }}
+    .terminal-command-shell {{
+        border: 1px solid #2a323f;
+        border-radius: 5px;
+        background: linear-gradient(180deg, #191f29 0%, #101722 100%);
+        margin-bottom: 8px;
+        overflow: hidden;
+    }}
+    .terminal-command-top {{
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 7px 9px;
+        border-bottom: 1px solid #2b3442;
+        background: #171d27;
+    }}
+    .terminal-brand {{
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        font-weight: 700;
+        color: #e4ebf7;
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
+    }}
+    .status-dot {{
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        display: inline-block;
+        background: #39d67a;
+        box-shadow: 0 0 8px rgba(57, 214, 122, 0.8);
+    }}
+    .terminal-right-meta {{
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: #9aa7bb;
+        font-size: 11px;
+        font-weight: 600;
+    }}
+    .terminal-command-grid {{
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: 6px;
+        padding: 7px 8px;
+    }}
+    .cmd-chip {{
+        border: 1px solid #2f3948;
+        border-radius: 4px;
+        background: #111823;
+        padding: 5px 7px;
+        min-height: 48px;
+    }}
+    .cmd-chip .k {{
+        margin: 0;
+        color: #8a99af;
+        font-size: 10px;
+        letter-spacing: 0.25px;
+        text-transform: uppercase;
+        font-weight: 700;
+    }}
+    .cmd-chip .v {{
+        margin: 4px 0 0 0;
+        color: #dbe5f3;
+        font-size: 14px;
+        font-weight: 700;
+    }}
+    .cmd-chip .v.good {{ color: #66f4a9; }}
+    .cmd-chip .v.warn {{ color: #ffd27d; }}
+    .cmd-chip .v.bad {{ color: #ff8f8f; }}
     .futures-strip {{
         display: grid;
         grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -560,6 +632,22 @@ def _theme_css(bg_color, card_bg, text_color, accent_color, border_color, compac
         background: #2f7d56;
         color: #b6ffd8;
     }}
+    @media (max-width: 1400px) {{
+        .terminal-command-grid {{
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }}
+        .futures-strip {{
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }}
+    }}
+    @media (max-width: 900px) {{
+        .terminal-command-grid {{
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }}
+        .futures-strip {{
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }}
+    }}
     {compact_css}
 </style>
 """,
@@ -618,6 +706,50 @@ def _render_left_nav(nav_sections):
 
     st.markdown("</div>", unsafe_allow_html=True)
     return st.session_state.main_left_nav
+
+
+def _render_terminal_command_bar(active_view, nq_source, qqq_source, auto_refresh, refresh_interval, ratio_meta, event_risk, market_data):
+    ratio_meta = ratio_meta or {}
+    event_risk = event_risk or {}
+    market_data = market_data or {}
+    vix_px = _safe_float((market_data.get("vix", {}) or {}).get("price"), 0.0) or 0.0
+    vix_chg = _safe_float((market_data.get("vix", {}) or {}).get("change_pct"), 0.0) or 0.0
+    ratio_conf = int(ratio_meta.get("confidence_score", 0) or 0)
+    ratio_lbl = str(ratio_meta.get("confidence_label", "Low"))
+    next_event = (event_risk.get("next_events") or [None])[0]
+    next_event_label = "-"
+    if next_event:
+        next_event_label = f"{next_event.get('time_et', '-')}: {str(next_event.get('event', 'Event'))[:22]}"
+    refresh_txt = f"{refresh_interval}s" if auto_refresh else "manual"
+    ratio_cls = "good" if ratio_lbl.lower() == "high" else "warn" if ratio_lbl.lower() == "medium" else "bad"
+    vix_cls = "warn" if vix_px >= 18 else "good"
+    lock_cls = "bad" if event_risk.get("lockout_active") else "good"
+    lock_text = "LOCKOUT" if event_risk.get("lockout_active") else "CLEAR"
+
+    st.markdown(
+        f"""
+        <div class="terminal-command-shell">
+            <div class="terminal-command-top">
+                <div class="terminal-brand"><span class="status-dot"></span> NQ Futures Terminal • {html.escape(str(active_view))}</div>
+                <div class="terminal-right-meta">
+                    <span>AUTO: {html.escape(refresh_txt)}</span>
+                    <span>NQ: {html.escape(str(nq_source))}</span>
+                    <span>QQQ: {html.escape(str(qqq_source))}</span>
+                    <span>{datetime.now().strftime("%I:%M:%S %p ET")}</span>
+                </div>
+            </div>
+            <div class="terminal-command-grid">
+                <div class="cmd-chip"><p class="k">VIX</p><p class="v {vix_cls}">{vix_px:.2f} ({vix_chg:+.2f}%)</p></div>
+                <div class="cmd-chip"><p class="k">Ratio Quality</p><p class="v {ratio_cls}">{ratio_lbl.upper()} {ratio_conf}%</p></div>
+                <div class="cmd-chip"><p class="k">Event Lock</p><p class="v {lock_cls}">{lock_text}</p></div>
+                <div class="cmd-chip"><p class="k">High Impact Today</p><p class="v">{int(event_risk.get("today_high_count", 0) or 0)}</p></div>
+                <div class="cmd-chip"><p class="k">Med Impact Today</p><p class="v">{int(event_risk.get("today_medium_count", 0) or 0)}</p></div>
+                <div class="cmd-chip"><p class="k">Next Event</p><p class="v">{html.escape(next_event_label)}</p></div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _track_level_changes(tracker_key, current_levels):
@@ -2870,6 +3002,16 @@ def run_full_app():
         ym = market_data.get("ym", {})
         rty = market_data.get("rty", {})
         gc = market_data.get("gc", {})
+        _render_terminal_command_bar(
+            active_view=active_view,
+            nq_source=nq_source,
+            qqq_source=qqq_source,
+            auto_refresh=auto_refresh,
+            refresh_interval=refresh_interval if auto_refresh else 0,
+            ratio_meta=ratio_meta,
+            event_risk=event_risk,
+            market_data=market_data,
+        )
 
         futures_cards = [
             ("S&P 500 (ES)", es.get("price", 0), es.get("change", 0), es.get("change_pct", 0)),
