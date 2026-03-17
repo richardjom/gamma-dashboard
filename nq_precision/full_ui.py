@@ -876,10 +876,27 @@ def _ratio_health_status(conf_label):
     return "stale_hard"
 
 
+def _ratio_source_tag(src):
+    s = str(src or "").strip()
+    if not s:
+        return "unknown"
+    # Prefer contract-like token inside source suffix, e.g. "Schwab (/NQM26)".
+    m = re.search(r"\(([^)]+)\)", s)
+    if m:
+        token = m.group(1)
+    else:
+        token = s
+    token = token.strip().lower()
+    token = re.sub(r"[^a-z0-9/_=.-]+", "_", token)
+    return token[:48] or "unknown"
+
+
 def _compute_tight_ratio(nq_now, qqq_price, nq_source="", qqq_source=""):
     raw_ratio = float(nq_now / qqq_price) if qqq_price and qqq_price > 0 else 0.0
     now_ts = float(time.time())
-    hist_key = "ratio_history::NQ_QQQ"
+    nq_tag = _ratio_source_tag(nq_source)
+    qqq_tag = _ratio_source_tag(qqq_source)
+    hist_key = f"ratio_history::NQ_QQQ::{nq_tag}::{qqq_tag}"
     history = list(st.session_state.get(hist_key, []))
 
     if raw_ratio > 0 and math.isfinite(raw_ratio):
@@ -1542,7 +1559,7 @@ def _render_data_health_strip(nq_source, qqq_source, ratio_meta, data_0dte, mark
         {
             "title": "Options Chain",
             "value": str(options_health.get("status", "unknown")).replace("_", " ").title(),
-            "sub": f"age {options_health.get('latency_s', 'n/a')}s • x{conf_mult:.2f}",
+            "sub": f"{options_health.get('source', 'unknown')} • age {options_health.get('latency_s', 'n/a')}s • x{conf_mult:.2f}",
             "status": options_health.get("status", "unknown"),
         },
         {

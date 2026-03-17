@@ -17,6 +17,7 @@ from bs4 import BeautifulSoup
 
 SCHWAB_TOKEN_URL = "https://api.schwabapi.com/v1/oauth/token"
 SCHWAB_QUOTES_URL = "https://api.schwabapi.com/marketdata/v1/quotes"
+SCHWAB_OPTION_CHAIN_URL = "https://api.schwabapi.com/marketdata/v1/chains"
 FUTURES_MONTH_CODES = {
     1: "F",
     2: "G",
@@ -535,15 +536,164 @@ def _fetch_cboe_options_raw(ticker="QQQ"):
         return None, None
 
 
+def _parse_chain_expiration(exp_key):
+    if not exp_key:
+        return None
+    try:
+        exp_s = str(exp_key).split(":", 1)[0].strip()
+        exp_dt = pd.to_datetime(exp_s, errors="coerce")
+        if pd.isna(exp_dt):
+            return None
+        return exp_dt.to_pydatetime()
+    except Exception:
+        return None
+
+
+def _safe_num(value, default=0.0):
+    try:
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return float(default)
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def _fetch_schwab_options_raw(ticker="QQQ"):
+    token = _get_schwab_access_token()
+    if not token:
+        return None, None
+
+    params = {
+        "symbol": ticker.upper(),
+        "contractType": "ALL",
+        "strategy": "SINGLE",
+        "includeQuotes": "TRUE",
+        "range": "ALL",
+        "strikeCount": 200,
+    }
+    try:
+        response = requests.get(
+            SCHWAB_OPTION_CHAIN_URL,
+            params=params,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=12,
+        )
+        if response.status_code == 401:
+            st.session_state.pop("schwab_access_token", None)
+            st.session_state.pop("schwab_access_expires_at", None)
+            return None, None
+        if response.status_code != 200:
+            return None, None
+        payload = response.json()
+        if not isinstance(payload, dict):
+            return None, None
+    except Exception:
+        return None, None
+
+    current_price = _safe_num(
+        payload.get("underlyingPrice"),
+        _safe_num((payload.get("underlying", {}) or {}).get("last"), 0.0),
+    )
+    if current_price <= 0:
+        current_price = None
+
+    rows = []
+    maps = [
+        ("call", payload.get("callExpDateMap", {})),
+        ("put", payload.get("putExpDateMap", {})),
+    ]
+
+    for opt_type, exp_map in maps:
+        if not isinstance(exp_map, dict):
+            continue
+        for exp_key, strike_map in exp_map.items():
+            exp_dt = _parse_chain_expiration(exp_key)
+            if not isinstance(strike_map, dict):
+                continue
+            for strike_key, contracts in strike_map.items():
+                if isinstance(contracts, dict):
+                    contracts = [contracts]
+                if not isinstance(contracts, list):
+                    continue
+                for contract in contracts:
+                    if not isinstance(contract, dict):
+                        continue
+                    strike = _safe_num(contract.get("strikePrice"), _safe_num(strike_key, 0.0))
+                    if strike <= 0:
+                        continue
+                    iv = _safe_num(contract.get("volatility"), 0.0)
+                    if iv > 3.0:
+                        iv = iv / 100.0
+                    option_symbol = (
+                        contract.get("symbol")
+                        or contract.get("optionDeliverablesList")
+                        or f"{ticker}_{exp_key}_{opt_type}_{strike}"
+                    )
+                    rows.append(
+                        {
+                            "option": str(option_symbol),
+                            "strike": strike,
+                            "type": opt_type,
+                            "expiration": exp_dt,
+                            "open_interest": _safe_num(contract.get("openInterest"), 0.0),
+                            "volume": _safe_num(contract.get("totalVolume"), 0.0),
+                            "iv": max(0.0, iv),
+                            "bid": _safe_num(contract.get("bid"), 0.0),
+                            "ask": _safe_num(contract.get("ask"), 0.0),
+                            "last": _safe_num(contract.get("last"), 0.0),
+                            "mark": _safe_num(contract.get("mark"), 0.0),
+                            "delta": _safe_num(contract.get("delta"), 0.0),
+                            "gamma": _safe_num(contract.get("gamma"), 0.0),
+                            "theta": _safe_num(contract.get("theta"), 0.0),
+                            "vega": _safe_num(contract.get("vega"), 0.0),
+                            "source": "Schwab",
+                        }
+                    )
+
+    if not rows:
+        return None, None
+
+    df = pd.DataFrame(rows)
+    # Normalize key numeric columns expected by downstream logic.
+    for col in ["strike", "open_interest", "volume", "iv", "bid", "ask", "delta", "gamma"]:
+        if col not in df.columns:
+            df[col] = 0.0
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+    if "expiration" not in df.columns:
+        return None, current_price
+    df = df[df["expiration"].notna()].copy()
+    if df.empty:
+        return None, current_price
+
+    _set_dataset_meta(
+        f"options:{ticker.upper()}",
+        "Schwab options chain",
+        timestamp_ms=int(time.time() * 1000),
+        max_age_sec=int(_get_secret("OPTIONS_MAX_STALE_SECONDS", 180)),
+    )
+    return df, current_price
+
+
+def _fetch_options_raw(ticker="QQQ"):
+    # Primary: Schwab option chain (realtime for entitled accounts).
+    if schwab_is_configured():
+        df_s, px_s = _fetch_schwab_options_raw(ticker)
+        if df_s is not None and not df_s.empty:
+            return df_s, px_s
+
+    # Fallback: CBOE delayed chain.
+    return _fetch_cboe_options_raw(ticker)
+
+
 @st.cache_data(ttl=120)
 def get_cboe_options(ticker="QQQ"):
-    return _fetch_cboe_options_raw(ticker)
+    return _fetch_options_raw(ticker)
 
 
 @st.cache_data(ttl=15)
 def get_cboe_options_live(ticker="QQQ"):
     """Short TTL fetch for chart tabs that need fresher ladders."""
-    return _fetch_cboe_options_raw(ticker)
+    return _fetch_options_raw(ticker)
 
 
 @st.cache_data(ttl=10)
