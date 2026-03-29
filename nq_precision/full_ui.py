@@ -2732,6 +2732,102 @@ def _render_heatmap_panel():
     st.markdown("</div></div>", unsafe_allow_html=True)
 
 
+def _level_builder_row(label, key, default):
+    return st.number_input(label, value=float(default), format="%.2f", key=key, step=0.25)
+
+
+def _render_nq_level_builder_panel():
+    st.subheader("📊 NQ Precision Map — Level Builder")
+    st.caption(
+        "Fill in your gamma levels. Copy the output string and paste it into the Pine Script input field."
+    )
+
+    col_0dte, col_wkly = st.columns(2)
+
+    with col_0dte:
+        st.markdown("### 0DTE (Daily)")
+
+        st.markdown("**Outer Range**")
+        d_res = _level_builder_row("Target Resistance", "builder_d_res", 25506.68)
+        d_wall = _level_builder_row("Primary Wall", "builder_d_wall", 25471.68)
+        d_floor = _level_builder_row("Primary Floor", "builder_d_floor", 25141.95)
+        d_supp = _level_builder_row("Target Support", "builder_d_supp", 25106.95)
+
+        st.markdown("**Intra-Range**")
+        d_swall = _level_builder_row("Secondary Wall", "builder_d_swall", 25400.00)
+        d_sfloor = _level_builder_row("Secondary Floor", "builder_d_sfloor", 25250.00)
+        d_flip = _level_builder_row("Gamma Flip", "builder_d_flip", 25183.16)
+        d_dn = _level_builder_row("Delta Neutral", "builder_d_dn", 24308.92)
+
+        st.markdown("**Volatility Bands**")
+        d_u50 = _level_builder_row("Upper 0.50σ", "builder_d_u50", 25565.24)
+        d_u25 = _level_builder_row("Upper 0.25σ", "builder_d_u25", 25380.00)
+        d_l25 = _level_builder_row("Lower 0.25σ", "builder_d_l25", 25280.00)
+        d_l50 = _level_builder_row("Lower 0.50σ", "builder_d_l50", 25074.76)
+
+    with col_wkly:
+        st.markdown("### Weekly")
+
+        st.markdown("**Outer Range**")
+        w_res = _level_builder_row("Target Resistance", "builder_w_res", 25500.00)
+        w_wall = _level_builder_row("Primary Wall", "builder_w_wall", 25450.00)
+        w_floor = _level_builder_row("Primary Floor", "builder_w_floor", 25150.00)
+        w_supp = _level_builder_row("Target Support", "builder_w_supp", 25100.00)
+
+        st.markdown("**Intra-Range**")
+        w_swall = _level_builder_row("Secondary Wall", "builder_w_swall", 25390.00)
+        w_sfloor = _level_builder_row("Secondary Floor", "builder_w_sfloor", 25240.00)
+        w_flip = _level_builder_row("Gamma Flip", "builder_w_flip", 24762.14)
+        w_dn = _level_builder_row("Delta Neutral", "builder_w_dn", 24308.92)
+
+        st.markdown("**Volatility Bands**")
+        w_u50 = _level_builder_row("Upper 0.50σ", "builder_w_u50", 25570.00)
+        w_u25 = _level_builder_row("Upper 0.25σ", "builder_w_u25", 25385.00)
+        w_l25 = _level_builder_row("Lower 0.25σ", "builder_w_l25", 25275.00)
+        w_l50 = _level_builder_row("Lower 0.50σ", "builder_w_l50", 25070.00)
+
+    st.divider()
+    st.markdown("### Output String")
+    st.caption(
+        "Order: 0DTE [res, wall, floor, supp, swall, sfloor, flip, dn, u50, u25, l25, l50] "
+        "→ Weekly [same order]"
+    )
+
+    values = [
+        d_res, d_wall, d_floor, d_supp,
+        d_swall, d_sfloor, d_flip, d_dn,
+        d_u50, d_u25, d_l25, d_l50,
+        w_res, w_wall, w_floor, w_supp,
+        w_swall, w_sfloor, w_flip, w_dn,
+        w_u50, w_u25, w_l25, w_l50,
+    ]
+    output_string = ",".join(f"{v:.2f}" for v in values)
+
+    st.text_area(
+        label="Copy this → paste into Pine Script 'Price Levels' input",
+        value=output_string,
+        height=80,
+    )
+
+    with st.expander("Preview all levels"):
+        labels_0dte = [
+            "0DTE Target Res", "0DTE Primary Wall", "0DTE Primary Floor", "0DTE Target Supp",
+            "0DTE Secondary Wall", "0DTE Secondary Floor", "0DTE Gamma Flip", "0DTE Delta Neutral",
+            "0DTE Upper 0.50σ", "0DTE Upper 0.25σ", "0DTE Lower 0.25σ", "0DTE Lower 0.50σ",
+        ]
+        labels_wkly = [
+            "Weekly Target Res", "Weekly Primary Wall", "Weekly Primary Floor", "Weekly Target Supp",
+            "Weekly Secondary Wall", "Weekly Secondary Floor", "Weekly Gamma Flip", "Weekly Delta Neutral",
+            "Weekly Upper 0.50σ", "Weekly Upper 0.25σ", "Weekly Lower 0.25σ", "Weekly Lower 0.50σ",
+        ]
+
+        df = pd.DataFrame({
+            "Level": labels_0dte + labels_wkly,
+            "Price": [f"{v:.2f}" for v in values],
+        })
+        st.dataframe(df, use_container_width=True, hide_index=True)
+
+
 def run_full_app():
     st.set_page_config(
         page_title="NQ Precision Map", layout="wide", initial_sidebar_state="expanded"
@@ -2992,7 +3088,9 @@ def run_full_app():
             ("📅 Earnings Calendar", "📅 Earnings Calendar"),
             ("🗓 Economic Calendar", "🗓 Economic Calendar"),
         ],
-        "Resources": [],
+        "Resources": [
+            ("📊 NQ Level Builder", "📊 NQ Level Builder"),
+        ],
         "Analytics": [
             ("🧪 Execution Lab", "🧪 Execution Lab"),
             ("🌐 Macro & Breadth", "🌐 Macro & Breadth"),
@@ -3289,6 +3387,9 @@ def run_full_app():
                     st.dataframe(pd.DataFrame(comparison_data), width="stretch", hide_index=True)
             else:
                 st.error("Could not load multi-asset data")
+
+        elif active_view == "📊 NQ Level Builder":
+            _render_nq_level_builder_panel()
 
         elif active_view in {"📊 0DTE Levels", "📊 Weekly Levels", "📊 Monthly Levels"}:
             view_map = {
