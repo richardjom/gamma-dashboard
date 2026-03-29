@@ -3226,6 +3226,10 @@ def run_full_app():
         st.session_state.show_command_bar = True
     if "show_futures_strip" not in st.session_state:
         st.session_state.show_futures_strip = True
+    if "rail_mode" not in st.session_state:
+        st.session_state.rail_mode = "Auto"
+    if "lean_overview" not in st.session_state:
+        st.session_state.lean_overview = True
     if "heatmap_universe" not in st.session_state:
         st.session_state.heatmap_universe = "Nasdaq 100"
     if "heatmap_size_mode" not in st.session_state:
@@ -3305,6 +3309,17 @@ def run_full_app():
     st.sidebar.checkbox("🧼 Focus Mode", key="focus_mode")
     st.sidebar.checkbox("🧭 Show Command Bar", key="show_command_bar")
     st.sidebar.checkbox("📈 Show Futures Strip", key="show_futures_strip")
+    st.sidebar.selectbox(
+        "📰 Right Rail",
+        options=["Auto", "Always", "Hidden"],
+        key="rail_mode",
+        help="Auto shows the right rail on overview/event/earnings views and expands center space on other views.",
+    )
+    st.sidebar.checkbox(
+        "🧱 Lean Overview Layout",
+        key="lean_overview",
+        help="Collapses secondary overview panels into a compact expander.",
+    )
     st.sidebar.checkbox("🗜 Compact Mode", key="compact_mode")
     manual_override = st.sidebar.checkbox("✏️ Manual NQ Override")
     auto_refresh = st.sidebar.checkbox("🔄 Auto-Refresh (60s)", value=True)
@@ -3483,7 +3498,21 @@ def run_full_app():
     if data_monthly:
         nav_sections["Resources"].append(("📊 Monthly Levels", "📊 Monthly Levels"))
 
-    nav_col, center_col, right_col = st.columns([0.95, 5.35, 0.9], gap="small")
+    active_view_hint = st.session_state.get("main_left_nav", "📈 Market Overview")
+    rail_auto_views = {"📈 Market Overview", "🚨 Event Intel", "📅 Earnings Calendar"}
+    rail_mode = str(st.session_state.get("rail_mode", "Auto"))
+    if rail_mode == "Hidden":
+        show_right_rail = False
+    elif rail_mode == "Always":
+        show_right_rail = True
+    else:
+        show_right_rail = active_view_hint in rail_auto_views
+
+    if show_right_rail:
+        nav_col, center_col, right_col = st.columns([0.95, 5.20, 1.20], gap="small")
+    else:
+        nav_col, center_col = st.columns([0.95, 6.40], gap="small")
+        right_col = None
 
     with nav_col:
         active_view = _render_left_nav(nav_sections)
@@ -3530,14 +3559,15 @@ def run_full_app():
             st.markdown("".join(strip_html), unsafe_allow_html=True)
 
         if active_view == "📈 Market Overview":
-            _render_data_health_strip(
-                nq_source=nq_source,
-                qqq_source=qqq_source,
-                ratio_meta=ratio_meta,
-                data_0dte=data_0dte,
-                market_data=market_data,
-                finnhub_key=finnhub_key,
-            )
+            with st.expander("Data Health & Feed Diagnostics", expanded=False):
+                _render_data_health_strip(
+                    nq_source=nq_source,
+                    qqq_source=qqq_source,
+                    ratio_meta=ratio_meta,
+                    data_0dte=data_0dte,
+                    market_data=market_data,
+                    finnhub_key=finnhub_key,
+                )
             if data_0dte:
                 dn_distance = nq_now - data_0dte["dn_nq"]
                 gf_distance = nq_now - data_0dte["g_flip_nq"]
@@ -3607,14 +3637,28 @@ def run_full_app():
                     nq_now=nq_now,
                     event_risk=event_risk,
                 )
-                _render_trade_plan_panel(
-                    playbook=playbook,
-                    data_0dte=data_0dte,
-                    nq_now=nq_now,
-                    event_risk=event_risk,
-                )
-                _render_overview_reference_snapshot(data_0dte, nq_now)
-                _render_overview_event_strip(event_risk)
+                if st.session_state.get("lean_overview", True):
+                    with st.expander("Session Plan, References, and Event Risk", expanded=False):
+                        _render_trade_plan_panel(
+                            playbook=playbook,
+                            data_0dte=data_0dte,
+                            nq_now=nq_now,
+                            event_risk=event_risk,
+                        )
+                        rc1, rc2 = st.columns(2)
+                        with rc1:
+                            _render_overview_reference_snapshot(data_0dte, nq_now)
+                        with rc2:
+                            _render_overview_event_strip(event_risk)
+                else:
+                    _render_trade_plan_panel(
+                        playbook=playbook,
+                        data_0dte=data_0dte,
+                        nq_now=nq_now,
+                        event_risk=event_risk,
+                    )
+                    _render_overview_reference_snapshot(data_0dte, nq_now)
+                    _render_overview_event_strip(event_risk)
 
                 st.markdown(
                     '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📊 Market Sentiment</div></div><div class="terminal-body">',
@@ -4311,81 +4355,84 @@ def run_full_app():
                 fig.update_layout(template="plotly_dark" if st.session_state.theme == "dark" else "plotly_white", height=360)
                 st.plotly_chart(fig, use_container_width=True)
 
-    with right_col:
-        if active_view == "📅 Earnings Calendar":
-            st.markdown(
-                '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📊 Earnings Detail</div></div><div class="terminal-body">',
-                unsafe_allow_html=True,
-            )
-            selected = st.session_state.get("selected_earnings")
-            if selected and selected.get("symbol"):
-                symbol = selected["symbol"]
-                detail = get_earnings_detail(symbol, finnhub_key)
-                st.markdown(f"### {detail.get('name', symbol)} ({symbol})")
-                c1, c2 = st.columns(2)
-                price_val = detail.get("price")
-                chg = detail.get("change")
-                dp = detail.get("change_pct")
-                c1.metric("Price", f"${price_val:,.2f}" if price_val not in (None, "") else "N/A")
-                c2.metric(
-                    "Change",
-                    f"{chg:+.2f}" if chg not in (None, "") else "N/A",
-                    f"{dp:+.2f}%" if dp not in (None, "") else None,
-                )
-                st.caption(
-                    f"Date: {selected.get('date', 'N/A')} • {selected.get('time', 'Time TBA')} • "
-                    f"Source: {selected.get('source', 'N/A')} • "
-                    f"Confidence: {selected.get('confidence_label', 'Low')} {selected.get('confidence_score', 0)}% • "
-                    f"AsOf: {selected.get('asof_utc', 'n/a')}"
-                )
+    if right_col is not None:
+        with right_col:
+            if active_view == "📅 Earnings Calendar":
                 st.markdown(
-                    f"Industry: `{detail.get('industry', 'N/A')}`  \n"
-                    f"Market Cap: `{detail.get('market_cap', 'N/A')}`  \n"
-                    f"Next Earnings: `{detail.get('next_earnings', 'N/A')}`"
+                    '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📊 Earnings Detail</div></div><div class="terminal-body">',
+                    unsafe_allow_html=True,
                 )
-                hist = detail.get("history", [])
-                if hist:
-                    hist_df = pd.DataFrame(hist)
-                    st.markdown("**Recent Earnings History**")
-                    st.dataframe(hist_df, width="stretch", hide_index=True)
-                else:
-                    st.info("No earnings history available.")
-            else:
-                st.info("Select an earnings card from the calendar to view details here.")
-            st.markdown("</div></div>", unsafe_allow_html=True)
-        else:
-            st.markdown(
-                '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📰 Live News Feed</div></div><div class="terminal-body">',
-                unsafe_allow_html=True,
-            )
-            rss_news = get_rss_news(finnhub_key)
-            visible_news = [
-                article
-                for article in (rss_news or [])
-                if str(article.get("headline", "")).strip()
-            ]
-            st.markdown('<div class="news-rail-title">Headlines</div>', unsafe_allow_html=True)
-            st.markdown('<div class="news-rail">', unsafe_allow_html=True)
-            if visible_news:
-                for article in visible_news[:32]:
-                    headline = html.escape(article.get("headline", "No title"))
-                    source = html.escape(article.get("source", "Unknown"))
-                    link = article.get("link", "#")
-                    published = html.escape(article.get("published", ""))
-                    st.markdown(
-                        f"""
-                        <div class="news-item">
-                            <div style="font-weight:700;color:#e9eef7;font-size:15px;line-height:1.35;">{headline}</div>
-                            <div style="color:#9da8ba;font-size:12px;margin-top:6px;">{source} • {published}</div>
-                            <div style="margin-top:8px;"><a href="{link}" target="_blank">Open</a></div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
+                selected = st.session_state.get("selected_earnings")
+                if selected and selected.get("symbol"):
+                    symbol = selected["symbol"]
+                    detail = get_earnings_detail(symbol, finnhub_key)
+                    st.markdown(f"### {detail.get('name', symbol)} ({symbol})")
+                    c1, c2 = st.columns(2)
+                    price_val = detail.get("price")
+                    chg = detail.get("change")
+                    dp = detail.get("change_pct")
+                    c1.metric("Price", f"${price_val:,.2f}" if price_val not in (None, "") else "N/A")
+                    c2.metric(
+                        "Change",
+                        f"{chg:+.2f}" if chg not in (None, "") else "N/A",
+                        f"{dp:+.2f}%" if dp not in (None, "") else None,
                     )
+                    st.caption(
+                        f"Date: {selected.get('date', 'N/A')} • {selected.get('time', 'Time TBA')} • "
+                        f"Source: {selected.get('source', 'N/A')} • "
+                        f"Confidence: {selected.get('confidence_label', 'Low')} {selected.get('confidence_score', 0)}% • "
+                        f"AsOf: {selected.get('asof_utc', 'n/a')}"
+                    )
+                    st.markdown(
+                        f"Industry: `{detail.get('industry', 'N/A')}`  \n"
+                        f"Market Cap: `{detail.get('market_cap', 'N/A')}`  \n"
+                        f"Next Earnings: `{detail.get('next_earnings', 'N/A')}`"
+                    )
+                    hist = detail.get("history", [])
+                    if hist:
+                        hist_df = pd.DataFrame(hist)
+                        st.markdown("**Recent Earnings History**")
+                        st.dataframe(hist_df, width="stretch", hide_index=True)
+                    else:
+                        st.info("No earnings history available.")
+                else:
+                    st.info("Select an earnings card from the calendar to view details here.")
+                st.markdown("</div></div>", unsafe_allow_html=True)
             else:
-                st.info("News feed temporarily unavailable")
-            st.markdown("</div>", unsafe_allow_html=True)
-            st.markdown("</div></div>", unsafe_allow_html=True)
+                st.markdown(
+                    '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📰 Live News Feed</div></div><div class="terminal-body">',
+                    unsafe_allow_html=True,
+                )
+                rss_news = get_rss_news(finnhub_key)
+                visible_news = [
+                    article
+                    for article in (rss_news or [])
+                    if str(article.get("headline", "")).strip()
+                ]
+                st.caption(f"{len(visible_news)} headlines • refreshes on app cycle")
+                st.markdown('<div class="news-rail">', unsafe_allow_html=True)
+                if visible_news:
+                    for article in visible_news[:24]:
+                        raw_headline = str(article.get("headline", "No title")).strip()
+                        headline_short = (raw_headline[:177] + "…") if len(raw_headline) > 178 else raw_headline
+                        headline = html.escape(headline_short)
+                        source = html.escape(str(article.get("source", "Unknown")))
+                        link = article.get("link", "#")
+                        published = html.escape(str(article.get("published", "")))
+                        st.markdown(
+                            f"""
+                            <div class="news-item">
+                                <div style="font-weight:700;color:#e9eef7;font-size:14px;line-height:1.3;">{headline}</div>
+                                <div style="color:#9da8ba;font-size:11px;margin-top:5px;">{source} • {published}</div>
+                                <div style="margin-top:7px;"><a href="{link}" target="_blank">Open</a></div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+                else:
+                    st.info("News feed temporarily unavailable")
+                st.markdown("</div>", unsafe_allow_html=True)
+                st.markdown("</div></div>", unsafe_allow_html=True)
 
     st.markdown("---")
     st.caption(f"Updated: {datetime.now().strftime('%H:%M:%S')} | CBOE • {nq_source}")
