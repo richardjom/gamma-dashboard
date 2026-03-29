@@ -2348,6 +2348,8 @@ def get_initial_balance_backtest(
         break_up = False
         break_down = False
         first_break = "none"
+        first_break_time_et = None
+        minutes_to_first_break = None
         ext_up = 0.0
         ext_down = 0.0
         if not after_ib.empty:
@@ -2358,23 +2360,39 @@ def get_initial_balance_backtest(
             ext_up = max(0.0, max_after - ib_high)
             ext_down = max(0.0, ib_low - min_after)
 
-            for _, bar in after_ib.iterrows():
+            for ts, bar in after_ib.iterrows():
                 up_now = float(bar["High"]) > ib_high
                 down_now = float(bar["Low"]) < ib_low
                 if up_now and down_now:
                     first_break = "both"
+                    first_break_time_et = ts
                     break
                 if up_now:
                     first_break = "up"
+                    first_break_time_et = ts
                     break
                 if down_now:
                     first_break = "down"
+                    first_break_time_et = ts
                     break
+
+            if first_break_time_et is not None:
+                try:
+                    minutes_to_first_break = int(
+                        max(0, (first_break_time_et - ib_slice.index[-1]).total_seconds() // 60)
+                    )
+                except Exception:
+                    minutes_to_first_break = None
 
         both_break = bool(break_up and break_down)
         no_break = bool((not break_up) and (not break_down))
+        single_side_break = bool((break_up and not break_down) or (break_down and not break_up))
         ext_mult_up = float(ext_up / ib_range) if ib_range > 0 else 0.0
         ext_mult_down = float(ext_down / ib_range) if ib_range > 0 else 0.0
+        session_high = float(day_rth["High"].max())
+        session_low = float(day_rth["Low"].min())
+        session_range = float(max(0.0, session_high - session_low))
+        close_in_ib_pos = float((day_close - ib_low) / ib_range) if ib_range > 0 else None
 
         day_key = day.isoformat()
         rows.append(
@@ -2397,12 +2415,20 @@ def get_initial_balance_backtest(
                 "break_up": bool(break_up),
                 "break_down": bool(break_down),
                 "both_break": both_break,
+                "single_side_break": single_side_break,
                 "no_break": no_break,
                 "first_break": first_break,
+                "first_break_time_et": first_break_time_et.strftime("%H:%M") if first_break_time_et is not None else None,
+                "minutes_to_first_break": minutes_to_first_break,
                 "ext_up": ext_up,
                 "ext_down": ext_down,
                 "ext_mult_up": ext_mult_up,
                 "ext_mult_down": ext_mult_down,
+                "session_high": session_high,
+                "session_low": session_low,
+                "session_range": session_range,
+                "close_in_ib_pos": close_in_ib_pos,
+                "close_above_ib_mid": bool(day_close >= ib_mid),
                 "hit_025_any": bool((ext_mult_up >= 0.25) or (ext_mult_down >= 0.25)),
                 "hit_050_any": bool((ext_mult_up >= 0.50) or (ext_mult_down >= 0.50)),
                 "hit_100_any": bool((ext_mult_up >= 1.00) or (ext_mult_down >= 1.00)),
@@ -2420,6 +2446,7 @@ def get_initial_balance_backtest(
             "up_break_pct": float(sessions_df["break_up"].mean() * 100.0),
             "down_break_pct": float(sessions_df["break_down"].mean() * 100.0),
             "both_break_pct": float(sessions_df["both_break"].mean() * 100.0),
+            "single_side_break_pct": float(sessions_df["single_side_break"].mean() * 100.0),
             "no_break_pct": float(sessions_df["no_break"].mean() * 100.0),
             "first_up_pct": float((sessions_df["first_break"] == "up").mean() * 100.0),
             "first_down_pct": float((sessions_df["first_break"] == "down").mean() * 100.0),
@@ -2427,6 +2454,13 @@ def get_initial_balance_backtest(
             "median_ib_range": float(sessions_df["ib_range"].median()),
             "mean_ib_range": float(sessions_df["ib_range"].mean()),
             "median_ib_range_pct": float(sessions_df["ib_range_pct"].median()),
+            "median_session_range": float(sessions_df["session_range"].median()),
+            "close_above_ib_mid_pct": float(sessions_df["close_above_ib_mid"].mean() * 100.0),
+            "avg_minutes_to_first_break": float(
+                sessions_df["minutes_to_first_break"].dropna().mean()
+            )
+            if sessions_df["minutes_to_first_break"].notna().any()
+            else None,
             "hit_025_any_pct": float(sessions_df["hit_025_any"].mean() * 100.0),
             "hit_050_any_pct": float(sessions_df["hit_050_any"].mean() * 100.0),
             "hit_100_any_pct": float(sessions_df["hit_100_any"].mean() * 100.0),

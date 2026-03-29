@@ -2736,7 +2736,7 @@ def _render_heatmap_panel():
 def _render_initial_balance_report_panel(finnhub_key):
     st.subheader("📈 Initial Balance Report")
     st.caption(
-        "Full report mode with historical IB probabilities, directional filters, and breakout extension stats."
+        "Profitabul-style IB dashboard: dense probabilities, breakout profile, scenario matrix, and session explorer."
     )
 
     symbol_options = {
@@ -2745,7 +2745,7 @@ def _render_initial_balance_report_panel(finnhub_key):
         "YM Futures": "YM=F",
     }
 
-    c1, c2, c3, c4, c5 = st.columns(5)
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
     with c1:
         symbol_label = st.selectbox(
             "Symbol",
@@ -2761,12 +2761,19 @@ def _render_initial_balance_report_panel(finnhub_key):
         ib_start = st.text_input("IB Start (ET, HH:MM)", value="09:30", key="ib_start")
     with c5:
         ib_end = st.text_input("IB End (ET, HH:MM)", value="10:30", key="ib_end")
+    with c6:
+        layout_mode = st.selectbox(
+            "Layout",
+            ["Profitabul-style", "Classic"],
+            index=0,
+            key="ib_layout_mode",
+        )
 
-    run_col, info_col = st.columns([1, 3])
+    run_col, info_col = st.columns([1, 4])
     with run_col:
         run_report = st.button("🔄 Run / Refresh IB Report", use_container_width=True)
     with info_col:
-        st.caption("Report updates on button click to avoid constant reruns.")
+        st.caption("Report updates on button click to avoid expensive reruns and keep the panel responsive.")
 
     current_params = {
         "symbol": symbol_options.get(symbol_label, "NQ=F"),
@@ -2859,35 +2866,144 @@ def _render_initial_balance_report_panel(finnhub_key):
     up_break_pct = float(filtered["break_up"].mean() * 100.0)
     down_break_pct = float(filtered["break_down"].mean() * 100.0)
     both_break_pct = float(filtered["both_break"].mean() * 100.0)
+    single_break_pct = float(filtered["single_side_break"].mean() * 100.0)
     no_break_pct = float(filtered["no_break"].mean() * 100.0)
     first_up_pct = float((filtered["first_break"] == "up").mean() * 100.0)
     first_down_pct = float((filtered["first_break"] == "down").mean() * 100.0)
+    first_both_pct = float((filtered["first_break"] == "both").mean() * 100.0)
     hit_025_pct = float(filtered["hit_025_any"].mean() * 100.0)
     hit_050_pct = float(filtered["hit_050_any"].mean() * 100.0)
     hit_100_pct = float(filtered["hit_100_any"].mean() * 100.0)
     med_ib_range = float(filtered["ib_range"].median())
     med_ib_range_pct = float(filtered["ib_range_pct"].median())
+    med_session_range = float(filtered["session_range"].median()) if "session_range" in filtered.columns else float("nan")
+    avg_min_to_break = (
+        float(filtered["minutes_to_first_break"].dropna().mean())
+        if "minutes_to_first_break" in filtered.columns and filtered["minutes_to_first_break"].notna().any()
+        else None
+    )
+    close_above_mid_pct = float(filtered["close_above_ib_mid"].mean() * 100.0) if "close_above_ib_mid" in filtered.columns else 0.0
 
-    m1, m2, m3, m4, m5, m6 = st.columns(6)
-    m1.metric("Sessions", f"{total}")
-    m2.metric("Up Break %", f"{up_break_pct:.1f}%")
-    m3.metric("Down Break %", f"{down_break_pct:.1f}%")
-    m4.metric("Both-Side Break %", f"{both_break_pct:.1f}%")
-    m5.metric("No Break %", f"{no_break_pct:.1f}%")
-    m6.metric("Median IB Range", f"{med_ib_range:.1f} pts")
+    if layout_mode == "Profitabul-style":
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Sample Size", f"{total}")
+        m2.metric("Single-Side Break", f"{single_break_pct:.1f}%")
+        m3.metric("Both-Side Break", f"{both_break_pct:.1f}%")
+        m4.metric("No Break Day", f"{no_break_pct:.1f}%")
 
-    mm1, mm2, mm3, mm4, mm5 = st.columns(5)
-    mm1.metric("First Break Up %", f"{first_up_pct:.1f}%")
-    mm2.metric("First Break Down %", f"{first_down_pct:.1f}%")
-    mm3.metric("Hit 0.25x IB %", f"{hit_025_pct:.1f}%")
-    mm4.metric("Hit 0.50x IB %", f"{hit_050_pct:.1f}%")
-    mm5.metric("Hit 1.00x IB %", f"{hit_100_pct:.1f}%")
+        mm1, mm2, mm3, mm4 = st.columns(4)
+        mm1.metric("Up Break Probability", f"{up_break_pct:.1f}%")
+        mm2.metric("Down Break Probability", f"{down_break_pct:.1f}%")
+        mm3.metric("Median IB Range", f"{med_ib_range:.1f} pts")
+        mm4.metric("Median Session Range", f"{med_session_range:.1f} pts" if not pd.isna(med_session_range) else "n/a")
+
+        mmm1, mmm2, mmm3, mmm4 = st.columns(4)
+        mmm1.metric("First Break Up", f"{first_up_pct:.1f}%")
+        mmm2.metric("First Break Down", f"{first_down_pct:.1f}%")
+        mmm3.metric("Close > IB Mid", f"{close_above_mid_pct:.1f}%")
+        mmm4.metric("Avg Min To Break", f"{avg_min_to_break:.0f}m" if avg_min_to_break is not None else "n/a")
+    else:
+        m1, m2, m3, m4, m5, m6 = st.columns(6)
+        m1.metric("Sessions", f"{total}")
+        m2.metric("Up Break %", f"{up_break_pct:.1f}%")
+        m3.metric("Down Break %", f"{down_break_pct:.1f}%")
+        m4.metric("Both-Side Break %", f"{both_break_pct:.1f}%")
+        m5.metric("No Break %", f"{no_break_pct:.1f}%")
+        m6.metric("Median IB Range", f"{med_ib_range:.1f} pts")
+
+        mm1, mm2, mm3, mm4, mm5 = st.columns(5)
+        mm1.metric("First Break Up %", f"{first_up_pct:.1f}%")
+        mm2.metric("First Break Down %", f"{first_down_pct:.1f}%")
+        mm3.metric("Hit 0.25x IB %", f"{hit_025_pct:.1f}%")
+        mm4.metric("Hit 0.50x IB %", f"{hit_050_pct:.1f}%")
+        mm5.metric("Hit 1.00x IB %", f"{hit_100_pct:.1f}%")
 
     st.caption(
         f"Median IB Range %: {med_ib_range_pct:.2f}% | "
         f"Avg Up Extension: {float(filtered['ext_mult_up'].mean()):.2f}x | "
-        f"Avg Down Extension: {float(filtered['ext_mult_down'].mean()):.2f}x"
+        f"Avg Down Extension: {float(filtered['ext_mult_down'].mean()):.2f}x | "
+        f"First Break (both): {first_both_pct:.1f}%"
     )
+
+    prob_cols = st.columns([1.2, 1.2, 1.2, 1.2])
+    with prob_cols[0]:
+        st.metric("Hit 0.25x IB", f"{hit_025_pct:.1f}%")
+    with prob_cols[1]:
+        st.metric("Hit 0.50x IB", f"{hit_050_pct:.1f}%")
+    with prob_cols[2]:
+        st.metric("Hit 1.00x IB", f"{hit_100_pct:.1f}%")
+    with prob_cols[3]:
+        expectancy = float(filtered["ext_mult_up"].mean() - filtered["ext_mult_down"].mean())
+        st.metric("Ext Bias (Up-Down)", f"{expectancy:+.2f}x")
+
+    st.markdown("### Directional Probability Block")
+    pblock = pd.DataFrame(
+        [
+            ("Break Up (any)", up_break_pct),
+            ("Break Down (any)", down_break_pct),
+            ("First Break Up", first_up_pct),
+            ("First Break Down", first_down_pct),
+            ("Single-Side Day", single_break_pct),
+            ("Both-Side Day", both_break_pct),
+            ("No Break Day", no_break_pct),
+        ],
+        columns=["Metric", "Probability %"],
+    )
+    pblock["Probability %"] = pblock["Probability %"].map(lambda v: round(float(v), 1))
+    st.dataframe(pblock, width="stretch", hide_index=True)
+
+    st.markdown("### Conditional Scenario Matrix")
+    scen = (
+        filtered.groupby(["gap_dir", "open_vs_overnight_mid", "ib_end_vs_vwap"], dropna=False)
+        .agg(
+            Sessions=("date", "count"),
+            UpBreak=("break_up", "mean"),
+            DownBreak=("break_down", "mean"),
+            NoBreak=("no_break", "mean"),
+            FirstUp=("first_break", lambda s: (s == "up").mean()),
+            FirstDown=("first_break", lambda s: (s == "down").mean()),
+            AvgExtUp=("ext_mult_up", "mean"),
+            AvgExtDown=("ext_mult_down", "mean"),
+            AvgMinToBreak=("minutes_to_first_break", "mean"),
+        )
+        .reset_index()
+    )
+    if not scen.empty:
+        scen["Scenario"] = scen.apply(
+            lambda r: f"Gap {str(r['gap_dir']).title()} | Open-ON {str(r['open_vs_overnight_mid']).title()} | IB-vVWAP {str(r['ib_end_vs_vwap']).title()}",
+            axis=1,
+        )
+        for col in ["UpBreak", "DownBreak", "NoBreak", "FirstUp", "FirstDown"]:
+            scen[col] = scen[col] * 100.0
+        min_samp = max(3, int(round(total * 0.06)))
+        scen = scen[scen["Sessions"] >= min_samp].copy()
+        scen = scen.sort_values(["Sessions", "UpBreak"], ascending=[False, False])
+        show_cols = [
+            "Scenario",
+            "Sessions",
+            "UpBreak",
+            "DownBreak",
+            "NoBreak",
+            "FirstUp",
+            "FirstDown",
+            "AvgExtUp",
+            "AvgExtDown",
+            "AvgMinToBreak",
+        ]
+        scen_show = scen[show_cols].copy()
+        fmt = {
+            "UpBreak": "{:.1f}%",
+            "DownBreak": "{:.1f}%",
+            "NoBreak": "{:.1f}%",
+            "FirstUp": "{:.1f}%",
+            "FirstDown": "{:.1f}%",
+            "AvgExtUp": "{:.2f}x",
+            "AvgExtDown": "{:.2f}x",
+            "AvgMinToBreak": "{:.0f}m",
+        }
+        st.dataframe(scen_show.style.format(fmt), width="stretch", hide_index=True, height=300)
+    else:
+        st.caption("Not enough filtered samples to build scenario matrix.")
 
     ch1, ch2 = st.columns(2)
     with ch1:
@@ -2911,68 +3027,113 @@ def _render_initial_balance_report_panel(finnhub_key):
         st.plotly_chart(fig_range, use_container_width=True)
 
     with ch2:
-        fb = (
-            filtered["first_break"]
-            .replace({"none": "none", "up": "up", "down": "down", "both": "both"})
-            .value_counts()
-            .reindex(["up", "down", "both", "none"])
-            .fillna(0)
-            .reset_index()
-        )
-        fb.columns = ["First Break", "Count"]
-        fig_fb = px.bar(
-            fb,
-            x="First Break",
-            y="Count",
-            color="First Break",
-            title="First Break Distribution",
-            color_discrete_map={
-                "up": "#27c46b",
-                "down": "#df4f4f",
-                "both": "#d1a942",
-                "none": "#607089",
-            },
-        )
-        fig_fb.update_layout(
-            template="plotly_dark" if st.session_state.theme == "dark" else "plotly_white",
-            height=340,
-            margin=dict(l=20, r=20, t=50, b=20),
-            showlegend=False,
-        )
-        st.plotly_chart(fig_fb, use_container_width=True)
+        if "minutes_to_first_break" in filtered.columns and filtered["minutes_to_first_break"].notna().any():
+            hist_df = filtered[filtered["minutes_to_first_break"].notna()].copy()
+            fig_t = px.histogram(
+                hist_df,
+                x="minutes_to_first_break",
+                nbins=24,
+                title="Time To First Break (minutes after IB end)",
+                color_discrete_sequence=["#00D9FF"],
+            )
+            fig_t.update_layout(
+                template="plotly_dark" if st.session_state.theme == "dark" else "plotly_white",
+                height=340,
+                margin=dict(l=20, r=20, t=50, b=20),
+                xaxis_title="Minutes",
+                yaxis_title="Count",
+                showlegend=False,
+            )
+            st.plotly_chart(fig_t, use_container_width=True)
+        else:
+            fb = (
+                filtered["first_break"]
+                .replace({"none": "none", "up": "up", "down": "down", "both": "both"})
+                .value_counts()
+                .reindex(["up", "down", "both", "none"])
+                .fillna(0)
+                .reset_index()
+            )
+            fb.columns = ["First Break", "Count"]
+            fig_fb = px.bar(
+                fb,
+                x="First Break",
+                y="Count",
+                color="First Break",
+                title="First Break Distribution",
+                color_discrete_map={
+                    "up": "#27c46b",
+                    "down": "#df4f4f",
+                    "both": "#d1a942",
+                    "none": "#607089",
+                },
+            )
+            fig_fb.update_layout(
+                template="plotly_dark" if st.session_state.theme == "dark" else "plotly_white",
+                height=340,
+                margin=dict(l=20, r=20, t=50, b=20),
+                showlegend=False,
+            )
+            st.plotly_chart(fig_fb, use_container_width=True)
 
-    st.markdown("### Weekday Breakdown (First Break %)")
-    pivot = (
-        filtered.assign(v=1)
-        .pivot_table(
-            index="weekday",
-            columns="first_break",
-            values="v",
-            aggfunc="sum",
-            fill_value=0,
+    w1, w2 = st.columns(2)
+    with w1:
+        st.markdown("### Weekday Breakdown (First Break %)")
+        pivot = (
+            filtered.assign(v=1)
+            .pivot_table(
+                index="weekday",
+                columns="first_break",
+                values="v",
+                aggfunc="sum",
+                fill_value=0,
+            )
+            .reindex(["Mon", "Tue", "Wed", "Thu", "Fri"])
+            .fillna(0)
         )
-        .reindex(["Mon", "Tue", "Wed", "Thu", "Fri"])
-        .fillna(0)
-    )
-    for col in ["up", "down", "both", "none"]:
-        if col not in pivot.columns:
-            pivot[col] = 0
-    pivot_pct = pivot.div(pivot.sum(axis=1).replace(0, pd.NA), axis=0).fillna(0) * 100.0
-    fig_heat = px.imshow(
-        pivot_pct[["up", "down", "both", "none"]],
-        text_auto=".0f",
-        aspect="auto",
-        color_continuous_scale="Blues",
-    )
-    fig_heat.update_layout(
-        template="plotly_dark" if st.session_state.theme == "dark" else "plotly_white",
-        height=280,
-        margin=dict(l=20, r=20, t=20, b=20),
-        coloraxis_showscale=False,
-        xaxis_title="First Break Side",
-        yaxis_title="Weekday",
-    )
-    st.plotly_chart(fig_heat, use_container_width=True)
+        for col in ["up", "down", "both", "none"]:
+            if col not in pivot.columns:
+                pivot[col] = 0
+        pivot_pct = pivot.div(pivot.sum(axis=1).replace(0, pd.NA), axis=0).fillna(0) * 100.0
+        fig_heat = px.imshow(
+            pivot_pct[["up", "down", "both", "none"]],
+            text_auto=".0f",
+            aspect="auto",
+            color_continuous_scale="Blues",
+        )
+        fig_heat.update_layout(
+            template="plotly_dark" if st.session_state.theme == "dark" else "plotly_white",
+            height=280,
+            margin=dict(l=20, r=20, t=20, b=20),
+            coloraxis_showscale=False,
+            xaxis_title="First Break Side",
+            yaxis_title="Weekday",
+        )
+        st.plotly_chart(fig_heat, use_container_width=True)
+    with w2:
+        st.markdown("### Extension Percentiles")
+        ext_tbl = pd.DataFrame(
+            [
+                {
+                    "Leg": "Up Extension",
+                    "P50": float(filtered["ext_mult_up"].quantile(0.50)),
+                    "P75": float(filtered["ext_mult_up"].quantile(0.75)),
+                    "P90": float(filtered["ext_mult_up"].quantile(0.90)),
+                },
+                {
+                    "Leg": "Down Extension",
+                    "P50": float(filtered["ext_mult_down"].quantile(0.50)),
+                    "P75": float(filtered["ext_mult_down"].quantile(0.75)),
+                    "P90": float(filtered["ext_mult_down"].quantile(0.90)),
+                },
+            ]
+        )
+        st.dataframe(
+            ext_tbl.style.format({"P50": "{:.2f}x", "P75": "{:.2f}x", "P90": "{:.2f}x"}),
+            width="stretch",
+            hide_index=True,
+            height=280,
+        )
 
     st.markdown("### Session Table")
     table_cols = [
@@ -2984,16 +3145,27 @@ def _render_initial_balance_report_panel(finnhub_key):
         "open_vs_overnight_mid",
         "ib_end_vs_vwap",
         "first_break",
+        "first_break_time_et",
+        "minutes_to_first_break",
         "break_up",
         "break_down",
         "both_break",
         "no_break",
         "ext_mult_up",
         "ext_mult_down",
+        "session_range",
+        "close_in_ib_pos",
         "high_impact_day",
     ]
     table_df = filtered[table_cols].copy().sort_values("date", ascending=False)
-    for col in ["ib_range", "ib_range_pct", "ext_mult_up", "ext_mult_down"]:
+    for col in [
+        "ib_range",
+        "ib_range_pct",
+        "ext_mult_up",
+        "ext_mult_down",
+        "session_range",
+        "close_in_ib_pos",
+    ]:
         table_df[col] = table_df[col].map(lambda v: round(float(v), 2))
     st.dataframe(table_df, width="stretch", hide_index=True, height=440)
 
