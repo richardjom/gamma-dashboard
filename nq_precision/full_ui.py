@@ -693,7 +693,7 @@ def _render_left_nav(nav_sections):
         st.session_state.main_left_nav = first_section[0][1]
 
     st.markdown('<div class="left-nav-shell">', unsafe_allow_html=True)
-    st.markdown('<div class="left-nav-title">Workspace</div>', unsafe_allow_html=True)
+    st.markdown('<div class="left-nav-title">Navigation</div>', unsafe_allow_html=True)
 
     for section_name, items in nav_sections.items():
         st.markdown(f'<div class="left-nav-section">{section_name}</div>', unsafe_allow_html=True)
@@ -3220,6 +3220,12 @@ def run_full_app():
 
     if "compact_mode" not in st.session_state:
         st.session_state.compact_mode = False
+    if "focus_mode" not in st.session_state:
+        st.session_state.focus_mode = True
+    if "show_command_bar" not in st.session_state:
+        st.session_state.show_command_bar = True
+    if "show_futures_strip" not in st.session_state:
+        st.session_state.show_futures_strip = True
     if "heatmap_universe" not in st.session_state:
         st.session_state.heatmap_universe = "Nasdaq 100"
     if "heatmap_size_mode" not in st.session_state:
@@ -3296,6 +3302,9 @@ def run_full_app():
         toggle_theme()
         st.rerun()
 
+    st.sidebar.checkbox("🧼 Focus Mode", key="focus_mode")
+    st.sidebar.checkbox("🧭 Show Command Bar", key="show_command_bar")
+    st.sidebar.checkbox("📈 Show Futures Strip", key="show_futures_strip")
     st.sidebar.checkbox("🗜 Compact Mode", key="compact_mode")
     manual_override = st.sidebar.checkbox("✏️ Manual NQ Override")
     auto_refresh = st.sidebar.checkbox("🔄 Auto-Refresh (60s)", value=True)
@@ -3484,16 +3493,20 @@ def run_full_app():
         ym = market_data.get("ym", {})
         rty = market_data.get("rty", {})
         gc = market_data.get("gc", {})
-        _render_terminal_command_bar(
-            active_view=active_view,
-            nq_source=nq_source,
-            qqq_source=qqq_source,
-            auto_refresh=auto_refresh,
-            refresh_interval=refresh_interval if auto_refresh else 0,
-            ratio_meta=ratio_meta,
-            event_risk=event_risk,
-            market_data=market_data,
-        )
+
+        focus_views = {"📈 Market Overview", "🌐 Macro & Breadth"}
+        top_modules_allowed = (not st.session_state.focus_mode) or (active_view in focus_views)
+        if st.session_state.show_command_bar and top_modules_allowed:
+            _render_terminal_command_bar(
+                active_view=active_view,
+                nq_source=nq_source,
+                qqq_source=qqq_source,
+                auto_refresh=auto_refresh,
+                refresh_interval=refresh_interval if auto_refresh else 0,
+                ratio_meta=ratio_meta,
+                event_risk=event_risk,
+                market_data=market_data,
+            )
 
         futures_cards = [
             ("S&P 500 (ES)", es.get("price", 0), es.get("change", 0), es.get("change_pct", 0)),
@@ -3502,18 +3515,19 @@ def run_full_app():
             ("RUSSELL (RTY)", rty.get("price", 0), rty.get("change", 0), rty.get("change_pct", 0)),
             ("GOLD (GC)", gc.get("price", 0), gc.get("change", 0), gc.get("change_pct", 0)),
         ]
-        strip_html = ['<div class="futures-strip">']
-        for name, price, chg, pct in futures_cards:
-            is_pos = (chg or 0) >= 0
-            badge_cls = "pos" if is_pos else "neg"
-            arrow = "↑" if is_pos else "↓"
-            strip_html.append(
-                f'<div class="future-card"><p class="future-title">{name}</p>'
-                f'<p class="future-value">{price:,.2f}</p>'
-                f'<span class="future-badge {badge_cls}">{arrow} {chg:+.2f} ({pct:+.2f}%)</span></div>'
-            )
-        strip_html.append("</div>")
-        st.markdown("".join(strip_html), unsafe_allow_html=True)
+        if st.session_state.show_futures_strip and top_modules_allowed:
+            strip_html = ['<div class="futures-strip">']
+            for name, price, chg, pct in futures_cards:
+                is_pos = (chg or 0) >= 0
+                badge_cls = "pos" if is_pos else "neg"
+                arrow = "↑" if is_pos else "↓"
+                strip_html.append(
+                    f'<div class="future-card"><p class="future-title">{name}</p>'
+                    f'<p class="future-value">{price:,.2f}</p>'
+                    f'<span class="future-badge {badge_cls}">{arrow} {chg:+.2f} ({pct:+.2f}%)</span></div>'
+                )
+            strip_html.append("</div>")
+            st.markdown("".join(strip_html), unsafe_allow_html=True)
 
         if active_view == "📈 Market Overview":
             _render_data_health_strip(
