@@ -2733,14 +2733,110 @@ def _render_heatmap_panel():
 
 
 def _level_builder_row(label, key, default):
-    return st.number_input(label, value=float(default), format="%.2f", key=key, step=0.25)
+    if key not in st.session_state:
+        st.session_state[key] = float(default)
+    return st.number_input(label, format="%.2f", key=key, step=0.25)
 
 
-def _render_nq_level_builder_panel():
+def _extract_builder_seed(level_data, prefix):
+    if not level_data:
+        return {}
+    level_map = {}
+    for row in level_data.get("results", []):
+        try:
+            name, price, _width, _icon = row
+            level_map[str(name)] = float(price)
+        except Exception:
+            continue
+    mapping = {
+        f"builder_{prefix}_res": "Target Resistance",
+        f"builder_{prefix}_wall": "Primary Wall",
+        f"builder_{prefix}_floor": "Primary Floor",
+        f"builder_{prefix}_supp": "Target Support",
+        f"builder_{prefix}_swall": "Secondary Wall",
+        f"builder_{prefix}_sfloor": "Secondary Floor",
+        f"builder_{prefix}_flip": "Gamma Flip",
+        f"builder_{prefix}_dn": "Delta Neutral",
+        f"builder_{prefix}_u50": "Upper 0.50σ",
+        f"builder_{prefix}_u25": "Upper 0.25σ",
+        f"builder_{prefix}_l25": "Lower 0.25σ",
+        f"builder_{prefix}_l50": "Lower 0.50σ",
+    }
+    out = {}
+    for key, level_name in mapping.items():
+        if level_name in level_map:
+            out[key] = float(level_map[level_name])
+    return out
+
+
+def _render_nq_level_builder_panel(data_0dte=None, data_weekly=None):
     st.subheader("📊 NQ Precision Map — Level Builder")
     st.caption(
         "Fill in your gamma levels. Copy the output string and paste it into the Pine Script input field."
     )
+
+    manual_defaults = {
+        "builder_d_res": 25506.68,
+        "builder_d_wall": 25471.68,
+        "builder_d_floor": 25141.95,
+        "builder_d_supp": 25106.95,
+        "builder_d_swall": 25400.00,
+        "builder_d_sfloor": 25250.00,
+        "builder_d_flip": 25183.16,
+        "builder_d_dn": 24308.92,
+        "builder_d_u50": 25565.24,
+        "builder_d_u25": 25380.00,
+        "builder_d_l25": 25280.00,
+        "builder_d_l50": 25074.76,
+        "builder_w_res": 25500.00,
+        "builder_w_wall": 25450.00,
+        "builder_w_floor": 25150.00,
+        "builder_w_supp": 25100.00,
+        "builder_w_swall": 25390.00,
+        "builder_w_sfloor": 25240.00,
+        "builder_w_flip": 24762.14,
+        "builder_w_dn": 24308.92,
+        "builder_w_u50": 25570.00,
+        "builder_w_u25": 25385.00,
+        "builder_w_l25": 25275.00,
+        "builder_w_l50": 25070.00,
+    }
+
+    auto_seed = {}
+    auto_seed.update(_extract_builder_seed(data_0dte, "d"))
+    auto_seed.update(_extract_builder_seed(data_weekly, "w"))
+    seed_values = {**manual_defaults, **auto_seed}
+
+    for key, val in seed_values.items():
+        if key not in st.session_state:
+            st.session_state[key] = float(val)
+
+    b1, b2 = st.columns(2)
+    with b1:
+        if st.button("🔄 Refresh From Generated Levels", use_container_width=True):
+            if auto_seed:
+                for key, val in seed_values.items():
+                    st.session_state[key] = float(val)
+                st.rerun()
+            else:
+                st.warning("Generated levels are unavailable right now. Using manual values.")
+    with b2:
+        if st.button("↩ Reset To Manual Defaults", use_container_width=True):
+            for key, val in manual_defaults.items():
+                st.session_state[key] = float(val)
+            st.rerun()
+
+    if auto_seed:
+        d_meta = (data_0dte or {}).get("data_meta", {})
+        w_meta = (data_weekly or {}).get("data_meta", {})
+        d_src = d_meta.get("options_source", "model")
+        w_src = w_meta.get("options_source", "model")
+        st.caption(
+            f"Auto-seed source: 0DTE={d_src} | Weekly={w_src}. "
+            "Use Refresh button to pull latest generated levels on demand."
+        )
+    else:
+        st.caption("Auto-seed unavailable; currently using manual/default values.")
 
     col_0dte, col_wkly = st.columns(2)
 
@@ -2748,43 +2844,43 @@ def _render_nq_level_builder_panel():
         st.markdown("### 0DTE (Daily)")
 
         st.markdown("**Outer Range**")
-        d_res = _level_builder_row("Target Resistance", "builder_d_res", 25506.68)
-        d_wall = _level_builder_row("Primary Wall", "builder_d_wall", 25471.68)
-        d_floor = _level_builder_row("Primary Floor", "builder_d_floor", 25141.95)
-        d_supp = _level_builder_row("Target Support", "builder_d_supp", 25106.95)
+        d_res = _level_builder_row("Target Resistance", "builder_d_res", manual_defaults["builder_d_res"])
+        d_wall = _level_builder_row("Primary Wall", "builder_d_wall", manual_defaults["builder_d_wall"])
+        d_floor = _level_builder_row("Primary Floor", "builder_d_floor", manual_defaults["builder_d_floor"])
+        d_supp = _level_builder_row("Target Support", "builder_d_supp", manual_defaults["builder_d_supp"])
 
         st.markdown("**Intra-Range**")
-        d_swall = _level_builder_row("Secondary Wall", "builder_d_swall", 25400.00)
-        d_sfloor = _level_builder_row("Secondary Floor", "builder_d_sfloor", 25250.00)
-        d_flip = _level_builder_row("Gamma Flip", "builder_d_flip", 25183.16)
-        d_dn = _level_builder_row("Delta Neutral", "builder_d_dn", 24308.92)
+        d_swall = _level_builder_row("Secondary Wall", "builder_d_swall", manual_defaults["builder_d_swall"])
+        d_sfloor = _level_builder_row("Secondary Floor", "builder_d_sfloor", manual_defaults["builder_d_sfloor"])
+        d_flip = _level_builder_row("Gamma Flip", "builder_d_flip", manual_defaults["builder_d_flip"])
+        d_dn = _level_builder_row("Delta Neutral", "builder_d_dn", manual_defaults["builder_d_dn"])
 
         st.markdown("**Volatility Bands**")
-        d_u50 = _level_builder_row("Upper 0.50σ", "builder_d_u50", 25565.24)
-        d_u25 = _level_builder_row("Upper 0.25σ", "builder_d_u25", 25380.00)
-        d_l25 = _level_builder_row("Lower 0.25σ", "builder_d_l25", 25280.00)
-        d_l50 = _level_builder_row("Lower 0.50σ", "builder_d_l50", 25074.76)
+        d_u50 = _level_builder_row("Upper 0.50σ", "builder_d_u50", manual_defaults["builder_d_u50"])
+        d_u25 = _level_builder_row("Upper 0.25σ", "builder_d_u25", manual_defaults["builder_d_u25"])
+        d_l25 = _level_builder_row("Lower 0.25σ", "builder_d_l25", manual_defaults["builder_d_l25"])
+        d_l50 = _level_builder_row("Lower 0.50σ", "builder_d_l50", manual_defaults["builder_d_l50"])
 
     with col_wkly:
         st.markdown("### Weekly")
 
         st.markdown("**Outer Range**")
-        w_res = _level_builder_row("Target Resistance", "builder_w_res", 25500.00)
-        w_wall = _level_builder_row("Primary Wall", "builder_w_wall", 25450.00)
-        w_floor = _level_builder_row("Primary Floor", "builder_w_floor", 25150.00)
-        w_supp = _level_builder_row("Target Support", "builder_w_supp", 25100.00)
+        w_res = _level_builder_row("Target Resistance", "builder_w_res", manual_defaults["builder_w_res"])
+        w_wall = _level_builder_row("Primary Wall", "builder_w_wall", manual_defaults["builder_w_wall"])
+        w_floor = _level_builder_row("Primary Floor", "builder_w_floor", manual_defaults["builder_w_floor"])
+        w_supp = _level_builder_row("Target Support", "builder_w_supp", manual_defaults["builder_w_supp"])
 
         st.markdown("**Intra-Range**")
-        w_swall = _level_builder_row("Secondary Wall", "builder_w_swall", 25390.00)
-        w_sfloor = _level_builder_row("Secondary Floor", "builder_w_sfloor", 25240.00)
-        w_flip = _level_builder_row("Gamma Flip", "builder_w_flip", 24762.14)
-        w_dn = _level_builder_row("Delta Neutral", "builder_w_dn", 24308.92)
+        w_swall = _level_builder_row("Secondary Wall", "builder_w_swall", manual_defaults["builder_w_swall"])
+        w_sfloor = _level_builder_row("Secondary Floor", "builder_w_sfloor", manual_defaults["builder_w_sfloor"])
+        w_flip = _level_builder_row("Gamma Flip", "builder_w_flip", manual_defaults["builder_w_flip"])
+        w_dn = _level_builder_row("Delta Neutral", "builder_w_dn", manual_defaults["builder_w_dn"])
 
         st.markdown("**Volatility Bands**")
-        w_u50 = _level_builder_row("Upper 0.50σ", "builder_w_u50", 25570.00)
-        w_u25 = _level_builder_row("Upper 0.25σ", "builder_w_u25", 25385.00)
-        w_l25 = _level_builder_row("Lower 0.25σ", "builder_w_l25", 25275.00)
-        w_l50 = _level_builder_row("Lower 0.50σ", "builder_w_l50", 25070.00)
+        w_u50 = _level_builder_row("Upper 0.50σ", "builder_w_u50", manual_defaults["builder_w_u50"])
+        w_u25 = _level_builder_row("Upper 0.25σ", "builder_w_u25", manual_defaults["builder_w_u25"])
+        w_l25 = _level_builder_row("Lower 0.25σ", "builder_w_l25", manual_defaults["builder_w_l25"])
+        w_l50 = _level_builder_row("Lower 0.50σ", "builder_w_l50", manual_defaults["builder_w_l50"])
 
     st.divider()
     st.markdown("### Output String")
@@ -3389,7 +3485,10 @@ def run_full_app():
                 st.error("Could not load multi-asset data")
 
         elif active_view == "📊 NQ Level Builder":
-            _render_nq_level_builder_panel()
+            _render_nq_level_builder_panel(
+                data_0dte=data_0dte,
+                data_weekly=data_weekly,
+            )
 
         elif active_view in {"📊 0DTE Levels", "📊 Weekly Levels", "📊 Monthly Levels"}:
             view_map = {
