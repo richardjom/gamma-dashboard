@@ -28,6 +28,7 @@ from nq_precision.full_data import (
     get_fear_greed_index,
     get_futures_breadth_internals,
     get_cot_dealer_positioning,
+    get_initial_balance_backtest,
     get_futures_reference_levels,
     get_futures_opening_structure,
     get_market_overview_yahoo,
@@ -2732,6 +2733,275 @@ def _render_heatmap_panel():
     st.markdown("</div></div>", unsafe_allow_html=True)
 
 
+def _render_initial_balance_report_panel(finnhub_key):
+    st.subheader("📈 Initial Balance Report")
+    st.caption(
+        "Full report mode with historical IB probabilities, directional filters, and breakout extension stats."
+    )
+
+    symbol_options = {
+        "NQ Futures": "NQ=F",
+        "ES Futures": "ES=F",
+        "YM Futures": "YM=F",
+    }
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    with c1:
+        symbol_label = st.selectbox(
+            "Symbol",
+            list(symbol_options.keys()),
+            index=0,
+            key="ib_symbol_label",
+        )
+    with c2:
+        lookback_days = st.slider("Lookback Days", min_value=10, max_value=90, value=30, step=5, key="ib_days")
+    with c3:
+        timeframe = st.selectbox("Timeframe", ["1m", "2m", "5m", "15m", "30m"], index=0, key="ib_timeframe")
+    with c4:
+        ib_start = st.text_input("IB Start (ET, HH:MM)", value="09:30", key="ib_start")
+    with c5:
+        ib_end = st.text_input("IB End (ET, HH:MM)", value="10:30", key="ib_end")
+
+    run_col, info_col = st.columns([1, 3])
+    with run_col:
+        run_report = st.button("🔄 Run / Refresh IB Report", use_container_width=True)
+    with info_col:
+        st.caption("Report updates on button click to avoid constant reruns.")
+
+    current_params = {
+        "symbol": symbol_options.get(symbol_label, "NQ=F"),
+        "days": int(lookback_days),
+        "timeframe": str(timeframe),
+        "ib_start": str(ib_start).strip(),
+        "ib_end": str(ib_end).strip(),
+    }
+
+    if "ib_report_params" not in st.session_state:
+        st.session_state.ib_report_params = None
+    if "ib_report_payload" not in st.session_state:
+        st.session_state.ib_report_payload = None
+
+    if run_report or st.session_state.ib_report_payload is None:
+        st.session_state.ib_report_params = current_params
+        st.session_state.ib_report_payload = get_initial_balance_backtest(
+            symbol=current_params["symbol"],
+            days=current_params["days"],
+            timeframe=current_params["timeframe"],
+            ib_start=current_params["ib_start"],
+            ib_end=current_params["ib_end"],
+            finnhub_key=finnhub_key,
+        )
+
+    if st.session_state.ib_report_params != current_params:
+        st.warning("Parameters changed. Click 'Run / Refresh IB Report' to update results.")
+
+    payload = st.session_state.ib_report_payload or {}
+    sessions_df = payload.get("sessions")
+    summary = payload.get("summary", {})
+    meta = payload.get("meta", {})
+
+    if sessions_df is None or sessions_df.empty:
+        st.info("No Initial Balance sessions available for these settings.")
+        return
+
+    st.caption(
+        f"Source: {meta.get('source', 'n/a')} | Symbol: {meta.get('symbol', 'n/a')} | "
+        f"Interval used: {meta.get('interval_used', 'n/a')} (requested {meta.get('interval_requested', 'n/a')}) | "
+        f"As of: {meta.get('asof_et', 'n/a')}"
+    )
+
+    st.markdown("### Condition Filters")
+    f1, f2, f3, f4, f5, f6 = st.columns(6)
+    with f1:
+        gap_filter = st.selectbox("Gap", ["Any", "Up", "Down", "Flat"], index=0, key="ib_f_gap")
+    with f2:
+        on_filter = st.selectbox("Open vs ON Mid", ["Any", "Above", "Below"], index=0, key="ib_f_on")
+    with f3:
+        vwap_filter = st.selectbox("IB End vs VWAP", ["Any", "Above", "Below"], index=0, key="ib_f_vwap")
+    with f4:
+        event_filter = st.selectbox("High-Impact Day", ["Any", "Only High", "Exclude High"], index=0, key="ib_f_event")
+    with f5:
+        min_ib = st.number_input("Min IB Size (pts)", min_value=0.0, value=0.0, step=1.0, key="ib_f_min")
+    with f6:
+        max_ib = st.number_input("Max IB Size (pts, 0=Any)", min_value=0.0, value=0.0, step=1.0, key="ib_f_max")
+
+    all_weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri"]
+    selected_weekdays = st.multiselect(
+        "Weekdays",
+        options=all_weekdays,
+        default=all_weekdays,
+        key="ib_f_weekdays",
+    )
+
+    filtered = sessions_df.copy()
+    if gap_filter != "Any":
+        filtered = filtered[filtered["gap_dir"] == gap_filter.lower()]
+    if on_filter != "Any":
+        filtered = filtered[filtered["open_vs_overnight_mid"] == on_filter.lower()]
+    if vwap_filter != "Any":
+        filtered = filtered[filtered["ib_end_vs_vwap"] == vwap_filter.lower()]
+    if event_filter == "Only High":
+        filtered = filtered[filtered["high_impact_day"] == True]  # noqa: E712
+    elif event_filter == "Exclude High":
+        filtered = filtered[filtered["high_impact_day"] == False]  # noqa: E712
+    if min_ib > 0:
+        filtered = filtered[filtered["ib_range"] >= float(min_ib)]
+    if max_ib > 0:
+        filtered = filtered[filtered["ib_range"] <= float(max_ib)]
+    if selected_weekdays:
+        filtered = filtered[filtered["weekday"].isin(selected_weekdays)]
+
+    if filtered.empty:
+        st.warning("No sessions matched current filters.")
+        return
+
+    total = len(filtered)
+    up_break_pct = float(filtered["break_up"].mean() * 100.0)
+    down_break_pct = float(filtered["break_down"].mean() * 100.0)
+    both_break_pct = float(filtered["both_break"].mean() * 100.0)
+    no_break_pct = float(filtered["no_break"].mean() * 100.0)
+    first_up_pct = float((filtered["first_break"] == "up").mean() * 100.0)
+    first_down_pct = float((filtered["first_break"] == "down").mean() * 100.0)
+    hit_025_pct = float(filtered["hit_025_any"].mean() * 100.0)
+    hit_050_pct = float(filtered["hit_050_any"].mean() * 100.0)
+    hit_100_pct = float(filtered["hit_100_any"].mean() * 100.0)
+    med_ib_range = float(filtered["ib_range"].median())
+    med_ib_range_pct = float(filtered["ib_range_pct"].median())
+
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
+    m1.metric("Sessions", f"{total}")
+    m2.metric("Up Break %", f"{up_break_pct:.1f}%")
+    m3.metric("Down Break %", f"{down_break_pct:.1f}%")
+    m4.metric("Both-Side Break %", f"{both_break_pct:.1f}%")
+    m5.metric("No Break %", f"{no_break_pct:.1f}%")
+    m6.metric("Median IB Range", f"{med_ib_range:.1f} pts")
+
+    mm1, mm2, mm3, mm4, mm5 = st.columns(5)
+    mm1.metric("First Break Up %", f"{first_up_pct:.1f}%")
+    mm2.metric("First Break Down %", f"{first_down_pct:.1f}%")
+    mm3.metric("Hit 0.25x IB %", f"{hit_025_pct:.1f}%")
+    mm4.metric("Hit 0.50x IB %", f"{hit_050_pct:.1f}%")
+    mm5.metric("Hit 1.00x IB %", f"{hit_100_pct:.1f}%")
+
+    st.caption(
+        f"Median IB Range %: {med_ib_range_pct:.2f}% | "
+        f"Avg Up Extension: {float(filtered['ext_mult_up'].mean()):.2f}x | "
+        f"Avg Down Extension: {float(filtered['ext_mult_down'].mean()):.2f}x"
+    )
+
+    ch1, ch2 = st.columns(2)
+    with ch1:
+        range_plot = filtered.copy()
+        range_plot["date"] = pd.to_datetime(range_plot["date"], errors="coerce")
+        range_plot = range_plot.sort_values("date")
+        fig_range = px.line(
+            range_plot,
+            x="date",
+            y="ib_range",
+            markers=True,
+            title="IB Range By Session",
+        )
+        fig_range.update_layout(
+            template="plotly_dark" if st.session_state.theme == "dark" else "plotly_white",
+            height=340,
+            margin=dict(l=20, r=20, t=50, b=20),
+            xaxis_title="Session",
+            yaxis_title="IB Range (pts)",
+        )
+        st.plotly_chart(fig_range, use_container_width=True)
+
+    with ch2:
+        fb = (
+            filtered["first_break"]
+            .replace({"none": "none", "up": "up", "down": "down", "both": "both"})
+            .value_counts()
+            .reindex(["up", "down", "both", "none"])
+            .fillna(0)
+            .reset_index()
+        )
+        fb.columns = ["First Break", "Count"]
+        fig_fb = px.bar(
+            fb,
+            x="First Break",
+            y="Count",
+            color="First Break",
+            title="First Break Distribution",
+            color_discrete_map={
+                "up": "#27c46b",
+                "down": "#df4f4f",
+                "both": "#d1a942",
+                "none": "#607089",
+            },
+        )
+        fig_fb.update_layout(
+            template="plotly_dark" if st.session_state.theme == "dark" else "plotly_white",
+            height=340,
+            margin=dict(l=20, r=20, t=50, b=20),
+            showlegend=False,
+        )
+        st.plotly_chart(fig_fb, use_container_width=True)
+
+    st.markdown("### Weekday Breakdown (First Break %)")
+    pivot = (
+        filtered.assign(v=1)
+        .pivot_table(
+            index="weekday",
+            columns="first_break",
+            values="v",
+            aggfunc="sum",
+            fill_value=0,
+        )
+        .reindex(["Mon", "Tue", "Wed", "Thu", "Fri"])
+        .fillna(0)
+    )
+    for col in ["up", "down", "both", "none"]:
+        if col not in pivot.columns:
+            pivot[col] = 0
+    pivot_pct = pivot.div(pivot.sum(axis=1).replace(0, pd.NA), axis=0).fillna(0) * 100.0
+    fig_heat = px.imshow(
+        pivot_pct[["up", "down", "both", "none"]],
+        text_auto=".0f",
+        aspect="auto",
+        color_continuous_scale="Blues",
+    )
+    fig_heat.update_layout(
+        template="plotly_dark" if st.session_state.theme == "dark" else "plotly_white",
+        height=280,
+        margin=dict(l=20, r=20, t=20, b=20),
+        coloraxis_showscale=False,
+        xaxis_title="First Break Side",
+        yaxis_title="Weekday",
+    )
+    st.plotly_chart(fig_heat, use_container_width=True)
+
+    st.markdown("### Session Table")
+    table_cols = [
+        "date",
+        "weekday",
+        "ib_range",
+        "ib_range_pct",
+        "gap_dir",
+        "open_vs_overnight_mid",
+        "ib_end_vs_vwap",
+        "first_break",
+        "break_up",
+        "break_down",
+        "both_break",
+        "no_break",
+        "ext_mult_up",
+        "ext_mult_down",
+        "high_impact_day",
+    ]
+    table_df = filtered[table_cols].copy().sort_values("date", ascending=False)
+    for col in ["ib_range", "ib_range_pct", "ext_mult_up", "ext_mult_down"]:
+        table_df[col] = table_df[col].map(lambda v: round(float(v), 2))
+    st.dataframe(table_df, width="stretch", hide_index=True, height=440)
+
+    st.caption(
+        "Note: high-impact day tagging depends on available calendar feed coverage and may be partial for historical sessions."
+    )
+
+
 def _level_builder_row(label, key, default):
     if key not in st.session_state:
         st.session_state[key] = float(default)
@@ -3189,6 +3459,7 @@ def run_full_app():
         ],
         "Analytics": [
             ("🧪 Execution Lab", "🧪 Execution Lab"),
+            ("📈 Initial Balance", "📈 Initial Balance"),
             ("🌐 Macro & Breadth", "🌐 Macro & Breadth"),
             ("🚨 Event Intel", "🚨 Event Intel"),
             ("🍞 Daily Bread", "🍞 Daily Bread"),
@@ -3433,6 +3704,9 @@ def run_full_app():
                     nq_now=nq_now,
                     level_interactions_df=level_interactions_df,
                 )
+
+        elif active_view == "📈 Initial Balance":
+            _render_initial_balance_report_panel(finnhub_key=finnhub_key)
 
         elif active_view == "🌐 Macro & Breadth":
             _render_futures_indices_panel(

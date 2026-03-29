@@ -2134,6 +2134,328 @@ def _calc_volume_profile_levels(frame, symbol, value_area=0.70):
     }
 
 
+def _parse_hhmm(raw_value, default_value):
+    try:
+        txt = str(raw_value).strip()
+        parsed = datetime.strptime(txt, "%H:%M")
+        return parsed.time()
+    except Exception:
+        return default_value
+
+
+def _safe_vwap(frame):
+    if frame is None or frame.empty:
+        return None
+    vol = frame["Volume"].fillna(0).astype(float)
+    if float(vol.sum()) <= 0:
+        try:
+            return float(frame["Close"].astype(float).mean())
+        except Exception:
+            return None
+    tp = ((frame["High"] + frame["Low"] + frame["Close"]) / 3.0).astype(float)
+    try:
+        return float((tp * vol).sum() / vol.sum())
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=180)
+def get_initial_balance_backtest(
+    symbol="NQ=F",
+    days=30,
+    timeframe="1m",
+    ib_start="09:30",
+    ib_end="10:30",
+    finnhub_key="",
+):
+    et = ZoneInfo("America/New_York")
+    now_et = datetime.now(et)
+    days = max(5, min(90, int(days)))
+    interval = str(timeframe or "1m")
+    ib_start_t = _parse_hhmm(ib_start, dt_time(9, 30))
+    ib_end_t = _parse_hhmm(ib_end, dt_time(10, 30))
+    if ib_end_t <= ib_start_t:
+        ib_end_t = dt_time(10, 30)
+
+    # Request extra bars so we still have enough sessions after filtering.
+    period_days = max(30, int(days * 4))
+    period = f"{period_days}d"
+
+    hist = None
+    used_interval = interval
+    for candidate in [interval, "5m", "15m", "30m"]:
+        try:
+            raw = yf.Ticker(symbol).history(
+                period=period,
+                interval=candidate,
+                auto_adjust=False,
+                prepost=True,
+            )
+            raw = _to_et_index(raw)
+            if raw is not None and not raw.empty:
+                hist = raw.copy()
+                used_interval = candidate
+                break
+        except Exception:
+            continue
+
+    if hist is None or hist.empty:
+        _set_dataset_meta(
+            f"ib_report:{symbol}",
+            "Yahoo Finance",
+            timestamp_ms=int(time.time() * 1000),
+            max_age_sec=180,
+        )
+        return {
+            "sessions": pd.DataFrame(),
+            "summary": {},
+            "meta": {
+                "symbol": symbol,
+                "interval_requested": interval,
+                "interval_used": None,
+                "ib_start": ib_start_t.strftime("%H:%M"),
+                "ib_end": ib_end_t.strftime("%H:%M"),
+                "asof_et": now_et.strftime("%Y-%m-%d %I:%M:%S %p ET"),
+                "source": "Yahoo Finance",
+            },
+        }
+
+    hist = hist.dropna(subset=["Open", "High", "Low", "Close"]).copy()
+    rth = hist[
+        (hist.index.time >= dt_time(9, 30))
+        & (hist.index.time <= dt_time(16, 0))
+    ].copy()
+    if rth.empty:
+        _set_dataset_meta(
+            f"ib_report:{symbol}",
+            "Yahoo Finance",
+            timestamp_ms=int(time.time() * 1000),
+            max_age_sec=180,
+        )
+        return {
+            "sessions": pd.DataFrame(),
+            "summary": {},
+            "meta": {
+                "symbol": symbol,
+                "interval_requested": interval,
+                "interval_used": used_interval,
+                "ib_start": ib_start_t.strftime("%H:%M"),
+                "ib_end": ib_end_t.strftime("%H:%M"),
+                "asof_et": now_et.strftime("%Y-%m-%d %I:%M:%S %p ET"),
+                "source": "Yahoo Finance",
+            },
+        }
+
+    session_dates = sorted(list(dict.fromkeys(rth.index.date.tolist())))
+    session_dates = session_dates[-days:]
+    if not session_dates:
+        _set_dataset_meta(
+            f"ib_report:{symbol}",
+            "Yahoo Finance",
+            timestamp_ms=int(time.time() * 1000),
+            max_age_sec=180,
+        )
+        return {
+            "sessions": pd.DataFrame(),
+            "summary": {},
+            "meta": {
+                "symbol": symbol,
+                "interval_requested": interval,
+                "interval_used": used_interval,
+                "ib_start": ib_start_t.strftime("%H:%M"),
+                "ib_end": ib_end_t.strftime("%H:%M"),
+                "asof_et": now_et.strftime("%Y-%m-%d %I:%M:%S %p ET"),
+                "source": "Yahoo Finance",
+            },
+        }
+
+    # High-impact event days (next N days). Historical coverage may be partial.
+    high_impact_dates = set()
+    try:
+        if finnhub_key:
+            econ_days = max(7, days)
+            econ_df = get_economic_calendar_window(finnhub_key, days=econ_days)
+            if econ_df is not None and not econ_df.empty:
+                hi = econ_df[econ_df["impact"].astype(str).str.lower() == "high"]
+                high_impact_dates = set(hi["date_et"].astype(str).tolist())
+    except Exception:
+        high_impact_dates = set()
+
+    rows = []
+    for i, day in enumerate(session_dates):
+        day_rth = rth[rth.index.date == day].copy()
+        if day_rth.empty:
+            continue
+
+        ib_slice = day_rth[
+            (day_rth.index.time >= ib_start_t) & (day_rth.index.time < ib_end_t)
+        ].copy()
+        if ib_slice.empty:
+            continue
+
+        ib_high = float(ib_slice["High"].max())
+        ib_low = float(ib_slice["Low"].min())
+        ib_mid = (ib_high + ib_low) / 2.0
+        ib_range = float(max(0.0, ib_high - ib_low))
+        if ib_range <= 0:
+            continue
+        ib_range_pct = float((ib_range / max(1e-9, ib_mid)) * 100.0)
+
+        day_open = float(day_rth["Open"].iloc[0])
+        day_close = float(day_rth["Close"].iloc[-1])
+
+        prev_close = None
+        if i > 0:
+            prev_day = session_dates[i - 1]
+            prev_rth = rth[rth.index.date == prev_day]
+            if not prev_rth.empty:
+                prev_close = float(prev_rth["Close"].iloc[-1])
+        gap_pts = (day_open - prev_close) if prev_close is not None else None
+        if gap_pts is None:
+            gap_dir = "unknown"
+        elif abs(gap_pts) < 0.25:
+            gap_dir = "flat"
+        elif gap_pts > 0:
+            gap_dir = "up"
+        else:
+            gap_dir = "down"
+
+        prev_day_for_overnight = day - timedelta(days=1)
+        overnight_start = datetime.combine(prev_day_for_overnight, dt_time(18, 0), tzinfo=et)
+        overnight_end = datetime.combine(day, dt_time(9, 29), tzinfo=et)
+        overnight = hist[(hist.index >= overnight_start) & (hist.index <= overnight_end)].copy()
+        overnight_mid = None
+        open_vs_overnight_mid = "unknown"
+        if not overnight.empty:
+            on_high = float(overnight["High"].max())
+            on_low = float(overnight["Low"].min())
+            overnight_mid = (on_high + on_low) / 2.0
+            if day_open >= overnight_mid:
+                open_vs_overnight_mid = "above"
+            else:
+                open_vs_overnight_mid = "below"
+
+        ib_end_frame = day_rth[
+            (day_rth.index.time >= dt_time(9, 30)) & (day_rth.index.time < ib_end_t)
+        ].copy()
+        ib_vwap = _safe_vwap(ib_end_frame)
+        ib_end_close = float(ib_slice["Close"].iloc[-1])
+        ib_end_vs_vwap = "unknown"
+        if ib_vwap is not None:
+            ib_end_vs_vwap = "above" if ib_end_close >= float(ib_vwap) else "below"
+
+        after_ib = day_rth[day_rth.index >= ib_slice.index[-1]].copy()
+        break_up = False
+        break_down = False
+        first_break = "none"
+        ext_up = 0.0
+        ext_down = 0.0
+        if not after_ib.empty:
+            max_after = float(after_ib["High"].max())
+            min_after = float(after_ib["Low"].min())
+            break_up = max_after > ib_high
+            break_down = min_after < ib_low
+            ext_up = max(0.0, max_after - ib_high)
+            ext_down = max(0.0, ib_low - min_after)
+
+            for _, bar in after_ib.iterrows():
+                up_now = float(bar["High"]) > ib_high
+                down_now = float(bar["Low"]) < ib_low
+                if up_now and down_now:
+                    first_break = "both"
+                    break
+                if up_now:
+                    first_break = "up"
+                    break
+                if down_now:
+                    first_break = "down"
+                    break
+
+        both_break = bool(break_up and break_down)
+        no_break = bool((not break_up) and (not break_down))
+        ext_mult_up = float(ext_up / ib_range) if ib_range > 0 else 0.0
+        ext_mult_down = float(ext_down / ib_range) if ib_range > 0 else 0.0
+
+        day_key = day.isoformat()
+        rows.append(
+            {
+                "date": day_key,
+                "weekday": datetime.combine(day, dt_time(0, 0)).strftime("%a"),
+                "open": day_open,
+                "close": day_close,
+                "ib_high": ib_high,
+                "ib_low": ib_low,
+                "ib_mid": ib_mid,
+                "ib_range": ib_range,
+                "ib_range_pct": ib_range_pct,
+                "gap_pts": gap_pts,
+                "gap_dir": gap_dir,
+                "overnight_mid": overnight_mid,
+                "open_vs_overnight_mid": open_vs_overnight_mid,
+                "ib_vwap": ib_vwap,
+                "ib_end_vs_vwap": ib_end_vs_vwap,
+                "break_up": bool(break_up),
+                "break_down": bool(break_down),
+                "both_break": both_break,
+                "no_break": no_break,
+                "first_break": first_break,
+                "ext_up": ext_up,
+                "ext_down": ext_down,
+                "ext_mult_up": ext_mult_up,
+                "ext_mult_down": ext_mult_down,
+                "hit_025_any": bool((ext_mult_up >= 0.25) or (ext_mult_down >= 0.25)),
+                "hit_050_any": bool((ext_mult_up >= 0.50) or (ext_mult_down >= 0.50)),
+                "hit_100_any": bool((ext_mult_up >= 1.00) or (ext_mult_down >= 1.00)),
+                "high_impact_day": bool(day_key in high_impact_dates),
+            }
+        )
+
+    sessions_df = pd.DataFrame(rows)
+    if sessions_df.empty:
+        summary = {}
+    else:
+        total = len(sessions_df)
+        summary = {
+            "sessions": int(total),
+            "up_break_pct": float(sessions_df["break_up"].mean() * 100.0),
+            "down_break_pct": float(sessions_df["break_down"].mean() * 100.0),
+            "both_break_pct": float(sessions_df["both_break"].mean() * 100.0),
+            "no_break_pct": float(sessions_df["no_break"].mean() * 100.0),
+            "first_up_pct": float((sessions_df["first_break"] == "up").mean() * 100.0),
+            "first_down_pct": float((sessions_df["first_break"] == "down").mean() * 100.0),
+            "first_both_pct": float((sessions_df["first_break"] == "both").mean() * 100.0),
+            "median_ib_range": float(sessions_df["ib_range"].median()),
+            "mean_ib_range": float(sessions_df["ib_range"].mean()),
+            "median_ib_range_pct": float(sessions_df["ib_range_pct"].median()),
+            "hit_025_any_pct": float(sessions_df["hit_025_any"].mean() * 100.0),
+            "hit_050_any_pct": float(sessions_df["hit_050_any"].mean() * 100.0),
+            "hit_100_any_pct": float(sessions_df["hit_100_any"].mean() * 100.0),
+            "avg_ext_mult_up": float(sessions_df["ext_mult_up"].mean()),
+            "avg_ext_mult_down": float(sessions_df["ext_mult_down"].mean()),
+        }
+
+    _set_dataset_meta(
+        f"ib_report:{symbol}",
+        "Yahoo Finance",
+        timestamp_ms=int(time.time() * 1000),
+        max_age_sec=180,
+    )
+
+    return {
+        "sessions": sessions_df,
+        "summary": summary,
+        "meta": {
+            "symbol": symbol,
+            "interval_requested": interval,
+            "interval_used": used_interval,
+            "ib_start": ib_start_t.strftime("%H:%M"),
+            "ib_end": ib_end_t.strftime("%H:%M"),
+            "asof_et": now_et.strftime("%Y-%m-%d %I:%M:%S %p ET"),
+            "source": "Yahoo Finance",
+        },
+    }
+
+
 @st.cache_data(ttl=30)
 def get_futures_reference_levels(symbol="NQ=F", finnhub_key=""):
     et = ZoneInfo("America/New_York")
