@@ -1,5 +1,5 @@
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time as dt_time
 import html
 import math
 import re
@@ -33,6 +33,7 @@ from nq_precision.full_data import (
     get_futures_opening_structure,
     get_market_overview_yahoo,
     get_nasdaq_heatmap_data,
+    get_intraday_history,
     get_nq_intraday_data,
     get_nq_price_auto,
     get_quote_age_label,
@@ -1908,6 +1909,430 @@ def _build_morning_playbook(data_0dte, data_weekly, nq_now, event_risk):
     }
 
 
+def _is_high_signal_news(article):
+    if not article:
+        return False
+    score = int(article.get("priority_score", 0) or 0)
+    if score >= 3:
+        return True
+    headline = str(article.get("headline", "")).lower()
+    source = str(article.get("source", "")).lower()
+    strong_terms = [
+        "fomc",
+        "fed",
+        "powell",
+        "cpi",
+        "pce",
+        "nfp",
+        "jobs",
+        "treasury",
+        "yield",
+        "inflation",
+        "earnings",
+        "guidance",
+        "downgrade",
+        "upgrade",
+        "tariff",
+        "war",
+        "sanction",
+        "rate",
+    ]
+    if any(term in headline for term in strong_terms):
+        return True
+    if any(src in source for src in ["reuters", "wsj", "bloomberg", "dow jones", "cnbc"]):
+        return True
+    return False
+
+
+def _build_trade_bias_engine(
+    data_0dte,
+    nq_now,
+    regime_engine,
+    cross_asset_matrix,
+    event_risk,
+    opening_structure,
+    breadth_internals,
+):
+    if not data_0dte:
+        return {}
+
+    score = int(_safe_float((regime_engine or {}).get("score"), 0) or 0)
+    reasons = []
+
+    gf_distance = float(nq_now - data_0dte.get("g_flip_nq", nq_now))
+    dn_distance = float(nq_now - data_0dte.get("dn_nq", nq_now))
+    if gf_distance > 0:
+        score -= 18
+        reasons.append(f"Above Gamma Flip by {gf_distance:+.0f} pts (negative-gamma drift risk).")
+    else:
+        score += 12
+        reasons.append(f"Below Gamma Flip by {gf_distance:+.0f} pts (mean-reversion support).")
+
+    if abs(dn_distance) > 220:
+        adj = -8 if dn_distance > 0 else 8
+        score += adj
+        reasons.append(f"Extended vs Delta Neutral ({dn_distance:+.0f} pts).")
+
+    macro_pressure = float((cross_asset_matrix or {}).get("composite", 0.0) or 0.0)
+    if macro_pressure >= 1.0:
+        score += 9
+        reasons.append(f"Cross-asset pressure supportive ({macro_pressure:+.2f}).")
+    elif macro_pressure <= -1.0:
+        score -= 9
+        reasons.append(f"Cross-asset pressure defensive ({macro_pressure:+.2f}).")
+
+    if event_risk and event_risk.get("lockout_active"):
+        score -= 18
+        reasons.append("High-impact event lockout active.")
+    else:
+        nh = (event_risk or {}).get("next_high")
+        if nh and int(nh.get("seconds_to", 999999)) <= 3600:
+            score -= 10
+            reasons.append("High-impact release within 60 minutes.")
+
+    open_drive = str((opening_structure or {}).get("open_drive_signal", "")).lower()
+    if "up" in open_drive:
+        score += 5
+        reasons.append("Opening drive is biased up.")
+    elif "down" in open_drive:
+        score -= 5
+        reasons.append("Opening drive is biased down.")
+
+    nq_part = _safe_float(((breadth_internals or {}).get("NQ", {}) or {}).get("participation_score"), 0.0) or 0.0
+    if nq_part >= 0.55:
+        score += 6
+        reasons.append(f"NQ participation is broad ({nq_part:+.2f}).")
+    elif nq_part <= -0.55:
+        score -= 6
+        reasons.append(f"NQ participation is weak ({nq_part:+.2f}).")
+
+    score = int(max(-100, min(100, score)))
+    if score >= 22:
+        bias = "LONG"
+    elif score <= -22:
+        bias = "SHORT"
+    else:
+        bias = "NEUTRAL"
+
+    conviction = "High" if abs(score) >= 45 else "Medium" if abs(score) >= 25 else "Low"
+    return {
+        "bias": bias,
+        "score": score,
+        "conviction": conviction,
+        "reasons": reasons[:5],
+    }
+
+
+def _render_trade_bias_panel(payload):
+    st.markdown(
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧠 Trade Bias Engine</div></div><div class="terminal-body">',
+        unsafe_allow_html=True,
+    )
+    if not payload:
+        st.info("Trade bias unavailable.")
+        st.markdown("</div></div>", unsafe_allow_html=True)
+        return
+
+    bias = str(payload.get("bias", "NEUTRAL")).upper()
+    score = int(payload.get("score", 0) or 0)
+    conviction = str(payload.get("conviction", "Low"))
+    b1, b2, b3 = st.columns(3)
+    b1.metric("Bias", bias)
+    b2.metric("Bias Score", f"{score:+d}")
+    b3.metric("Conviction", conviction)
+    reasons = payload.get("reasons", [])
+    if reasons:
+        st.markdown("**Top Drivers**")
+        for reason in reasons:
+            st.markdown(f"- {reason}")
+    st.markdown("</div></div>", unsafe_allow_html=True)
+
+
+def _render_open_playbook_panel(playbook, data_0dte, nq_now):
+    st.markdown(
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📖 Open Playbook (If/Then)</div></div><div class="terminal-body">',
+        unsafe_allow_html=True,
+    )
+    if not playbook or not data_0dte:
+        st.info("Open playbook unavailable.")
+        st.markdown("</div></div>", unsafe_allow_html=True)
+        return
+
+    p_wall = float(data_0dte.get("p_wall", nq_now))
+    p_floor = float(data_0dte.get("p_floor", nq_now))
+    dn = float(data_0dte.get("dn_nq", nq_now))
+    gf = float(data_0dte.get("g_flip_nq", nq_now))
+    s_wall = float(data_0dte.get("s_wall", p_wall))
+    s_floor = float(data_0dte.get("s_floor", p_floor))
+
+    scenarios = [
+        {
+            "Trigger": f"Rejects {p_wall:.0f}-{p_wall + 12:.0f}",
+            "Action": f"Fade to DN {dn:.0f}, then {p_floor:.0f}",
+            "Invalidation": f"Accepts above {s_wall + 12:.0f}",
+        },
+        {
+            "Trigger": f"Holds above GF {gf:.0f} and reclaims pullback",
+            "Action": f"Momentum continuation toward {p_wall:.0f}",
+            "Invalidation": f"Loses GF and closes below {dn:.0f}",
+        },
+        {
+            "Trigger": f"Reclaims {p_floor:.0f} after liquidity sweep",
+            "Action": f"Mean-revert back to DN {dn:.0f}",
+            "Invalidation": f"Breaks/accepts below {s_floor - 10:.0f}",
+        },
+    ]
+    st.dataframe(pd.DataFrame(scenarios), width="stretch", hide_index=True)
+    st.markdown("</div></div>", unsafe_allow_html=True)
+
+
+def _build_level_reaction_stats(data_0dte, intraday_hist):
+    if not data_0dte or intraday_hist is None or intraday_hist.empty:
+        return pd.DataFrame()
+
+    use = intraday_hist.copy()
+    if not isinstance(use.index, pd.DatetimeIndex):
+        return pd.DataFrame()
+    day_key = use.index.tz_convert("America/New_York").date if use.index.tz else use.index.date
+    use = use.assign(_day=day_key)
+
+    levels = [
+        ("Primary Wall", float(data_0dte.get("p_wall", 0))),
+        ("Gamma Flip", float(data_0dte.get("g_flip_nq", 0))),
+        ("Delta Neutral", float(data_0dte.get("dn_nq", 0))),
+        ("Primary Floor", float(data_0dte.get("p_floor", 0))),
+    ]
+    rows = []
+    by_day = use.groupby("_day", as_index=False).agg(
+        high=("High", "max"),
+        low=("Low", "min"),
+        close=("Close", "last"),
+    )
+    total_days = int(len(by_day))
+    if total_days == 0:
+        return pd.DataFrame()
+
+    for lvl_name, lvl_px in levels:
+        if lvl_px <= 0:
+            continue
+        touched = (by_day["low"] <= lvl_px) & (by_day["high"] >= lvl_px)
+        touched_df = by_day[touched]
+        touches = int(len(touched_df))
+        if touches == 0:
+            rows.append(
+                {
+                    "Level": lvl_name,
+                    "Touches (20D)": 0,
+                    "Hold %": "0%",
+                    "Break %": "0%",
+                    "Avg Excursion": "0.0 pts",
+                }
+            )
+            continue
+        is_resistance = "wall" in lvl_name.lower()
+        is_support = "floor" in lvl_name.lower()
+        if is_resistance:
+            held = int((touched_df["close"] <= lvl_px).sum())
+            breaks = int((touched_df["close"] > lvl_px).sum())
+            excursion = (touched_df["high"] - lvl_px).clip(lower=0)
+        elif is_support:
+            held = int((touched_df["close"] >= lvl_px).sum())
+            breaks = int((touched_df["close"] < lvl_px).sum())
+            excursion = (lvl_px - touched_df["low"]).clip(lower=0)
+        else:
+            held = int((touched_df["close"] - lvl_px).abs().le(18).sum())
+            breaks = int(max(0, touches - held))
+            excursion = (touched_df["high"] - touched_df["low"]).clip(lower=0)
+        rows.append(
+            {
+                "Level": lvl_name,
+                "Touches (20D)": touches,
+                "Hold %": f"{(held / touches) * 100:.0f}%",
+                "Break %": f"{(breaks / touches) * 100:.0f}%",
+                "Avg Excursion": f"{float(excursion.mean() if len(excursion) else 0):.1f} pts",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _render_level_reaction_panel(stats_df):
+    st.markdown(
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🪃 Level Reaction Stats (Last ~20 Sessions)</div></div><div class="terminal-body">',
+        unsafe_allow_html=True,
+    )
+    if stats_df is None or stats_df.empty:
+        st.info("Reaction stats unavailable.")
+        st.markdown("</div></div>", unsafe_allow_html=True)
+        return
+    st.dataframe(stats_df, width="stretch", hide_index=True)
+    st.markdown("</div></div>", unsafe_allow_html=True)
+
+
+def _build_alert_center(data_0dte, nq_now, event_risk, ratio_meta, nq_source, qqq_source):
+    alerts = []
+    if data_0dte:
+        checks = [
+            ("Gamma Flip", float(data_0dte.get("g_flip_nq", nq_now)), 18),
+            ("Delta Neutral", float(data_0dte.get("dn_nq", nq_now)), 25),
+            ("Primary Wall", float(data_0dte.get("p_wall", nq_now)), 12),
+            ("Primary Floor", float(data_0dte.get("p_floor", nq_now)), 12),
+        ]
+        for name, level, threshold in checks:
+            dist = abs(float(nq_now - level))
+            if dist <= threshold:
+                sev = "HIGH" if dist <= threshold * 0.45 else "MED"
+                alerts.append(
+                    {
+                        "Severity": sev,
+                        "Alert": f"{name} proximity",
+                        "Detail": f"NQ is {dist:.1f} pts from {name} ({level:.2f})",
+                    }
+                )
+
+    if event_risk and event_risk.get("lockout_active"):
+        lock = event_risk.get("lockout_event", {}) or {}
+        alerts.append(
+            {
+                "Severity": "HIGH",
+                "Alert": "Event lockout active",
+                "Detail": f"{lock.get('event', 'High-impact release')} {lock.get('time_et', '')}",
+            }
+        )
+    else:
+        nh = (event_risk or {}).get("next_high")
+        if nh and int(nh.get("seconds_to", 999999)) <= 3600:
+            alerts.append(
+                {
+                    "Severity": "MED",
+                    "Alert": "High-impact event due soon",
+                    "Detail": f"{nh.get('event', 'Release')} in {_countdown_label(nh.get('seconds_to', 0))}",
+                }
+            )
+
+    ratio_conf = int((ratio_meta or {}).get("confidence_score", 0) or 0)
+    if ratio_conf < 55:
+        alerts.append(
+            {
+                "Severity": "MED",
+                "Alert": "Ratio quality reduced",
+                "Detail": f"NQ/QQQ mapping confidence {ratio_conf}%",
+            }
+        )
+
+    if "schwab" not in str(nq_source).lower():
+        alerts.append(
+            {
+                "Severity": "LOW",
+                "Alert": "NQ realtime fallback",
+                "Detail": f"NQ source is {nq_source}",
+            }
+        )
+    if "schwab" not in str(qqq_source).lower():
+        alerts.append(
+            {
+                "Severity": "LOW",
+                "Alert": "QQQ realtime fallback",
+                "Detail": f"QQQ source is {qqq_source}",
+            }
+        )
+
+    sev_rank = {"HIGH": 0, "MED": 1, "LOW": 2}
+    alerts = sorted(alerts, key=lambda r: sev_rank.get(str(r.get("Severity", "LOW")), 3))
+    return alerts[:8]
+
+
+def _render_alert_center_panel(alerts):
+    st.markdown(
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🔔 Alert Center</div></div><div class="terminal-body">',
+        unsafe_allow_html=True,
+    )
+    if not alerts:
+        st.success("No active high-priority alerts.")
+        st.markdown("</div></div>", unsafe_allow_html=True)
+        return
+    st.dataframe(pd.DataFrame(alerts), width="stretch", hide_index=True)
+    st.markdown("</div></div>", unsafe_allow_html=True)
+
+
+def _third_friday(year, month):
+    d = datetime(year, month, 1)
+    offset = (4 - d.weekday()) % 7
+    first_friday = d + timedelta(days=offset)
+    return first_friday + timedelta(days=14)
+
+
+def _expected_nq_front_contract(now_et=None):
+    if now_et is None:
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+    q_months = [3, 6, 9, 12]
+    year = now_et.year
+
+    def _next_quarter(y, m):
+        idx = q_months.index(m)
+        if idx == len(q_months) - 1:
+            return y + 1, q_months[0]
+        return y, q_months[idx + 1]
+
+    quarter = None
+    for qm in q_months:
+        if now_et.month <= qm:
+            quarter = qm
+            break
+    if quarter is None:
+        year += 1
+        quarter = 3
+
+    expiry = _third_friday(year, quarter).replace(tzinfo=now_et.tzinfo)
+    roll_start = expiry - timedelta(days=8)
+    if now_et >= roll_start:
+        year, quarter = _next_quarter(year, quarter)
+    month_codes = {3: "H", 6: "M", 9: "U", 12: "Z"}
+    return f"NQ{month_codes[quarter]}{str(year)[-2:]}", roll_start.strftime("%Y-%m-%d")
+
+
+def _build_contract_roll_status(nq_source):
+    src = str(nq_source or "")
+    m = re.search(r"/NQ([HMUZ])(\d{2,4})", src.upper())
+    current = None
+    if m:
+        yy = m.group(2)[-2:]
+        current = f"NQ{m.group(1)}{yy}"
+
+    expected, roll_start = _expected_nq_front_contract()
+    status = "OK"
+    note = f"Expected active front contract: {expected} (roll window starts {roll_start} ET)."
+    if current and current != expected:
+        status = "ROLL"
+        note = f"Feed contract {current} differs from expected {expected}."
+    elif not current:
+        status = "UNKNOWN"
+        note = f"Source does not expose explicit contract token. {note}"
+    return {"status": status, "current": current or "N/A", "expected": expected, "note": note}
+
+
+def _render_contract_roll_panel(payload):
+    st.markdown(
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📅 Contract Rollover Watch</div></div><div class="terminal-body">',
+        unsafe_allow_html=True,
+    )
+    if not payload:
+        st.info("Rollover status unavailable.")
+        st.markdown("</div></div>", unsafe_allow_html=True)
+        return
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Feed Contract", payload.get("current", "N/A"))
+    c2.metric("Expected Front", payload.get("expected", "N/A"))
+    c3.metric("Status", payload.get("status", "UNKNOWN"))
+    msg = str(payload.get("note", ""))
+    if payload.get("status") == "ROLL":
+        st.warning(msg)
+    elif payload.get("status") == "OK":
+        st.success(msg)
+    else:
+        st.info(msg)
+    st.markdown("</div></div>", unsafe_allow_html=True)
+
+
 def _render_morning_playbook(playbook, nq_source, options_freshness, econ_freshness, breadth_freshness):
     if not playbook:
         st.info("Morning playbook unavailable.")
@@ -3402,6 +3827,10 @@ def run_full_app():
         st.session_state.rail_mode = "Auto"
     if "lean_overview" not in st.session_state:
         st.session_state.lean_overview = True
+    if "show_monthly_views" not in st.session_state:
+        st.session_state.show_monthly_views = False
+    if "news_signal_mode" not in st.session_state:
+        st.session_state.news_signal_mode = "High-Signal"
     if "heatmap_universe" not in st.session_state:
         st.session_state.heatmap_universe = "Nasdaq 100"
     if "heatmap_size_mode" not in st.session_state:
@@ -3491,6 +3920,17 @@ def run_full_app():
         "🧱 Lean Overview Layout",
         key="lean_overview",
         help="Collapses secondary overview panels into a compact expander.",
+    )
+    st.sidebar.checkbox(
+        "🗓 Show Monthly Views",
+        key="show_monthly_views",
+        help="Keeps monthly level tabs hidden by default to reduce clutter.",
+    )
+    st.sidebar.selectbox(
+        "📰 News Signal",
+        options=["High-Signal", "All"],
+        key="news_signal_mode",
+        help="High-Signal filters the right rail to macro/market-moving headlines.",
     )
     st.sidebar.checkbox("🗜 Compact Mode", key="compact_mode")
     manual_override = st.sidebar.checkbox("✏️ Manual NQ Override")
@@ -3642,6 +4082,26 @@ def run_full_app():
         nq_day_change_pct=nq_day_change_pct,
     )
     event_surprise_engine = _build_event_surprise_engine(econ_window)
+    history_20d = get_intraday_history("NQ=F", days=20, interval="5m") if data_0dte else pd.DataFrame()
+    trade_bias_engine = _build_trade_bias_engine(
+        data_0dte=data_0dte,
+        nq_now=nq_now,
+        regime_engine=regime_engine,
+        cross_asset_matrix=cross_asset_matrix,
+        event_risk=event_risk,
+        opening_structure=opening_structure,
+        breadth_internals=breadth_internals,
+    )
+    reaction_stats_df = _build_level_reaction_stats(data_0dte=data_0dte, intraday_hist=history_20d)
+    alert_center = _build_alert_center(
+        data_0dte=data_0dte,
+        nq_now=nq_now,
+        event_risk=event_risk,
+        ratio_meta=ratio_meta,
+        nq_source=nq_source,
+        qqq_source=qqq_source,
+    )
+    rollover_status = _build_contract_roll_status(nq_source=nq_source)
 
     nav_sections = {
         "Workspace": [
@@ -3667,8 +4127,12 @@ def run_full_app():
         nav_sections["Resources"].append(("📊 0DTE Levels", "📊 0DTE Levels"))
     if data_weekly:
         nav_sections["Resources"].append(("📊 Weekly Levels", "📊 Weekly Levels"))
-    if data_monthly:
+    if data_monthly and st.session_state.get("show_monthly_views", False):
         nav_sections["Resources"].append(("📊 Monthly Levels", "📊 Monthly Levels"))
+
+    available_views = {value for items in nav_sections.values() for _, value in items}
+    if st.session_state.get("main_left_nav") not in available_views:
+        st.session_state.main_left_nav = "📈 Market Overview"
 
     active_view_hint = st.session_state.get("main_left_nav", "📈 Market Overview")
     rail_auto_views = {"📈 Market Overview", "🚨 Event Intel", "📅 Earnings Calendar"}
@@ -3810,7 +4274,17 @@ def run_full_app():
                     event_risk=event_risk,
                 )
                 if st.session_state.get("lean_overview", True):
-                    with st.expander("Session Plan, References, and Event Risk", expanded=False):
+                    i1, i2 = st.columns(2)
+                    with i1:
+                        _render_trade_bias_panel(trade_bias_engine)
+                    with i2:
+                        _render_alert_center_panel(alert_center)
+                    with st.expander("Session Plan, References, Event Risk, and Reactions", expanded=False):
+                        _render_open_playbook_panel(
+                            playbook=playbook,
+                            data_0dte=data_0dte,
+                            nq_now=nq_now,
+                        )
                         _render_trade_plan_panel(
                             playbook=playbook,
                             data_0dte=data_0dte,
@@ -3822,15 +4296,35 @@ def run_full_app():
                             _render_overview_reference_snapshot(data_0dte, nq_now)
                         with rc2:
                             _render_overview_event_strip(event_risk)
+                        rr1, rr2 = st.columns(2)
+                        with rr1:
+                            _render_contract_roll_panel(rollover_status)
+                        with rr2:
+                            _render_level_reaction_panel(reaction_stats_df)
                 else:
+                    e1, e2 = st.columns(2)
+                    with e1:
+                        _render_trade_bias_panel(trade_bias_engine)
+                    with e2:
+                        _render_alert_center_panel(alert_center)
+                    _render_open_playbook_panel(
+                        playbook=playbook,
+                        data_0dte=data_0dte,
+                        nq_now=nq_now,
+                    )
                     _render_trade_plan_panel(
                         playbook=playbook,
                         data_0dte=data_0dte,
                         nq_now=nq_now,
                         event_risk=event_risk,
                     )
-                    _render_overview_reference_snapshot(data_0dte, nq_now)
-                    _render_overview_event_strip(event_risk)
+                    f1, f2 = st.columns(2)
+                    with f1:
+                        _render_overview_reference_snapshot(data_0dte, nq_now)
+                        _render_contract_roll_panel(rollover_status)
+                    with f2:
+                        _render_overview_event_strip(event_risk)
+                        _render_level_reaction_panel(reaction_stats_df)
 
                 st.markdown(
                     '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📊 Market Sentiment</div></div><div class="terminal-body">',
@@ -4508,7 +5002,10 @@ def run_full_app():
 
         elif active_view == "⚖️ Delta Charts":
             st.subheader("⚖️ Cumulative Delta")
-            for name, selected_data in [("0DTE", data_0dte), ("Weekly", data_weekly), ("Monthly", data_monthly)]:
+            delta_views = [("0DTE", data_0dte), ("Weekly", data_weekly)]
+            if st.session_state.get("show_monthly_views", False):
+                delta_views.append(("Monthly", data_monthly))
+            for name, selected_data in delta_views:
                 if not selected_data:
                     continue
                 st.markdown(f"**{name}**")
@@ -4576,15 +5073,24 @@ def run_full_app():
                     unsafe_allow_html=True,
                 )
                 rss_news = get_rss_news(finnhub_key)
-                visible_news = [
+                base_news = [
                     article
                     for article in (rss_news or [])
                     if str(article.get("headline", "")).strip()
                 ]
-                st.caption(f"{len(visible_news)} headlines • refreshes on app cycle")
+                news_mode = str(st.session_state.get("news_signal_mode", "High-Signal"))
+                if news_mode == "High-Signal":
+                    visible_news = [a for a in base_news if _is_high_signal_news(a)]
+                else:
+                    visible_news = list(base_news)
+                if not visible_news and base_news:
+                    visible_news = base_news[:12]
+                st.caption(
+                    f"{len(visible_news)} headlines • mode: {news_mode} • refreshes on app cycle"
+                )
                 st.markdown('<div class="news-rail">', unsafe_allow_html=True)
                 if visible_news:
-                    for article in visible_news[:24]:
+                    for article in visible_news[:20]:
                         raw_headline = str(article.get("headline", "No title")).strip()
                         headline_short = (raw_headline[:177] + "…") if len(raw_headline) > 178 else raw_headline
                         headline = html.escape(headline_short)

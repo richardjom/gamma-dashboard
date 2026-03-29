@@ -729,6 +729,28 @@ def get_nq_intraday_data():
     return None
 
 
+@st.cache_data(ttl=300)
+def get_intraday_history(symbol="NQ=F", days=45, interval="5m"):
+    """Extended intraday history (ET) for reaction/backtest style analytics."""
+    days = max(5, min(120, int(days)))
+    try:
+        ticker = yf.Ticker(symbol)
+        period = f"{max(20, int(days * 2.2))}d"
+        data = ticker.history(period=period, interval=interval, auto_adjust=False, prepost=True)
+        data = _to_et_index(data)
+        if data is None or data.empty:
+            return pd.DataFrame()
+        data = data.dropna(subset=["Open", "High", "Low", "Close"]).copy()
+        if data.empty:
+            return pd.DataFrame()
+        # Keep recent window only.
+        cutoff = datetime.now(ZoneInfo("America/New_York")) - timedelta(days=days)
+        data = data[data.index >= cutoff].copy()
+        return data
+    except Exception:
+        return pd.DataFrame()
+
+
 @st.cache_data(ttl=10)
 def get_qqq_price_with_source(finnhub_key):
     # Prefer Schwab so NQ and QQQ can come from the same venue/timebase.
