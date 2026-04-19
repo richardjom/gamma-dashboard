@@ -3186,6 +3186,7 @@ def _style_dashboard_figure(fig, height=260, margin=None):
 def _render_market_overview_visuals(
     data_0dte,
     nq_now,
+    qqq_price,
     nq_source,
     qqq_source,
     ratio_meta,
@@ -3375,35 +3376,108 @@ def _render_market_overview_visuals(
         st.plotly_chart(fig_event, use_container_width=True)
 
     with m3:
-        lvl_df = pd.DataFrame(
-            [
-                {"Level": "P Wall", "Dist": float(p_wall - nq_now)},
-                {"Level": "S Wall", "Dist": float(s_wall - nq_now)},
-                {"Level": "G Flip", "Dist": float(gf_level - nq_now)},
-                {"Level": "D Neutral", "Dist": float(dn_level - nq_now)},
-                {"Level": "P Floor", "Dist": float(p_floor - nq_now)},
-                {"Level": "S Floor", "Dist": float(s_floor - nq_now)},
-            ]
+        gex_df = (data_0dte or {}).get("df")
+        qqq_spot = _safe_float(qqq_price, None)
+        gex_ready = (
+            gex_df is not None
+            and not gex_df.empty
+            and "strike" in gex_df.columns
+            and "GEX" in gex_df.columns
+            and qqq_spot is not None
+            and qqq_spot > 0
         )
-        lvl_df = lvl_df.sort_values("Dist", ascending=False)
-        lvl_colors = ["#ff8b8b" if v > 0 else "#54efaa" if v < 0 else "#ffd37f" for v in lvl_df["Dist"]]
-        fig_levels = go.Figure(
-            data=[
-                go.Bar(
-                    x=lvl_df["Dist"],
-                    y=lvl_df["Level"],
-                    orientation="h",
-                    marker=dict(color=lvl_colors),
-                    text=[f"{v:+.0f}" for v in lvl_df["Dist"]],
-                    textposition="outside",
+        if gex_ready:
+            strike_map = (
+                gex_df.groupby("strike", as_index=False)["GEX"]
+                .sum()
+                .sort_values("strike")
+                .copy()
+            )
+            window = 0.065
+            low = float(qqq_spot * (1.0 - window))
+            high = float(qqq_spot * (1.0 + window))
+            strike_map = strike_map[(strike_map["strike"] >= low) & (strike_map["strike"] <= high)].copy()
+            if strike_map.empty:
+                strike_map = (
+                    gex_df.groupby("strike", as_index=False)["GEX"]
+                    .sum()
+                    .assign(spot_dist=lambda d: (d["strike"] - float(qqq_spot)).abs())
+                    .nsmallest(26, "spot_dist")
+                    .copy()
                 )
-            ]
-        )
-        fig_levels.add_vline(x=0, line_width=1, line_color="#7e90ab", line_dash="dot")
-        fig_levels.update_xaxes(title_text="Distance (pts)")
-        fig_levels.update_yaxes(title_text="")
-        _style_dashboard_figure(fig_levels, height=370, margin=dict(l=28, r=12, t=34, b=28))
-        st.plotly_chart(fig_levels, use_container_width=True)
+            if len(strike_map) > 22:
+                strike_map = (
+                    strike_map.assign(abs_gex=lambda d: d["GEX"].abs())
+                    .nlargest(22, "abs_gex")
+                    .sort_values("strike")
+                    .copy()
+                )
+            colors = ["#77ddb0" if float(v) >= 0 else "#f29595" for v in strike_map["GEX"]]
+            fig_gex = go.Figure(
+                data=[
+                    go.Bar(
+                        x=strike_map["GEX"],
+                        y=[f"{float(s):.2f}" for s in strike_map["strike"]],
+                        orientation="h",
+                        marker=dict(color=colors),
+                        text=[f"{float(v)/1_000_000:.1f}M" for v in strike_map["GEX"]],
+                        textposition="outside",
+                    )
+                ]
+            )
+            fig_gex.add_vline(x=0, line_width=1, line_color="#7e90ab", line_dash="dot")
+            g_flip_strike = _safe_float((data_0dte or {}).get("g_flip_strike"), None)
+            if g_flip_strike is not None:
+                fig_gex.add_hline(
+                    y=f"{float(g_flip_strike):.2f}",
+                    line_width=1,
+                    line_color="#ffd37f",
+                    line_dash="dot",
+                    annotation_text="Gamma Flip",
+                    annotation_position="top right",
+                )
+            fig_gex.add_hline(
+                y=f"{float(qqq_spot):.2f}",
+                line_width=1,
+                line_color="#38d7ff",
+                line_dash="dash",
+                annotation_text=f"QQQ Spot {float(qqq_spot):.2f}",
+                annotation_position="top left",
+            )
+            fig_gex.update_xaxes(title_text="Net GEX (notional)")
+            fig_gex.update_yaxes(title_text="QQQ Strike")
+            _style_dashboard_figure(fig_gex, height=370, margin=dict(l=20, r=14, t=34, b=28))
+            st.plotly_chart(fig_gex, use_container_width=True)
+        else:
+            lvl_df = pd.DataFrame(
+                [
+                    {"Level": "P Wall", "Dist": float(p_wall - nq_now)},
+                    {"Level": "S Wall", "Dist": float(s_wall - nq_now)},
+                    {"Level": "G Flip", "Dist": float(gf_level - nq_now)},
+                    {"Level": "D Neutral", "Dist": float(dn_level - nq_now)},
+                    {"Level": "P Floor", "Dist": float(p_floor - nq_now)},
+                    {"Level": "S Floor", "Dist": float(s_floor - nq_now)},
+                ]
+            )
+            lvl_df = lvl_df.sort_values("Dist", ascending=False)
+            lvl_colors = ["#ff8b8b" if v > 0 else "#54efaa" if v < 0 else "#ffd37f" for v in lvl_df["Dist"]]
+            fig_levels = go.Figure(
+                data=[
+                    go.Bar(
+                        x=lvl_df["Dist"],
+                        y=lvl_df["Level"],
+                        orientation="h",
+                        marker=dict(color=lvl_colors),
+                        text=[f"{v:+.0f}" for v in lvl_df["Dist"]],
+                        textposition="outside",
+                    )
+                ]
+            )
+            fig_levels.add_vline(x=0, line_width=1, line_color="#7e90ab", line_dash="dot")
+            fig_levels.update_xaxes(title_text="Distance (pts)")
+            fig_levels.update_yaxes(title_text="")
+            _style_dashboard_figure(fig_levels, height=370, margin=dict(l=28, r=12, t=34, b=28))
+            st.plotly_chart(fig_levels, use_container_width=True)
 
     has_tape = nq_data is not None and not nq_data.empty and "Close" in nq_data.columns
     b1, b2 = st.columns([1.0, 2.0] if has_tape else [1.0, 1.0], gap="small")
@@ -4805,6 +4879,7 @@ def run_full_app():
                 _render_market_overview_visuals(
                     data_0dte=data_0dte,
                     nq_now=nq_now,
+                    qqq_price=qqq_price,
                     nq_source=nq_source,
                     qqq_source=qqq_source,
                     ratio_meta=ratio_meta,
