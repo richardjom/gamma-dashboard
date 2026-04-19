@@ -62,9 +62,26 @@ def _theme_css(bg_color, card_bg, text_color, accent_color, border_color, compac
     st.markdown(
         f"""
 <style>
+    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap');
+    :root {{
+        --viz-bg-0: #0a1019;
+        --viz-bg-1: #121a27;
+        --viz-panel: #151f2d;
+        --viz-panel-2: #101823;
+        --viz-text: #e6efff;
+        --viz-muted: #8ea1bf;
+        --viz-cyan: #38d7ff;
+        --viz-green: #54efaa;
+        --viz-amber: #ffd37f;
+        --viz-red: #ff8b8b;
+    }}
     .stApp {{
         background: radial-gradient(circle at 20% -20%, #171b22 0%, {bg_color} 38%, #090d14 100%);
         color: {text_color};
+        font-family: "Space Grotesk", "Trebuchet MS", sans-serif;
+    }}
+    html, body, [class*="css"] {{
+        font-family: "Space Grotesk", "Trebuchet MS", sans-serif;
     }}
     section.main > div {{
         padding-top: 0.5rem;
@@ -74,9 +91,11 @@ def _theme_css(bg_color, card_bg, text_color, accent_color, border_color, compac
         font-weight: 800;
         letter-spacing: 0.2px;
         margin-bottom: 0.2rem;
+        font-family: "Space Grotesk", "Trebuchet MS", sans-serif;
     }}
     h2, h3 {{
         color: #e9edf5;
+        font-family: "Space Grotesk", "Trebuchet MS", sans-serif;
     }}
     [data-testid="stHorizontalBlock"] {{
         gap: 0.55rem !important;
@@ -506,6 +525,145 @@ def _theme_css(bg_color, card_bg, text_color, accent_color, border_color, compac
         font-size: 10px;
         margin: 2px 0 0 0;
     }}
+    .viz-hero {{
+        border: 1px solid #2b3749;
+        border-radius: 16px;
+        overflow: hidden;
+        margin-bottom: 10px;
+        background:
+            radial-gradient(circle at 84% -20%, rgba(56, 215, 255, 0.20), transparent 55%),
+            radial-gradient(circle at 14% 118%, rgba(84, 239, 170, 0.13), transparent 45%),
+            linear-gradient(170deg, #172334 0%, #0e1520 100%);
+        box-shadow: 0 14px 30px rgba(2, 8, 18, 0.45);
+    }}
+    .viz-hero-top {{
+        padding: 14px 16px 12px 16px;
+        border-bottom: 1px solid #2a3444;
+    }}
+    .viz-kicker {{
+        margin: 0;
+        color: #98a9c4;
+        text-transform: uppercase;
+        letter-spacing: 0.34px;
+        font-size: 11px;
+        font-weight: 700;
+    }}
+    .viz-big {{
+        margin: 4px 0 0 0;
+        color: #eaf4ff;
+        font-weight: 700;
+        font-size: clamp(30px, 5.6vw, 52px);
+        line-height: 1.0;
+        letter-spacing: 0.25px;
+        font-family: "JetBrains Mono", "Consolas", monospace;
+    }}
+    .viz-chip-row {{
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 10px;
+    }}
+    .viz-chip {{
+        border-radius: 999px;
+        border: 1px solid #2a3544;
+        padding: 4px 10px;
+        font-size: 11px;
+        font-weight: 700;
+        color: #dce7fa;
+        background: #152132;
+    }}
+    .viz-chip.pos {{
+        border-color: #2f7d56;
+        color: #9affc9;
+        background: rgba(47, 125, 86, 0.24);
+    }}
+    .viz-chip.warn {{
+        border-color: #7d6430;
+        color: #ffe3a7;
+        background: rgba(166, 123, 32, 0.24);
+    }}
+    .viz-chip.neg {{
+        border-color: #7e3434;
+        color: #ffc2c2;
+        background: rgba(176, 56, 56, 0.22);
+    }}
+    .viz-kpi-grid {{
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: 8px;
+        padding: 12px 14px 14px 14px;
+    }}
+    .viz-kpi-card {{
+        border: 1px solid #2b3748;
+        border-radius: 10px;
+        background: linear-gradient(180deg, #152132 0%, #101823 100%);
+        padding: 8px 10px;
+    }}
+    .viz-kpi-card .k {{
+        margin: 0;
+        color: #8ca0bc;
+        font-size: 10px;
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
+        font-weight: 700;
+    }}
+    .viz-kpi-card .v {{
+        margin: 3px 0 0 0;
+        color: #e8f1ff;
+        font-size: 18px;
+        line-height: 1.1;
+        font-weight: 700;
+        font-family: "JetBrains Mono", "Consolas", monospace;
+    }}
+    .viz-kpi-card .s {{
+        margin: 4px 0 0 0;
+        color: #88a0be;
+        font-size: 10px;
+        line-height: 1.15;
+    }}
+    .viz-alert-grid {{
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+        margin: 8px 0 10px 0;
+    }}
+    .viz-alert {{
+        border: 1px solid #2a3545;
+        border-radius: 10px;
+        padding: 8px 10px;
+        background: #111a27;
+    }}
+    .viz-alert.high {{
+        border-color: #7e3434;
+        background: rgba(176, 56, 56, 0.14);
+    }}
+    .viz-alert.med {{
+        border-color: #7d6430;
+        background: rgba(166, 123, 32, 0.14);
+    }}
+    .viz-alert.low {{
+        border-color: #2f5f8b;
+        background: rgba(44, 79, 120, 0.14);
+    }}
+    .viz-alert .sev {{
+        margin: 0;
+        font-size: 10px;
+        letter-spacing: 0.25px;
+        font-weight: 700;
+        text-transform: uppercase;
+        color: #97abc7;
+    }}
+    .viz-alert .txt {{
+        margin: 3px 0 0 0;
+        font-size: 12px;
+        color: #e1ecff;
+        line-height: 1.2;
+    }}
+    .viz-alert .sub {{
+        margin: 2px 0 0 0;
+        font-size: 10px;
+        color: #89a1be;
+    }}
     .sentiment-meter {{
         height: 22px;
         background: linear-gradient(90deg, #FF4444 0%, #FFAA00 50%, #44FF44 100%);
@@ -641,6 +799,12 @@ def _theme_css(bg_color, card_bg, text_color, accent_color, border_color, compac
         .futures-strip {{
             grid-template-columns: repeat(3, minmax(0, 1fr));
         }}
+        .viz-kpi-grid {{
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }}
+        .viz-alert-grid {{
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }}
     }}
     @media (max-width: 900px) {{
         .terminal-command-grid {{
@@ -648,6 +812,12 @@ def _theme_css(bg_color, card_bg, text_color, accent_color, border_color, compac
         }}
         .futures-strip {{
             grid-template-columns: repeat(2, minmax(0, 1fr));
+        }}
+        .viz-kpi-grid {{
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }}
+        .viz-alert-grid {{
+            grid-template-columns: repeat(1, minmax(0, 1fr));
         }}
     }}
     {compact_css}
@@ -991,6 +1161,67 @@ def _compute_tight_ratio(nq_now, qqq_price, nq_source="", qqq_source=""):
         "uncertainty_pts": float(uncertainty_pts),
         "source_pair": f"{nq_source} / {qqq_source}",
     }
+
+
+def _stabilize_level_mapping(nq_now, qqq_price_live, cboe_price, ratio_meta):
+    ratio_meta = dict(ratio_meta or {})
+    qqq_live = float(qqq_price_live or 0.0)
+    qqq_cboe = float(cboe_price or 0.0)
+
+    qqq_level_anchor = qqq_live if qqq_live > 0 else qqq_cboe
+    mode = "Live"
+    note = ""
+
+    if qqq_live > 0 and qqq_cboe > 0:
+        q_dev_pct = abs(qqq_live - qqq_cboe) / qqq_cboe * 100.0
+        if q_dev_pct > 1.75:
+            qqq_level_anchor = qqq_cboe
+            mode = "CBOE Anchored"
+            note = (
+                f"QQQ live vs CBOE diverged by {q_dev_pct:.2f}%. "
+                f"Level engine anchored to CBOE spot ({qqq_cboe:.2f})."
+            )
+        elif q_dev_pct > 0.75:
+            qqq_level_anchor = (0.70 * qqq_live) + (0.30 * qqq_cboe)
+            mode = "Blended Live/CBOE"
+            note = (
+                f"QQQ live vs CBOE divergence {q_dev_pct:.2f}%. "
+                "Using blended anchor for level mapping."
+            )
+
+    ratio_live = float(ratio_meta.get("ratio", 0.0) or 0.0)
+    ratio_anchor = float(nq_now / qqq_level_anchor) if qqq_level_anchor > 0 else ratio_live
+
+    if ratio_live <= 0:
+        ratio_final = ratio_anchor
+        mode = f"{mode} (anchor only)"
+    else:
+        r_dev_pct = abs(ratio_live - ratio_anchor) / max(1e-9, ratio_anchor) * 100.0
+        if r_dev_pct > 1.75:
+            ratio_final = ratio_anchor
+            mode = f"{mode} (ratio reset)"
+            if not note:
+                note = (
+                    f"Live ratio deviated {r_dev_pct:.2f}% from options anchor. "
+                    "Resetting to anchored ratio for levels."
+                )
+        elif r_dev_pct > 0.75:
+            ratio_final = (0.75 * ratio_live) + (0.25 * ratio_anchor)
+            mode = f"{mode} (ratio blend)"
+        else:
+            ratio_final = ratio_live
+
+    ratio_meta.update(
+        {
+            "ratio": float(ratio_final),
+            "ratio_live": float(ratio_live),
+            "ratio_levels_anchor": float(ratio_anchor),
+            "ratio_mode": mode,
+            "qqq_live": float(qqq_live),
+            "qqq_levels_anchor": float(qqq_level_anchor),
+        }
+    )
+    return ratio_meta, float(ratio_final), float(qqq_level_anchor), note
 
 
 def _parse_macro_number(raw):
@@ -1546,6 +1777,8 @@ def _render_data_health_strip(nq_source, qqq_source, ratio_meta, data_0dte, mark
     ratio_meta = ratio_meta or {}
     ratio_val = float(ratio_meta.get("ratio", 0.0) or 0.0)
     ratio_raw = float(ratio_meta.get("raw_ratio", ratio_val) or ratio_val)
+    ratio_anchor = float(ratio_meta.get("ratio_levels_anchor", ratio_val) or ratio_val)
+    ratio_mode = str(ratio_meta.get("ratio_mode", "Live"))
     ratio_unc = float(ratio_meta.get("uncertainty_pts", 0.0) or 0.0)
     ratio_conf = int(ratio_meta.get("confidence_score", 0) or 0)
     ratio_label = str(ratio_meta.get("confidence_label", "Low"))
@@ -1573,7 +1806,7 @@ def _render_data_health_strip(nq_source, qqq_source, ratio_meta, data_0dte, mark
         {
             "title": "NQ↔QQQ Ratio",
             "value": f"{ratio_val:.4f}",
-            "sub": f"raw {ratio_raw:.4f} • ±{ratio_unc:.0f} pts • {ratio_conf}%",
+            "sub": f"{ratio_mode} • live {ratio_raw:.4f} • anchor {ratio_anchor:.4f} • ±{ratio_unc:.0f} pts • {ratio_conf}%",
             "status": ratio_status,
         },
         {
@@ -2935,6 +3168,338 @@ def _render_cot_dealer_panel(cot_payload):
     st.markdown("</div></div>", unsafe_allow_html=True)
 
 
+def _style_dashboard_figure(fig, height=260, margin=None):
+    fig.update_layout(
+        height=height,
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(
+            family="Space Grotesk, Trebuchet MS, sans-serif",
+            color="#dce8fb",
+            size=12,
+        ),
+        margin=margin or dict(l=14, r=14, t=38, b=14),
+    )
+    return fig
+
+
+def _render_market_overview_visuals(
+    data_0dte,
+    nq_now,
+    nq_source,
+    qqq_source,
+    ratio_meta,
+    sentiment_score,
+    fg,
+    event_risk,
+    market_data,
+    trade_bias_engine,
+    alert_center,
+    reaction_stats_df,
+    nq_data,
+    nq_day_change_pct,
+):
+    if not data_0dte:
+        st.info("No 0DTE data available for dashboard view.")
+        return
+
+    dn_level = float(data_0dte.get("dn_nq", nq_now))
+    gf_level = float(data_0dte.get("g_flip_nq", nq_now))
+    p_wall = float(data_0dte.get("p_wall", nq_now))
+    p_floor = float(data_0dte.get("p_floor", nq_now))
+    s_wall = float(data_0dte.get("s_wall", p_wall))
+    s_floor = float(data_0dte.get("s_floor", p_floor))
+
+    dn_distance = float(nq_now - dn_level)
+    gf_distance = float(nq_now - gf_level)
+    expected_move = float(data_0dte.get("nq_em_full", 0.0) or 0.0)
+    net_delta = float(data_0dte.get("net_delta", 0.0) or 0.0)
+
+    bias = str((trade_bias_engine or {}).get("bias", "NEUTRAL")).upper()
+    bias_score = int((trade_bias_engine or {}).get("score", 0) or 0)
+    bias_conviction = str((trade_bias_engine or {}).get("conviction", "Low"))
+    bias_meter = int(max(0, min(100, (bias_score + 100) / 2.0)))
+
+    ratio_conf = int((ratio_meta or {}).get("confidence_score", 0) or 0)
+    ratio_lbl = str((ratio_meta or {}).get("confidence_label", "Low"))
+    ratio_mode = str((ratio_meta or {}).get("ratio_mode", "Live"))
+    ratio_unc = float((ratio_meta or {}).get("uncertainty_pts", 0.0) or 0.0)
+
+    fg_score = int(_safe_float((fg or {}).get("score"), 50) or 50)
+    fg_rating = str((fg or {}).get("rating", "Neutral")).title()
+
+    high_ct = int((event_risk or {}).get("today_high_count", 0) or 0)
+    med_ct = int((event_risk or {}).get("today_medium_count", 0) or 0)
+    total_events = int((event_risk or {}).get("total_events", 0) or 0)
+    lockout = bool((event_risk or {}).get("lockout_active"))
+    next_event = ((event_risk or {}).get("next_events") or [None])[0]
+    next_event_txt = "-"
+    if next_event:
+        next_event_txt = (
+            f"{next_event.get('time_et', 'n/a')} "
+            f"{str(next_event.get('event', 'Event'))[:28]}"
+        )
+
+    regime_txt = "NEGATIVE GAMMA" if gf_distance > 0 else "POSITIVE GAMMA"
+    regime_cls = "neg" if gf_distance > 0 else "pos"
+    ratio_cls = "pos" if ratio_lbl.lower() == "high" else "warn" if ratio_lbl.lower() == "medium" else "neg"
+    event_cls = "neg" if lockout else "warn" if high_ct > 0 else "pos"
+    bias_cls = "pos" if bias == "LONG" else "neg" if bias == "SHORT" else "warn"
+
+    kpis = [
+        ("Dist GF", f"{gf_distance:+.0f}", f"vs {gf_level:.2f}"),
+        ("Dist DN", f"{dn_distance:+.0f}", f"vs {dn_level:.2f}"),
+        ("Expected", f"+/-{expected_move:.0f}", "0DTE range"),
+        ("Wall Span", f"{abs(p_wall - p_floor):.0f}", f"{p_floor:.0f}-{p_wall:.0f}"),
+        ("Net Delta", f"{net_delta:,.0f}", "book pressure"),
+        ("Ratio Err", f"+/-{ratio_unc:.0f}", ratio_mode),
+    ]
+    kpi_html = []
+    for title, val, sub in kpis:
+        kpi_html.append(
+            '<div class="viz-kpi-card">'
+            f'<p class="k">{html.escape(title)}</p>'
+            f'<p class="v">{html.escape(str(val))}</p>'
+            f'<p class="s">{html.escape(str(sub))}</p>'
+            "</div>"
+        )
+
+    st.markdown(
+        f"""
+        <div class="viz-hero">
+            <div class="viz-hero-top">
+                <p class="viz-kicker">NQ Visual Command Center</p>
+                <p class="viz-big">{nq_now:,.2f}</p>
+                <div class="viz-chip-row">
+                    <span class="viz-chip {regime_cls}">{regime_txt}</span>
+                    <span class="viz-chip {bias_cls}">Bias {bias} ({bias_score:+d})</span>
+                    <span class="viz-chip {ratio_cls}">Ratio {ratio_lbl} {ratio_conf}%</span>
+                    <span class="viz-chip {event_cls}">Event {'LOCKOUT' if lockout else 'CLEAR'}</span>
+                    <span class="viz-chip">NQ {html.escape(str(nq_source))}</span>
+                    <span class="viz-chip">QQQ {html.escape(str(qqq_source))}</span>
+                </div>
+            </div>
+            <div class="viz-kpi-grid">
+                {''.join(kpi_html)}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    m1, m2, m3 = st.columns([1.20, 1.05, 1.75], gap="small")
+    with m1:
+        fig_meter = go.Figure()
+        fig_meter.add_trace(
+            go.Indicator(
+                mode="gauge+number",
+                value=float(bias_meter),
+                title={"text": "Bias Pressure"},
+                domain={"x": [0.0, 0.48], "y": [0.0, 1.0]},
+                gauge={
+                    "axis": {"range": [0, 100]},
+                    "bar": {"color": "#44e8b7"},
+                    "steps": [
+                        {"range": [0, 35], "color": "rgba(255,139,139,0.24)"},
+                        {"range": [35, 65], "color": "rgba(255,211,127,0.22)"},
+                        {"range": [65, 100], "color": "rgba(84,239,170,0.24)"},
+                    ],
+                },
+            )
+        )
+        fig_meter.add_trace(
+            go.Indicator(
+                mode="gauge+number",
+                value=float(sentiment_score),
+                title={"text": "Sentiment"},
+                domain={"x": [0.52, 1.0], "y": [0.0, 1.0]},
+                gauge={
+                    "axis": {"range": [0, 100]},
+                    "bar": {"color": "#38d7ff"},
+                    "steps": [
+                        {"range": [0, 35], "color": "rgba(255,139,139,0.24)"},
+                        {"range": [35, 65], "color": "rgba(255,211,127,0.22)"},
+                        {"range": [65, 100], "color": "rgba(84,239,170,0.24)"},
+                    ],
+                },
+            )
+        )
+        _style_dashboard_figure(fig_meter, height=248, margin=dict(l=8, r=8, t=38, b=4))
+        st.plotly_chart(fig_meter, use_container_width=True)
+
+    level_conf = data_0dte.get("level_confidence", {}) or {}
+    conf_counts = {"High": 0, "Medium": 0, "Low": 0}
+    for payload in level_conf.values():
+        lbl = str((payload or {}).get("label", "Low")).title()
+        if lbl in conf_counts:
+            conf_counts[lbl] += 1
+    if conf_counts["High"] + conf_counts["Medium"] + conf_counts["Low"] == 0:
+        conf_counts = {"High": 2, "Medium": 2, "Low": 2}
+
+    with m2:
+        fig_conf = go.Figure(
+            data=[
+                go.Pie(
+                    labels=list(conf_counts.keys()),
+                    values=list(conf_counts.values()),
+                    hole=0.62,
+                    marker=dict(colors=["#54efaa", "#ffd37f", "#ff8b8b"]),
+                    textinfo="percent",
+                    sort=False,
+                )
+            ]
+        )
+        fig_conf.update_layout(
+            annotations=[dict(text="Levels", showarrow=False, font=dict(size=12, color="#dce8fb"))]
+        )
+        _style_dashboard_figure(fig_conf, height=178, margin=dict(l=8, r=8, t=28, b=4))
+        st.plotly_chart(fig_conf, use_container_width=True)
+
+        other_events = max(0, total_events - high_ct - med_ct)
+        fig_event = go.Figure(
+            data=[
+                go.Pie(
+                    labels=["High", "Medium", "Other"],
+                    values=[max(1, high_ct), max(1, med_ct), max(1, other_events)],
+                    hole=0.62,
+                    marker=dict(colors=["#ff8b8b", "#ffd37f", "#38d7ff"]),
+                    textinfo="none",
+                    sort=False,
+                )
+            ]
+        )
+        fig_event.update_layout(
+            annotations=[dict(text=f"FG {fg_score}<br>{html.escape(fg_rating)}", showarrow=False, font=dict(size=11, color="#dce8fb"))]
+        )
+        _style_dashboard_figure(fig_event, height=178, margin=dict(l=8, r=8, t=14, b=2))
+        st.plotly_chart(fig_event, use_container_width=True)
+
+    with m3:
+        lvl_df = pd.DataFrame(
+            [
+                {"Level": "P Wall", "Dist": float(p_wall - nq_now)},
+                {"Level": "S Wall", "Dist": float(s_wall - nq_now)},
+                {"Level": "G Flip", "Dist": float(gf_level - nq_now)},
+                {"Level": "D Neutral", "Dist": float(dn_level - nq_now)},
+                {"Level": "P Floor", "Dist": float(p_floor - nq_now)},
+                {"Level": "S Floor", "Dist": float(s_floor - nq_now)},
+            ]
+        )
+        lvl_df = lvl_df.sort_values("Dist", ascending=False)
+        lvl_colors = ["#ff8b8b" if v > 0 else "#54efaa" if v < 0 else "#ffd37f" for v in lvl_df["Dist"]]
+        fig_levels = go.Figure(
+            data=[
+                go.Bar(
+                    x=lvl_df["Dist"],
+                    y=lvl_df["Level"],
+                    orientation="h",
+                    marker=dict(color=lvl_colors),
+                    text=[f"{v:+.0f}" for v in lvl_df["Dist"]],
+                    textposition="outside",
+                )
+            ]
+        )
+        fig_levels.add_vline(x=0, line_width=1, line_color="#7e90ab", line_dash="dot")
+        fig_levels.update_xaxes(title_text="Distance (pts)")
+        fig_levels.update_yaxes(title_text="")
+        _style_dashboard_figure(fig_levels, height=370, margin=dict(l=28, r=12, t=34, b=28))
+        st.plotly_chart(fig_levels, use_container_width=True)
+
+    b1, b2 = st.columns([1.0, 2.0], gap="small")
+    with b1:
+        pulse = [
+            ("NQ", float(nq_day_change_pct)),
+            ("ES", float(_safe_float((market_data.get("es", {}) or {}).get("change_pct"), 0.0) or 0.0)),
+            ("YM", float(_safe_float((market_data.get("ym", {}) or {}).get("change_pct"), 0.0) or 0.0)),
+            ("RTY", float(_safe_float((market_data.get("rty", {}) or {}).get("change_pct"), 0.0) or 0.0)),
+            ("GC", float(_safe_float((market_data.get("gc", {}) or {}).get("change_pct"), 0.0) or 0.0)),
+            ("DXY", float(_safe_float((market_data.get("dxy", {}) or {}).get("change_pct"), 0.0) or 0.0)),
+            ("VIX", float(_safe_float((market_data.get("vix", {}) or {}).get("change_pct"), 0.0) or 0.0)),
+        ]
+        pulse_df = pd.DataFrame(pulse, columns=["Asset", "Change"])
+        pulse_colors = ["#54efaa" if v >= 0 else "#ff8b8b" for v in pulse_df["Change"]]
+        fig_pulse = go.Figure(
+            data=[go.Bar(x=pulse_df["Asset"], y=pulse_df["Change"], marker=dict(color=pulse_colors))]
+        )
+        fig_pulse.add_hline(y=0, line_width=1, line_color="#7e90ab", line_dash="dot")
+        fig_pulse.update_yaxes(title_text="%")
+        _style_dashboard_figure(fig_pulse, height=220, margin=dict(l=14, r=8, t=30, b=24))
+        st.plotly_chart(fig_pulse, use_container_width=True)
+
+        if reaction_stats_df is not None and not reaction_stats_df.empty:
+            rs = reaction_stats_df.copy()
+            rs["HoldPct"] = pd.to_numeric(
+                rs["Hold %"].astype(str).str.replace("%", "", regex=False),
+                errors="coerce",
+            ).fillna(0.0)
+            fig_react = go.Figure(
+                data=[
+                    go.Bar(
+                        x=rs["Level"],
+                        y=rs["HoldPct"],
+                        marker=dict(color="#38d7ff"),
+                        text=[f"{v:.0f}%" for v in rs["HoldPct"]],
+                        textposition="outside",
+                    )
+                ]
+            )
+            fig_react.update_yaxes(title_text="Hold %", range=[0, 100])
+            _style_dashboard_figure(fig_react, height=208, margin=dict(l=14, r=8, t=28, b=44))
+            st.plotly_chart(fig_react, use_container_width=True)
+
+    with b2:
+        if nq_data is not None and not nq_data.empty and "Close" in nq_data.columns:
+            tape_df = nq_data.copy()
+            close = tape_df["Close"].astype(float).tail(220)
+            fig_tape = go.Figure()
+            fig_tape.add_trace(
+                go.Scatter(
+                    x=close.index,
+                    y=close.values,
+                    mode="lines",
+                    line=dict(color="#57dfff", width=2),
+                    fill="tozeroy",
+                    fillcolor="rgba(56,215,255,0.12)",
+                    name="NQ",
+                )
+            )
+            fig_tape.add_hline(y=gf_level, line_color="#ff9b9b", line_dash="dot", annotation_text="GF")
+            fig_tape.add_hline(y=dn_level, line_color="#ffd37f", line_dash="dot", annotation_text="DN")
+            fig_tape.add_hline(y=p_wall, line_color="#9ee6c2", line_dash="dash", annotation_text="Wall")
+            fig_tape.add_hline(y=p_floor, line_color="#9ee6c2", line_dash="dash", annotation_text="Floor")
+            fig_tape.update_xaxes(title_text="")
+            fig_tape.update_yaxes(title_text="Price")
+            _style_dashboard_figure(fig_tape, height=432, margin=dict(l=16, r=12, t=28, b=18))
+            st.plotly_chart(fig_tape, use_container_width=True)
+        else:
+            st.info("Intraday tape unavailable.")
+
+    active_alerts = alert_center or []
+    if active_alerts:
+        snippets = []
+        sev_to_cls = {"HIGH": "high", "MED": "med", "LOW": "low"}
+        for row in active_alerts[:4]:
+            sev = str(row.get("Severity", "LOW")).upper()
+            cls = sev_to_cls.get(sev, "low")
+            snippets.append(
+                f"""
+                <div class="viz-alert {cls}">
+                    <p class="sev">{sev}</p>
+                    <p class="txt">{html.escape(str(row.get("Alert", "Alert")))}</p>
+                    <p class="sub">{html.escape(str(row.get("Detail", ""))[:88])}</p>
+                </div>
+                """
+            )
+        st.markdown(f'<div class="viz-alert-grid">{"".join(snippets)}</div>', unsafe_allow_html=True)
+    else:
+        st.caption("No active alerts. Next event: " + next_event_txt)
+
+    st.caption(
+        f"Next event: {next_event_txt} | Conviction: {bias_conviction} | "
+        f"High impact today: {high_ct} | Medium impact today: {med_ct}"
+    )
+
+
 def _render_overview_reference_snapshot(data_0dte, nq_now):
     st.markdown(
         '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📍 Key References (Compact)</div></div><div class="terminal-body">',
@@ -3907,33 +4472,30 @@ def run_full_app():
         toggle_theme()
         st.rerun()
 
-    st.sidebar.checkbox("🧼 Focus Mode", key="focus_mode")
-    st.sidebar.checkbox("🧭 Show Command Bar", key="show_command_bar")
-    st.sidebar.checkbox("📈 Show Futures Strip", key="show_futures_strip")
-    st.sidebar.selectbox(
-        "📰 Right Rail",
-        options=["Auto", "Always", "Hidden"],
-        key="rail_mode",
-        help="Auto shows the right rail on overview/event/earnings views and expands center space on other views.",
-    )
-    st.sidebar.checkbox(
-        "🧱 Lean Overview Layout",
-        key="lean_overview",
-        help="Collapses secondary overview panels into a compact expander.",
-    )
-    st.sidebar.checkbox(
-        "🗓 Show Monthly Views",
-        key="show_monthly_views",
-        help="Keeps monthly level tabs hidden by default to reduce clutter.",
-    )
-    st.sidebar.selectbox(
-        "📰 News Signal",
-        options=["High-Signal", "All"],
-        key="news_signal_mode",
-        help="High-Signal filters the right rail to macro/market-moving headlines.",
-    )
-    st.sidebar.checkbox("🗜 Compact Mode", key="compact_mode")
-    manual_override = st.sidebar.checkbox("✏️ Manual NQ Override")
+    with st.sidebar.expander("Layout & Display", expanded=False):
+        st.checkbox("🧼 Focus Mode", key="focus_mode")
+        st.checkbox("🧭 Show Command Bar", key="show_command_bar")
+        st.checkbox("📈 Show Futures Strip", key="show_futures_strip")
+        st.selectbox(
+            "📰 Right Rail",
+            options=["Auto", "Always", "Hidden"],
+            key="rail_mode",
+            help="Auto shows the right rail on overview/event/earnings views and expands center space on other views.",
+        )
+        st.selectbox(
+            "📰 News Signal",
+            options=["High-Signal", "All"],
+            key="news_signal_mode",
+            help="High-Signal filters the right rail to macro/market-moving headlines.",
+        )
+        st.checkbox(
+            "🗓 Show Monthly Views",
+            key="show_monthly_views",
+            help="Keeps monthly level tabs hidden by default to reduce clutter.",
+        )
+        st.checkbox("🗜 Compact Mode", key="compact_mode")
+
+    manual_override = st.sidebar.checkbox("✏️ Manual NQ Price")
     auto_refresh = st.sidebar.checkbox("🔄 Auto-Refresh (60s)", value=True)
     if auto_refresh:
         refresh_interval = st.sidebar.slider("Refresh Interval (seconds)", 30, 300, 60)
@@ -3956,6 +4518,8 @@ def run_full_app():
     if not finnhub_key:
         st.warning("Enter your Finnhub API key in the sidebar to load data.")
         st.stop()
+
+    level_mapping_note = ""
 
     with st.spinner("🔄 Loading multi-timeframe data..."):
         qqq_price, qqq_source = get_qqq_price_with_source(finnhub_key)
@@ -4020,6 +4584,13 @@ def run_full_app():
             )
             ratio = float(ratio_meta.get("ratio", 0.0) or 0.0)
 
+        ratio_meta, ratio, qqq_price_levels, level_mapping_note = _stabilize_level_mapping(
+            nq_now=nq_now,
+            qqq_price_live=qqq_price,
+            cboe_price=cboe_price,
+            ratio_meta=ratio_meta,
+        )
+
         exp_0dte, exp_weekly, exp_monthly = get_expirations_by_type(df_raw)
 
         data_0dte = None
@@ -4028,17 +4599,17 @@ def run_full_app():
 
         if exp_0dte:
             data_0dte = process_expiration(
-                df_raw, exp_0dte, qqq_price, ratio, nq_now, options_ticker="QQQ"
+                df_raw, exp_0dte, qqq_price_levels, ratio, nq_now, options_ticker="QQQ"
             )
 
         if exp_weekly and exp_weekly != exp_0dte:
             data_weekly = process_expiration(
-                df_raw, exp_weekly, qqq_price, ratio, nq_now, options_ticker="QQQ"
+                df_raw, exp_weekly, qqq_price_levels, ratio, nq_now, options_ticker="QQQ"
             )
 
         if exp_monthly and exp_monthly not in [exp_0dte, exp_weekly]:
             data_monthly = process_expiration(
-                df_raw, exp_monthly, qqq_price, ratio, nq_now, options_ticker="QQQ"
+                df_raw, exp_monthly, qqq_price_levels, ratio, nq_now, options_ticker="QQQ"
             )
 
         market_data = get_market_overview_yahoo()
@@ -4193,6 +4764,8 @@ def run_full_app():
                 )
             strip_html.append("</div>")
             st.markdown("".join(strip_html), unsafe_allow_html=True)
+        if level_mapping_note:
+            st.warning(level_mapping_note)
 
         if active_view == "📈 Market Overview":
             with st.expander("Data Health & Feed Diagnostics", expanded=False):
@@ -4205,66 +4778,21 @@ def run_full_app():
                     finnhub_key=finnhub_key,
                 )
             if data_0dte:
-                dn_distance = nq_now - data_0dte["dn_nq"]
-                gf_distance = nq_now - data_0dte["g_flip_nq"]
-                above_gf = gf_distance > 0
-                regime = "🔴 NEGATIVE GAMMA" if above_gf else "🟢 POSITIVE GAMMA"
-                regime_desc = "Unstable / Whipsaw Risk" if above_gf else "Stable / Range-Bound"
-                if abs(dn_distance) > 200:
-                    if dn_distance > 0:
-                        bias = "⬇️ SHORT BIAS"
-                        bias_desc = f"Price extended {dn_distance:.0f}pts above Delta Neutral"
-                    else:
-                        bias = "⬆️ LONG BIAS"
-                        bias_desc = f"Price {abs(dn_distance):.0f}pts below Delta Neutral"
-                else:
-                    bias = "⚖️ NEUTRAL"
-                    bias_desc = "Price near Delta Neutral equilibrium"
-                key_level_price = data_0dte["g_flip_nq"] if above_gf else data_0dte["dn_nq"]
-                key_level_name = "Gamma Flip" if above_gf else "Delta Neutral"
-                em_points = data_0dte.get("nq_em_full", 0)
-                level_gap = abs(data_0dte["p_wall"] - data_0dte["p_floor"])
-                source_age = get_quote_age_label("NQ=F")
-                ratio_conf = int(ratio_meta.get("confidence_score", 0) or 0)
-                ratio_lbl = str(ratio_meta.get("confidence_label", "Low"))
-                ratio_unc = float(ratio_meta.get("uncertainty_pts", 0.0) or 0.0)
-
-                st.markdown(
-                    f"""
-                <div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🎯 Session Quick Glance</div></div><div class="terminal-body"><div class="quick-glance">
-                    <div class="quick-grid">
-                        <div>
-                            <p style="color: #888; margin: 0; font-size: 14px;">CURRENT PRICE</p>
-                            <p style="font-size: 32px; margin: 5px 0; color: {accent_color}; font-weight: bold;">{nq_now:.2f}</p>
-                            <p style="color: #888; margin: 0; font-size: 12px;">{nq_source}</p>
-                        </div>
-                        <div>
-                            <p style="color: #888; margin: 0; font-size: 14px;">REGIME</p>
-                            <p style="font-size: 24px; margin: 5px 0; font-weight: bold;">{regime}</p>
-                            <p style="color: #888; margin: 0; font-size: 12px;">{regime_desc}</p>
-                        </div>
-                        <div>
-                            <p style="color: #888; margin: 0; font-size: 14px;">BIAS</p>
-                            <p style="font-size: 24px; margin: 5px 0; font-weight: bold;">{bias}</p>
-                            <p style="color: #888; margin: 0; font-size: 12px;">{bias_desc}</p>
-                        </div>
-                        <div>
-                            <p style="color: #888; margin: 0; font-size: 14px;">KEY LEVEL</p>
-                            <p style="font-size: 24px; margin: 5px 0; font-weight: bold;">{key_level_price:.2f}</p>
-                            <p style="color: #888; margin: 0; font-size: 12px;">{key_level_name}</p>
-                        </div>
-                    </div>
-                    <div class="quick-grid-compact">
-                        <div class="quick-stat"><p class="label">GAMMA FLIP DISTANCE</p><p class="value">{gf_distance:+.0f} pts</p><p class="sub">vs {data_0dte['g_flip_nq']:.2f}</p></div>
-                        <div class="quick-stat"><p class="label">DELTA NEUTRAL DISTANCE</p><p class="value">{dn_distance:+.0f} pts</p><p class="sub">vs {data_0dte['dn_nq']:.2f}</p></div>
-                        <div class="quick-stat"><p class="label">EXPECTED MOVE</p><p class="value">±{em_points:.0f}</p><p class="sub">0DTE implied range</p></div>
-                        <div class="quick-stat"><p class="label">WALL-FLOOR SPAN</p><p class="value">{level_gap:.0f} pts</p><p class="sub">{data_0dte['p_floor']:.0f} → {data_0dte['p_wall']:.0f}</p></div>
-                        <div class="quick-stat"><p class="label">DATA HEALTH</p><p class="value">{source_age}</p><p class="sub">{nq_source}</p></div>
-                        <div class="quick-stat"><p class="label">RATIO QUALITY</p><p class="value">{ratio_conf}%</p><p class="sub">{ratio_lbl} • ±{ratio_unc:.0f} pts map error</p></div>
-                    </div>
-                </div></div></div>
-                """,
-                    unsafe_allow_html=True,
+                _render_market_overview_visuals(
+                    data_0dte=data_0dte,
+                    nq_now=nq_now,
+                    nq_source=nq_source,
+                    qqq_source=qqq_source,
+                    ratio_meta=ratio_meta,
+                    sentiment_score=sentiment_score,
+                    fg=fg,
+                    event_risk=event_risk,
+                    market_data=market_data,
+                    trade_bias_engine=trade_bias_engine,
+                    alert_center=alert_center,
+                    reaction_stats_df=reaction_stats_df,
+                    nq_data=nq_data,
+                    nq_day_change_pct=nq_day_change_pct,
                 )
 
                 playbook = _build_morning_playbook(
@@ -4273,39 +4801,11 @@ def run_full_app():
                     nq_now=nq_now,
                     event_risk=event_risk,
                 )
-                if st.session_state.get("lean_overview", True):
-                    i1, i2 = st.columns(2)
-                    with i1:
+                with st.expander("Deep Dive Modules", expanded=False):
+                    d1, d2 = st.columns(2)
+                    with d1:
                         _render_trade_bias_panel(trade_bias_engine)
-                    with i2:
-                        _render_alert_center_panel(alert_center)
-                    with st.expander("Session Plan, References, Event Risk, and Reactions", expanded=False):
-                        _render_open_playbook_panel(
-                            playbook=playbook,
-                            data_0dte=data_0dte,
-                            nq_now=nq_now,
-                        )
-                        _render_trade_plan_panel(
-                            playbook=playbook,
-                            data_0dte=data_0dte,
-                            nq_now=nq_now,
-                            event_risk=event_risk,
-                        )
-                        rc1, rc2 = st.columns(2)
-                        with rc1:
-                            _render_overview_reference_snapshot(data_0dte, nq_now)
-                        with rc2:
-                            _render_overview_event_strip(event_risk)
-                        rr1, rr2 = st.columns(2)
-                        with rr1:
-                            _render_contract_roll_panel(rollover_status)
-                        with rr2:
-                            _render_level_reaction_panel(reaction_stats_df)
-                else:
-                    e1, e2 = st.columns(2)
-                    with e1:
-                        _render_trade_bias_panel(trade_bias_engine)
-                    with e2:
+                    with d2:
                         _render_alert_center_panel(alert_center)
                     _render_open_playbook_panel(
                         playbook=playbook,
@@ -4318,92 +4818,16 @@ def run_full_app():
                         nq_now=nq_now,
                         event_risk=event_risk,
                     )
-                    f1, f2 = st.columns(2)
-                    with f1:
+                    r1, r2 = st.columns(2)
+                    with r1:
                         _render_overview_reference_snapshot(data_0dte, nq_now)
-                        _render_contract_roll_panel(rollover_status)
-                    with f2:
+                    with r2:
                         _render_overview_event_strip(event_risk)
+                    r3, r4 = st.columns(2)
+                    with r3:
+                        _render_contract_roll_panel(rollover_status)
+                    with r4:
                         _render_level_reaction_panel(reaction_stats_df)
-
-                st.markdown(
-                    '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📊 Market Sentiment</div></div><div class="terminal-body">',
-                    unsafe_allow_html=True,
-                )
-                sc1, sc2 = st.columns([3, 1])
-                with sc1:
-                    marker_left = max(1, min(99, sentiment_score))
-                    st.markdown(
-                        f"""
-                    <div class="sentiment-wrap">
-                        <div class="sentiment-meter"><div class="sentiment-marker" style="left: {marker_left}%;"></div></div>
-                        <div class="sentiment-axis">
-                            <span>0 (Bearish)</span><span>50 (Neutral)</span><span>100 (Bullish)</span>
-                        </div>
-                    </div>
-                    """,
-                        unsafe_allow_html=True,
-                    )
-                with sc2:
-                    sentiment_text = (
-                        "BEARISH"
-                        if sentiment_score < 30
-                        else "CAUTIOUS BEARISH"
-                        if sentiment_score < 45
-                        else "NEUTRAL"
-                        if sentiment_score < 55
-                        else "CAUTIOUS BULLISH"
-                        if sentiment_score < 70
-                        else "BULLISH"
-                    )
-                    sentiment_badge = (
-                        "bear"
-                        if sentiment_score < 45
-                        else "neutral"
-                        if sentiment_score < 55
-                        else "bull"
-                    )
-                    sentiment_arrow = "↓" if sentiment_score < 45 else "→" if sentiment_score < 55 else "↑"
-                    st.markdown(
-                        f"""
-                        <div class="score-panel">
-                            <p class="score-kicker">Score</p>
-                            <p class="score-value">{sentiment_score}/100</p>
-                            <span class="score-badge {sentiment_badge}">{sentiment_arrow} {sentiment_text}</span>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-                    fg_score = int(_safe_float((fg or {}).get("score"), 50) or 50)
-                    fg_rating_raw = str((fg or {}).get("rating", "Neutral"))
-                    fg_rating = html.escape(fg_rating_raw.title())
-                    fg_lower = fg_rating_raw.lower()
-                    if "fear" in fg_lower and "extreme" in fg_lower:
-                        fg_badge = "bull"
-                        fg_arrow = "↑"
-                    elif "fear" in fg_lower:
-                        fg_badge = "neutral"
-                        fg_arrow = "→"
-                    elif "greed" in fg_lower and "extreme" in fg_lower:
-                        fg_badge = "bear"
-                        fg_arrow = "↓"
-                    elif "greed" in fg_lower:
-                        fg_badge = "neutral"
-                        fg_arrow = "→"
-                    else:
-                        fg_badge = "neutral"
-                        fg_arrow = "→"
-                    st.markdown(
-                        f"""
-                        <div class="score-panel" style="margin-top:10px;">
-                            <p class="score-kicker">Fear &amp; Greed</p>
-                            <p class="score-value">{fg_score}/100</p>
-                            <span class="score-badge {fg_badge}">{fg_arrow} {fg_rating}</span>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-                st.markdown("</div></div>", unsafe_allow_html=True)
             else:
                 st.info("No 0DTE data available for compact overview.")
 
@@ -4523,9 +4947,28 @@ def run_full_app():
                 results_df["Conf Score"] = results_df["Level"].map(
                     lambda lvl: conf_map.get(lvl, {}).get("score", 0)
                 )
+                conf_snapshot = results_df[["Level", "Confidence", "Conf Score"]].copy()
+                conf_snapshot["Conf Score"] = conf_snapshot["Conf Score"].fillna(0).astype(int)
+                conf_snapshot = conf_snapshot.sort_values("Conf Score", ascending=False)
+                high_ct = int((conf_snapshot["Confidence"] == "High").sum())
+                med_ct = int((conf_snapshot["Confidence"] == "Medium").sum())
+                low_ct = int((conf_snapshot["Confidence"] == "Low").sum())
+
+                st.markdown("**Level Confidence Snapshot**")
+                c_high, c_med, c_low = st.columns(3)
+                c_high.metric("High Confidence", str(high_ct))
+                c_med.metric("Medium Confidence", str(med_ct))
+                c_low.metric("Low Confidence", str(low_ct))
+                st.dataframe(
+                    conf_snapshot.head(8),
+                    width="stretch",
+                    hide_index=True,
+                    height=320,
+                )
+
                 table_height = max(300, min(650, 52 + (len(results_df) + 1) * 35))
                 st.dataframe(
-                    results_df[["Icon", "Level", "Price", "Width", "Confidence", "Conf Score"]],
+                    results_df[["Icon", "Level", "Confidence", "Conf Score", "Price", "Width"]],
                     width="stretch",
                     hide_index=True,
                     height=table_height,
