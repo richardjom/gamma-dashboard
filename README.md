@@ -1,3 +1,14 @@
+---
+title: Gamma Dashboard
+emoji: 📈
+colorFrom: blue
+colorTo: green
+sdk: streamlit
+sdk_version: "1.49.0"
+app_file: app.py
+pinned: false
+---
+
 # Gamma Dashboard
 
 Quick setup and run instructions
