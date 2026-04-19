@@ -42,3 +42,14 @@ streamlit run nq_app.py
 
 Notes:
 - `.venv` is gitignored. Use the `requirements.txt` for reproducible installs.
+
+## Deploy to Hugging Face Space via GitHub Actions
+
+This repo includes `.github/workflows/sync.yml` to mirror `main` to your Hugging Face Space.
+
+1. In GitHub repo settings, add Actions secret:
+   - `HF_TOKEN`: a Hugging Face User Access Token with write access to your Space.
+2. Push changes to `main`.
+3. In GitHub, verify workflow **Sync to Hugging Face** passes.
+
+Your Space should target `app.py` (already included in this repo).

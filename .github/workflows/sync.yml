@@ -15,4 +15,4 @@ jobs:
       - name: Push to Hub
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: git push --force https://richardjom:$HF_TOKEN@https://huggingface.co/spaces/Richardjom/gexdashboard main
+        run: git push --force https://richardjom:${HF_TOKEN}@huggingface.co/spaces/Richardjom/gexdashboard HEAD:main

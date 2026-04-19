@@ -6,3 +6,4 @@ requests>=2.31,<3
 yfinance>=0.2.50,<1
 finnhub-python==2.4.25
 feedparser==6.0.11
+beautifulsoup4>=4.12,<5
