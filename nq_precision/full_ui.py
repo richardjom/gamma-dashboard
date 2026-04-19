@@ -3405,7 +3405,8 @@ def _render_market_overview_visuals(
         _style_dashboard_figure(fig_levels, height=370, margin=dict(l=28, r=12, t=34, b=28))
         st.plotly_chart(fig_levels, use_container_width=True)
 
-    b1, b2 = st.columns([1.0, 2.0], gap="small")
+    has_tape = nq_data is not None and not nq_data.empty and "Close" in nq_data.columns
+    b1, b2 = st.columns([1.0, 2.0] if has_tape else [1.0, 1.0], gap="small")
     with b1:
         pulse = [
             ("NQ", float(nq_day_change_pct)),
@@ -3448,7 +3449,7 @@ def _render_market_overview_visuals(
             st.plotly_chart(fig_react, use_container_width=True)
 
     with b2:
-        if nq_data is not None and not nq_data.empty and "Close" in nq_data.columns:
+        if has_tape:
             tape_df = nq_data.copy()
             close = tape_df["Close"].astype(float).tail(220)
             fig_tape = go.Figure()
@@ -3472,25 +3473,48 @@ def _render_market_overview_visuals(
             _style_dashboard_figure(fig_tape, height=432, margin=dict(l=16, r=12, t=28, b=18))
             st.plotly_chart(fig_tape, use_container_width=True)
         else:
-            st.info("Intraday tape unavailable.")
+            fallback_rows = [
+                {"Metric": "Ratio Quality", "Value": float(ratio_conf)},
+                {"Metric": "Bias Score", "Value": float(max(0, min(100, bias_meter)))},
+                {"Metric": "Sentiment", "Value": float(max(0, min(100, sentiment_score)))},
+                {"Metric": "Fear & Greed", "Value": float(max(0, min(100, fg_score)))},
+            ]
+            fallback_df = pd.DataFrame(fallback_rows)
+            fig_fallback = go.Figure(
+                data=[
+                    go.Bar(
+                        x=fallback_df["Metric"],
+                        y=fallback_df["Value"],
+                        marker=dict(color=["#38d7ff", "#54efaa", "#ffd37f", "#ff8b8b"]),
+                        text=[f"{v:.0f}" for v in fallback_df["Value"]],
+                        textposition="outside",
+                    )
+                ]
+            )
+            fig_fallback.update_yaxes(title_text="Score", range=[0, 100])
+            _style_dashboard_figure(fig_fallback, height=300, margin=dict(l=14, r=10, t=32, b=28))
+            st.plotly_chart(fig_fallback, use_container_width=True)
+            st.caption("Intraday tape unavailable. Showing structural score snapshot.")
 
     active_alerts = alert_center or []
     if active_alerts:
-        snippets = []
         sev_to_cls = {"HIGH": "high", "MED": "med", "LOW": "low"}
-        for row in active_alerts[:4]:
+        alert_rows = active_alerts[:4]
+        alert_cols = st.columns(len(alert_rows)) if alert_rows else []
+        for idx, row in enumerate(alert_rows):
             sev = str(row.get("Severity", "LOW")).upper()
             cls = sev_to_cls.get(sev, "low")
-            snippets.append(
-                f"""
-                <div class="viz-alert {cls}">
-                    <p class="sev">{sev}</p>
-                    <p class="txt">{html.escape(str(row.get("Alert", "Alert")))}</p>
-                    <p class="sub">{html.escape(str(row.get("Detail", ""))[:88])}</p>
-                </div>
-                """
-            )
-        st.markdown(f'<div class="viz-alert-grid">{"".join(snippets)}</div>', unsafe_allow_html=True)
+            with alert_cols[idx]:
+                st.markdown(
+                    (
+                        f'<div class="viz-alert {cls}">'
+                        f'<p class="sev">{sev}</p>'
+                        f'<p class="txt">{html.escape(str(row.get("Alert", "Alert")))}</p>'
+                        f'<p class="sub">{html.escape(str(row.get("Detail", ""))[:88])}</p>'
+                        "</div>"
+                    ),
+                    unsafe_allow_html=True,
+                )
     else:
         st.caption("No active alerts. Next event: " + next_event_txt)
 
@@ -4385,9 +4409,9 @@ def run_full_app():
     if "focus_mode" not in st.session_state:
         st.session_state.focus_mode = True
     if "show_command_bar" not in st.session_state:
-        st.session_state.show_command_bar = True
+        st.session_state.show_command_bar = False
     if "show_futures_strip" not in st.session_state:
-        st.session_state.show_futures_strip = True
+        st.session_state.show_futures_strip = False
     if "rail_mode" not in st.session_state:
         st.session_state.rail_mode = "Auto"
     if "lean_overview" not in st.session_state:
