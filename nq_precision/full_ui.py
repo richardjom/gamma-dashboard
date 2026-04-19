@@ -3417,7 +3417,7 @@ def _render_market_overview_visuals(
                 data=[
                     go.Bar(
                         x=strike_map["GEX"],
-                        y=[f"{float(s):.2f}" for s in strike_map["strike"]],
+                        y=strike_map["strike"].astype(float),
                         orientation="h",
                         marker=dict(color=colors),
                         text=[f"{float(v)/1_000_000:.1f}M" for v in strike_map["GEX"]],
@@ -3429,7 +3429,7 @@ def _render_market_overview_visuals(
             g_flip_strike = _safe_float((data_0dte or {}).get("g_flip_strike"), None)
             if g_flip_strike is not None:
                 fig_gex.add_hline(
-                    y=f"{float(g_flip_strike):.2f}",
+                    y=float(g_flip_strike),
                     line_width=1,
                     line_color="#ffd37f",
                     line_dash="dot",
@@ -3437,7 +3437,7 @@ def _render_market_overview_visuals(
                     annotation_position="top right",
                 )
             fig_gex.add_hline(
-                y=f"{float(qqq_spot):.2f}",
+                y=float(qqq_spot),
                 line_width=1,
                 line_color="#38d7ff",
                 line_dash="dash",
@@ -3445,7 +3445,7 @@ def _render_market_overview_visuals(
                 annotation_position="top left",
             )
             fig_gex.update_xaxes(title_text="Net GEX (notional)")
-            fig_gex.update_yaxes(title_text="QQQ Strike")
+            fig_gex.update_yaxes(title_text="QQQ Strike", tickformat=".2f")
             _style_dashboard_figure(fig_gex, height=370, margin=dict(l=20, r=14, t=34, b=28))
             st.plotly_chart(fig_gex, use_container_width=True)
         else:
