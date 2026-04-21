@@ -220,15 +220,15 @@ def _candidate_schwab_symbols(futures_symbol):
     return deduped
 
 
-def _get_schwab_access_token():
+def _get_schwab_access_token(force_refresh=False):
     static_token = _get_secret("SCHWAB_ACCESS_TOKEN")
-    if static_token:
+    if static_token and not force_refresh:
         return static_token
 
     now = time.time()
     cached_token = st.session_state.get("schwab_access_token")
     cached_exp = st.session_state.get("schwab_access_expires_at", 0)
-    if cached_token and now < (cached_exp - 30):
+    if cached_token and now < (cached_exp - 30) and not force_refresh:
         return cached_token
 
     app_key = _get_secret("SCHWAB_APP_KEY")
@@ -414,7 +414,17 @@ def _get_schwab_quotes_with_status(symbols):
         if response.status_code == 401:
             st.session_state.pop("schwab_access_token", None)
             st.session_state.pop("schwab_access_expires_at", None)
-            return {}, "auth_401"
+            retry_token = _get_schwab_access_token(force_refresh=True)
+            if not retry_token:
+                return {}, "auth_401_refresh_failed"
+            response = requests.get(
+                SCHWAB_QUOTES_URL,
+                params={"symbols": ",".join(symbols), "fields": "quote"},
+                headers={"Authorization": f"Bearer {retry_token}"},
+                timeout=10,
+            )
+            if response.status_code == 401:
+                return {}, "auth_401_after_refresh"
         if response.status_code != 200:
             return {}, f"http_{response.status_code}"
         payload = response.json()
