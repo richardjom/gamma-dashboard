@@ -396,9 +396,14 @@ def _validate_jump(symbol, price):
 
 
 def _get_schwab_quotes(symbols):
+    quotes, _status = _get_schwab_quotes_with_status(symbols)
+    return quotes
+
+
+def _get_schwab_quotes_with_status(symbols):
     token = _get_schwab_access_token()
     if not token:
-        return {}
+        return {}, "token_unavailable"
     try:
         response = requests.get(
             SCHWAB_QUOTES_URL,
@@ -409,47 +414,83 @@ def _get_schwab_quotes(symbols):
         if response.status_code == 401:
             st.session_state.pop("schwab_access_token", None)
             st.session_state.pop("schwab_access_expires_at", None)
-            return {}
+            return {}, "auth_401"
         if response.status_code != 200:
-            return {}
+            return {}, f"http_{response.status_code}"
         payload = response.json()
-        return payload if isinstance(payload, dict) else {}
+        if not isinstance(payload, dict):
+            return {}, "payload_invalid"
+        if not payload:
+            return {}, "empty_payload"
+        return payload, "ok"
     except Exception:
-        return {}
+        return {}, "request_exception"
 
 
 def _get_schwab_futures_price(futures_symbol):
     candidates = _candidate_schwab_symbols(futures_symbol)
-    quotes = _get_schwab_quotes(candidates)
+    quotes, quote_status = _get_schwab_quotes_with_status(candidates)
     if not quotes:
-        return None, "Schwab unavailable"
+        return None, f"Schwab unavailable ({quote_status})"
 
     lookup_keys = []
     for sym in candidates:
         lookup_keys.extend([sym, sym.lstrip("/")])
     lookup_keys.append(futures_symbol)
 
+    rejects = {
+        "missing_price": 0,
+        "range": 0,
+        "stale": 0,
+        "jump": 0,
+    }
+
     for key in lookup_keys:
         if key in quotes:
             price = _extract_quote_price(quotes[key])
             ts = _extract_quote_timestamp_ms(quotes[key])
-            if price and _validate_price_range(futures_symbol, price) and _validate_stale_quote(ts):
-                if _validate_jump(futures_symbol, price):
-                    _set_quote_meta(futures_symbol, f"Schwab ({key})", ts or int(time.time() * 1000))
-                    return price, f"Schwab ({key})"
+            if not price:
+                rejects["missing_price"] += 1
+                continue
+            if not _validate_price_range(futures_symbol, price):
+                rejects["range"] += 1
+                continue
+            if not _validate_stale_quote(ts):
+                rejects["stale"] += 1
+                continue
+            if not _validate_jump(futures_symbol, price):
+                rejects["jump"] += 1
+                continue
+            _set_quote_meta(futures_symbol, f"Schwab ({key})", ts or int(time.time() * 1000))
+            return price, f"Schwab ({key})"
 
     for quote_key, value in quotes.items():
         price = _extract_quote_price(value)
         ts = _extract_quote_timestamp_ms(value)
-        if price and _validate_price_range(futures_symbol, price) and _validate_stale_quote(ts):
-            if _validate_jump(futures_symbol, price):
-                _set_quote_meta(
-                    futures_symbol,
-                    f"Schwab ({quote_key})",
-                    ts or int(time.time() * 1000),
-                )
-                return price, f"Schwab ({quote_key})"
-    return None, "Schwab unavailable"
+        if not price:
+            rejects["missing_price"] += 1
+            continue
+        if not _validate_price_range(futures_symbol, price):
+            rejects["range"] += 1
+            continue
+        if not _validate_stale_quote(ts):
+            rejects["stale"] += 1
+            continue
+        if not _validate_jump(futures_symbol, price):
+            rejects["jump"] += 1
+            continue
+        _set_quote_meta(
+            futures_symbol,
+            f"Schwab ({quote_key})",
+            ts or int(time.time() * 1000),
+        )
+        return price, f"Schwab ({quote_key})"
+
+    detail = (
+        f"quote_rejects missing={rejects['missing_price']} "
+        f"range={rejects['range']} stale={rejects['stale']} jump={rejects['jump']}"
+    )
+    return None, f"Schwab unavailable ({detail})"
 
 
 def _get_yahoo_chart_price(symbol, min_price=0):
@@ -468,13 +509,18 @@ def _get_yahoo_chart_price(symbol, min_price=0):
     return None
 
 
-def _schwab_cross_source_ok(yahoo_symbol, schwab_price):
+def _schwab_cross_source_check(yahoo_symbol, schwab_price):
     yahoo_price = _get_yahoo_chart_price(yahoo_symbol, min_price=0)
     if not yahoo_price:
-        return True
+        return True, None, None, None
     allowed_dev_pct = float(_get_secret("MAX_CROSS_SOURCE_DEVIATION_PCT", 3.0))
     deviation = abs(schwab_price - yahoo_price) / yahoo_price * 100
-    return deviation <= allowed_dev_pct
+    return deviation <= allowed_dev_pct, float(deviation), float(allowed_dev_pct), float(yahoo_price)
+
+
+def _schwab_cross_source_ok(yahoo_symbol, schwab_price):
+    ok, _dev, _allowed, _yahoo = _schwab_cross_source_check(yahoo_symbol, schwab_price)
+    return ok
 
 
 def get_runtime_health():
@@ -493,6 +539,22 @@ def get_runtime_health():
     )
     token = _get_schwab_access_token() if (app_key and app_secret and refresh) else None
     checks.append(("Schwab token refresh", bool(token), "OK" if token else "Failed/unavailable"))
+
+    nq_probe_price, nq_probe_source = _get_schwab_futures_price("NQ=F")
+    if nq_probe_price:
+        cross_ok, dev, allowed, yahoo_px = _schwab_cross_source_check("NQ=F", nq_probe_price)
+        if cross_ok:
+            checks.append(("Schwab NQ quote path", True, f"OK via {nq_probe_source}"))
+        else:
+            checks.append(
+                (
+                    "Schwab NQ quote path",
+                    False,
+                    f"{nq_probe_source}; rejected by cross-check dev {dev:.2f}% > {allowed:.2f}% (Yahoo {yahoo_px:.2f})",
+                )
+            )
+    else:
+        checks.append(("Schwab NQ quote path", False, str(nq_probe_source)))
     return checks
 
 
@@ -699,11 +761,22 @@ def get_cboe_options_live(ticker="QQQ"):
 @st.cache_data(ttl=10)
 def get_nq_price_auto(_finnhub_key):
     schwab_price, schwab_source = _get_schwab_futures_price("NQ=F")
-    if schwab_price and schwab_price > 10000 and _schwab_cross_source_ok("NQ=F", schwab_price):
-        return float(schwab_price), schwab_source
+    if schwab_price and schwab_price > 10000:
+        cross_ok, dev, allowed, yahoo_px = _schwab_cross_source_check("NQ=F", schwab_price)
+        if cross_ok:
+            st.session_state["diag::NQ_SOURCE_PATH"] = f"Schwab selected: {schwab_source}"
+            return float(schwab_price), schwab_source
+        st.session_state["diag::NQ_SOURCE_PATH"] = (
+            f"Schwab rejected by cross-check ({dev:.2f}% > {allowed:.2f}% vs Yahoo {yahoo_px:.2f}); "
+            "using Yahoo fallback"
+        )
+    else:
+        st.session_state["diag::NQ_SOURCE_PATH"] = f"Schwab unavailable: {schwab_source}"
 
     yahoo_price = _get_yahoo_chart_price("NQ=F", min_price=10000)
     if yahoo_price:
+        if "diag::NQ_SOURCE_PATH" not in st.session_state:
+            st.session_state["diag::NQ_SOURCE_PATH"] = "Using Yahoo fallback"
         return float(yahoo_price), "Yahoo Finance"
 
     try:
