@@ -179,6 +179,7 @@ def _map_futures_symbol(futures_symbol):
         "RTY=F": _get_secret("SCHWAB_SYMBOL_RTY", ""),
         "DX=F": _get_secret("SCHWAB_SYMBOL_DX", ""),
         "GC=F": _get_secret("SCHWAB_SYMBOL_GC", ""),
+        "CL=F": _get_secret("SCHWAB_SYMBOL_CL", ""),
     }
     if overrides.get(futures_symbol):
         return overrides[futures_symbol]
@@ -189,6 +190,7 @@ def _map_futures_symbol(futures_symbol):
         "RTY=F": "/RTY",
         "DX=F": "/DX",
         "GC=F": "/GC",
+        "CL=F": "/CL",
     }
     return defaults.get(futures_symbol, futures_symbol)
 
@@ -365,6 +367,7 @@ def _validate_price_range(symbol, price):
         "RTY=F": (500, 5000),
         "DX=F": (50, 200),
         "GC=F": (1000, 5000),
+        "CL=F": (20, 200),
     }
     min_p, max_p = symbol_ranges.get(symbol, (0.01, 1e9))
     return min_p <= price <= max_p
@@ -888,6 +891,9 @@ def get_market_overview_yahoo():
         "ym": "YM=F",
         "rty": "RTY=F",
         "gc": "GC=F",
+        "cl": "CL=F",
+        "iwm": "IWM",
+        "dia": "DIA",
         "10y": "^TNX",
         "dxy": "DX=F",
     }
@@ -927,6 +933,7 @@ def get_market_overview_yahoo():
         "rty": "RTY=F",
         "dxy": "DX=F",
         "gc": "GC=F",
+        "cl": "CL=F",
     }.items():
         schwab_price, source = _get_schwab_futures_price(symbol)
         if schwab_price:

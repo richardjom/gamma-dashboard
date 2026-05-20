@@ -3598,6 +3598,166 @@ def _render_market_overview_visuals(
     )
 
 
+def _render_clean_dashboard(
+    nq_now,
+    nq_day_change_pct,
+    nq_source,
+    qqq_price,
+    qqq_source,
+    nq_data,
+    data_0dte,
+    market_data,
+    event_risk,
+):
+    st.markdown(
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🛰 Asset Command Strip</div></div><div class="terminal-body">',
+        unsafe_allow_html=True,
+    )
+    es = market_data.get("es", {}) or {}
+    rty = market_data.get("rty", {}) or {}
+    iwm = market_data.get("iwm", {}) or {}
+    dia = market_data.get("dia", {}) or {}
+    gc = market_data.get("gc", {}) or {}
+    cl = market_data.get("cl", {}) or {}
+
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    nq_change = float(nq_now * (_safe_float(nq_day_change_pct, 0.0) / 100.0))
+    c1.metric("NQ", f"{nq_now:,.2f}", f"{nq_change:+.2f} ({_safe_float(nq_day_change_pct, 0.0):+.2f}%)")
+    c1.caption(f"{nq_source} • {get_quote_age_label('NQ=F')}")
+    c2.metric("ES", f"{_safe_float(es.get('price'), 0.0):,.2f}", f"{_safe_float(es.get('change_pct'), 0.0):+.2f}%")
+    c2.caption(str(es.get("source", "source n/a")))
+    c3.metric("IWM", f"{_safe_float(iwm.get('price'), 0.0):,.2f}", f"{_safe_float(iwm.get('change_pct'), 0.0):+.2f}%")
+    c3.caption(str(iwm.get("source", "source n/a")))
+    c4.metric("DIA", f"{_safe_float(dia.get('price'), 0.0):,.2f}", f"{_safe_float(dia.get('change_pct'), 0.0):+.2f}%")
+    c4.caption(str(dia.get("source", "source n/a")))
+    c5.metric("GC", f"{_safe_float(gc.get('price'), 0.0):,.2f}", f"{_safe_float(gc.get('change_pct'), 0.0):+.2f}%")
+    c5.caption(str(gc.get("source", "source n/a")))
+    c6.metric("CL", f"{_safe_float(cl.get('price'), 0.0):,.2f}", f"{_safe_float(cl.get('change_pct'), 0.0):+.2f}%")
+    c6.caption(str(cl.get("source", "source n/a")))
+    st.markdown("</div></div>", unsafe_allow_html=True)
+
+    main_col, side_col = st.columns([4.6, 1.6], gap="small")
+    with main_col:
+        st.markdown(
+            '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📈 NQ Tape</div></div><div class="terminal-body">',
+            unsafe_allow_html=True,
+        )
+        if nq_data is not None and not nq_data.empty and "Close" in nq_data.columns:
+            close = nq_data["Close"].astype(float)
+            fig_nq = go.Figure()
+            fig_nq.add_trace(
+                go.Scatter(
+                    x=close.index,
+                    y=close.values,
+                    mode="lines",
+                    line=dict(color="#7ed7ff", width=2),
+                    fill="tozeroy",
+                    fillcolor="rgba(126,215,255,0.12)",
+                    name="NQ",
+                )
+            )
+            if data_0dte:
+                fig_nq.add_hline(
+                    y=float(data_0dte.get("g_flip_nq", nq_now)),
+                    line_color="#ffd37f",
+                    line_dash="dot",
+                    annotation_text="Gamma Flip",
+                )
+                fig_nq.add_hline(
+                    y=float(data_0dte.get("dn_nq", nq_now)),
+                    line_color="#9ee6c2",
+                    line_dash="dot",
+                    annotation_text="Delta Neutral",
+                )
+            _style_dashboard_figure(fig_nq, height=370, margin=dict(l=14, r=10, t=24, b=14))
+            st.plotly_chart(fig_nq, use_container_width=True)
+        else:
+            st.info("NQ intraday feed unavailable.")
+        st.markdown("</div></div>", unsafe_allow_html=True)
+
+        st.markdown(
+            '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧲 QQQ Gamma by Strike</div></div><div class="terminal-body">',
+            unsafe_allow_html=True,
+        )
+        gex_df = (data_0dte or {}).get("df")
+        qqq_spot = _safe_float(qqq_price, None)
+        if gex_df is not None and not gex_df.empty and qqq_spot and qqq_spot > 0 and "GEX" in gex_df.columns:
+            strike_map = (
+                gex_df.groupby("strike", as_index=False)["GEX"]
+                .sum()
+                .sort_values("strike")
+                .copy()
+            )
+            low = float(qqq_spot * 0.94)
+            high = float(qqq_spot * 1.06)
+            strike_map = strike_map[(strike_map["strike"] >= low) & (strike_map["strike"] <= high)].copy()
+            if strike_map.empty:
+                strike_map = (
+                    gex_df.groupby("strike", as_index=False)["GEX"]
+                    .sum()
+                    .assign(spot_dist=lambda d: (d["strike"] - float(qqq_spot)).abs())
+                    .nsmallest(24, "spot_dist")
+                )
+            if len(strike_map) > 28:
+                strike_map = (
+                    strike_map.assign(abs_gex=lambda d: d["GEX"].abs())
+                    .nlargest(28, "abs_gex")
+                    .sort_values("strike")
+                )
+            colors = ["#77ddb0" if float(v) >= 0 else "#f29595" for v in strike_map["GEX"]]
+            fig_gex = go.Figure(
+                data=[
+                    go.Bar(
+                        x=strike_map["GEX"],
+                        y=strike_map["strike"].astype(float),
+                        orientation="h",
+                        marker=dict(color=colors),
+                        text=[f"{float(v)/1_000_000:.1f}M" for v in strike_map["GEX"]],
+                        textposition="outside",
+                    )
+                ]
+            )
+            fig_gex.add_vline(x=0, line_color="#7e90ab", line_dash="dot")
+            fig_gex.add_hline(
+                y=float(qqq_spot),
+                line_color="#38d7ff",
+                line_dash="dash",
+                annotation_text=f"QQQ Spot {float(qqq_spot):.2f}",
+            )
+            g_flip = _safe_float((data_0dte or {}).get("g_flip_strike"), None)
+            if g_flip:
+                fig_gex.add_hline(y=float(g_flip), line_color="#ffd37f", line_dash="dot", annotation_text="Gamma Flip")
+            fig_gex.update_xaxes(title_text="Net GEX")
+            fig_gex.update_yaxes(title_text="QQQ Strike", tickformat=".2f")
+            _style_dashboard_figure(fig_gex, height=340, margin=dict(l=14, r=10, t=24, b=14))
+            st.plotly_chart(fig_gex, use_container_width=True)
+            st.caption(f"QQQ source: {qqq_source}")
+        else:
+            st.info("QQQ gamma map unavailable.")
+        st.markdown("</div></div>", unsafe_allow_html=True)
+
+    with side_col:
+        st.markdown(
+            '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🏦 Rates & Macro</div></div><div class="terminal-body">',
+            unsafe_allow_html=True,
+        )
+        tnx = market_data.get("10y", {}) or {}
+        dxy = market_data.get("dxy", {}) or {}
+        vix = market_data.get("vix", {}) or {}
+        vvix = market_data.get("vvix", {}) or {}
+        st.metric("US10Y", f"{_safe_float(tnx.get('price'), 0.0):.2f}", f"{_safe_float(tnx.get('change'), 0.0):+.2f}")
+        st.metric("DXY", f"{_safe_float(dxy.get('price'), 0.0):.2f}", f"{_safe_float(dxy.get('change_pct'), 0.0):+.2f}%")
+        st.metric("VIX", f"{_safe_float(vix.get('price'), 0.0):.2f}", f"{_safe_float(vix.get('change_pct'), 0.0):+.2f}%")
+        st.metric("VVIX", f"{_safe_float(vvix.get('price'), 0.0):.2f}", f"{_safe_float(vvix.get('change_pct'), 0.0):+.2f}%")
+        nh = (event_risk or {}).get("next_high")
+        if nh:
+            st.caption(f"Next high-impact: {nh.get('time_et', 'n/a')} {nh.get('event', '')}")
+            st.caption(f"Countdown: {_countdown_label(nh.get('seconds_to', 0))}")
+        else:
+            st.caption("No high-impact events in near horizon.")
+        st.markdown("</div></div>", unsafe_allow_html=True)
+
+
 def _render_overview_reference_snapshot(data_0dte, nq_now):
     st.markdown(
         '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📍 Key References (Compact)</div></div><div class="terminal-body">',
@@ -4300,10 +4460,8 @@ def _extract_builder_seed(level_data, prefix):
 
 
 def _render_nq_level_builder_panel(data_0dte=None, data_weekly=None):
-    st.subheader("📊 NQ Precision Map — Level Builder")
-    st.caption(
-        "Fill in your gamma levels. Copy the output string and paste it into the Pine Script input field."
-    )
+    st.subheader("📊 NQ Level Builder")
+    st.caption("Update daily/weekly levels and copy the export string.")
 
     manual_defaults = {
         "builder_d_res": 25506.68,
@@ -4570,27 +4728,7 @@ def run_full_app():
         toggle_theme()
         st.rerun()
 
-    with st.sidebar.expander("Layout & Display", expanded=False):
-        st.checkbox("🧼 Focus Mode", key="focus_mode")
-        st.checkbox("🧭 Show Command Bar", key="show_command_bar")
-        st.checkbox("📈 Show Futures Strip", key="show_futures_strip")
-        st.selectbox(
-            "📰 Right Rail",
-            options=["Auto", "Always", "Hidden"],
-            key="rail_mode",
-            help="Auto shows the right rail on overview/event/earnings views and expands center space on other views.",
-        )
-        st.selectbox(
-            "📰 News Signal",
-            options=["High-Signal", "All"],
-            key="news_signal_mode",
-            help="High-Signal filters the right rail to macro/market-moving headlines.",
-        )
-        st.checkbox(
-            "🗓 Show Monthly Views",
-            key="show_monthly_views",
-            help="Keeps monthly level tabs hidden by default to reduce clutter.",
-        )
+    with st.sidebar.expander("Layout", expanded=False):
         st.checkbox("🗜 Compact Mode", key="compact_mode")
 
     manual_override = st.sidebar.checkbox("✏️ Manual NQ Price")
@@ -4711,860 +4849,55 @@ def run_full_app():
             )
 
         market_data = get_market_overview_yahoo()
-        vix_level = market_data.get("vix", {}).get("price", 15)
-        fg = get_fear_greed_index()
-        sentiment_score = calculate_sentiment_score(data_0dte, nq_now, vix_level, fg["score"])
-        opening_structure = get_futures_opening_structure("NQ=F")
-        reference_levels = get_futures_reference_levels("NQ=F", finnhub_key)
         event_risk = get_event_risk_snapshot(finnhub_key, hours_ahead=24)
-        breadth_internals = get_futures_breadth_internals()
-        cot_dealer = get_cot_dealer_positioning()
 
-    level_interactions_df = None
     nq_data = None
     if data_0dte:
         nq_data = get_nq_intraday_data()
-        if nq_data is not None and not nq_data.empty:
-            level_interactions_df = _build_level_interactions(nq_data, data_0dte)
-
-    econ_window = get_economic_calendar_window(finnhub_key, days=7)
-    regime_engine = _build_regime_engine(
-        data_0dte=data_0dte,
-        data_weekly=data_weekly,
-        nq_now=nq_now,
-        market_data=market_data,
-        opening_structure=opening_structure,
-        event_risk=event_risk,
-        nq_data=nq_data,
-    )
-    dealer_forward_pressure = _build_dealer_forward_pressure(
-        data_0dte=data_0dte,
-        qqq_price=qqq_price,
-        ratio=ratio,
-    )
-    microstructure_snapshot = _build_microstructure_snapshot(
-        nq_data=nq_data,
-        opening_structure=opening_structure,
-    )
-    cross_asset_matrix = _build_cross_asset_driver_matrix(
-        market_data=market_data,
-        nq_day_change_pct=nq_day_change_pct,
-    )
-    event_surprise_engine = _build_event_surprise_engine(econ_window)
-    history_20d = get_intraday_history("NQ=F", days=20, interval="5m") if data_0dte else pd.DataFrame()
-    trade_bias_engine = _build_trade_bias_engine(
-        data_0dte=data_0dte,
-        nq_now=nq_now,
-        regime_engine=regime_engine,
-        cross_asset_matrix=cross_asset_matrix,
-        event_risk=event_risk,
-        opening_structure=opening_structure,
-        breadth_internals=breadth_internals,
-    )
-    reaction_stats_df = _build_level_reaction_stats(data_0dte=data_0dte, intraday_hist=history_20d)
-    alert_center = _build_alert_center(
-        data_0dte=data_0dte,
-        nq_now=nq_now,
-        event_risk=event_risk,
-        ratio_meta=ratio_meta,
-        nq_source=nq_source,
-        qqq_source=qqq_source,
-    )
-    rollover_status = _build_contract_roll_status(nq_source=nq_source)
 
     nav_sections = {
-        "Workspace": [
-            ("🏠 Overview", "📈 Market Overview"),
-            ("🌐 Multi-Asset", "🌐 Multi-Asset"),
-            ("📅 Earnings Calendar", "📅 Earnings Calendar"),
-            ("🗓 Economic Calendar", "🗓 Economic Calendar"),
-        ],
-        "Resources": [
-            ("📊 NQ Level Builder", "📊 NQ Level Builder"),
-        ],
-        "Analytics": [
-            ("🧪 Execution Lab", "🧪 Execution Lab"),
-            ("📈 Initial Balance", "📈 Initial Balance"),
-            ("🌐 Macro & Breadth", "🌐 Macro & Breadth"),
-            ("🚨 Event Intel", "🚨 Event Intel"),
-            ("🍞 Daily Bread", "🍞 Daily Bread"),
-            ("📈 GEX Charts", "📈 GEX Charts"),
-            ("⚖️ Delta Charts", "⚖️ Delta Charts"),
-        ],
+        "Workspace": [("🏠 Dashboard", "🏠 Dashboard")],
+        "Tools": [("📊 NQ Level Builder", "📊 NQ Level Builder")],
     }
-    if data_0dte:
-        nav_sections["Resources"].append(("📊 0DTE Levels", "📊 0DTE Levels"))
-    if data_weekly:
-        nav_sections["Resources"].append(("📊 Weekly Levels", "📊 Weekly Levels"))
-    if data_monthly and st.session_state.get("show_monthly_views", False):
-        nav_sections["Resources"].append(("📊 Monthly Levels", "📊 Monthly Levels"))
-
     available_views = {value for items in nav_sections.values() for _, value in items}
     if st.session_state.get("main_left_nav") not in available_views:
-        st.session_state.main_left_nav = "📈 Market Overview"
+        st.session_state.main_left_nav = "🏠 Dashboard"
 
-    active_view_hint = st.session_state.get("main_left_nav", "📈 Market Overview")
-    rail_auto_views = {"📈 Market Overview", "🚨 Event Intel", "📅 Earnings Calendar"}
-    rail_mode = str(st.session_state.get("rail_mode", "Auto"))
-    if rail_mode == "Hidden":
-        show_right_rail = False
-    elif rail_mode == "Always":
-        show_right_rail = True
-    else:
-        show_right_rail = active_view_hint in rail_auto_views
-
-    if show_right_rail:
-        nav_col, center_col, right_col = st.columns([0.95, 5.20, 1.20], gap="small")
-    else:
-        nav_col, center_col = st.columns([0.95, 6.40], gap="small")
-        right_col = None
+    nav_col, center_col = st.columns([0.95, 6.40], gap="small")
+    right_col = None
 
     with nav_col:
         active_view = _render_left_nav(nav_sections)
 
     with center_col:
-        es = market_data.get("es", {})
-        ym = market_data.get("ym", {})
-        rty = market_data.get("rty", {})
-        gc = market_data.get("gc", {})
-
-        focus_views = {"📈 Market Overview", "🌐 Macro & Breadth"}
-        top_modules_allowed = (not st.session_state.focus_mode) or (active_view in focus_views)
-        if st.session_state.show_command_bar and top_modules_allowed:
-            _render_terminal_command_bar(
-                active_view=active_view,
-                nq_source=nq_source,
-                qqq_source=qqq_source,
-                auto_refresh=auto_refresh,
-                refresh_interval=refresh_interval if auto_refresh else 0,
-                ratio_meta=ratio_meta,
-                event_risk=event_risk,
-                market_data=market_data,
-            )
-
-        futures_cards = [
-            ("S&P 500 (ES)", es.get("price", 0), es.get("change", 0), es.get("change_pct", 0)),
-            ("NASDAQ (NQ)", nq_now, nq_now * (nq_day_change_pct / 100), nq_day_change_pct),
-            ("DOW (YM)", ym.get("price", 0), ym.get("change", 0), ym.get("change_pct", 0)),
-            ("RUSSELL (RTY)", rty.get("price", 0), rty.get("change", 0), rty.get("change_pct", 0)),
-            ("GOLD (GC)", gc.get("price", 0), gc.get("change", 0), gc.get("change_pct", 0)),
-        ]
-        if st.session_state.show_futures_strip and top_modules_allowed:
-            strip_html = ['<div class="futures-strip">']
-            for name, price, chg, pct in futures_cards:
-                is_pos = (chg or 0) >= 0
-                badge_cls = "pos" if is_pos else "neg"
-                arrow = "↑" if is_pos else "↓"
-                strip_html.append(
-                    f'<div class="future-card"><p class="future-title">{name}</p>'
-                    f'<p class="future-value">{price:,.2f}</p>'
-                    f'<span class="future-badge {badge_cls}">{arrow} {chg:+.2f} ({pct:+.2f}%)</span></div>'
-                )
-            strip_html.append("</div>")
-            st.markdown("".join(strip_html), unsafe_allow_html=True)
         if level_mapping_note:
             st.warning(level_mapping_note)
-
-        if active_view == "📈 Market Overview":
-            with st.expander("Data Health & Feed Diagnostics", expanded=False):
-                _render_data_health_strip(
-                    nq_source=nq_source,
-                    qqq_source=qqq_source,
-                    ratio_meta=ratio_meta,
-                    data_0dte=data_0dte,
-                    market_data=market_data,
-                    finnhub_key=finnhub_key,
-                )
-            if data_0dte:
-                _render_market_overview_visuals(
-                    data_0dte=data_0dte,
-                    nq_now=nq_now,
-                    qqq_price=qqq_price,
-                    nq_source=nq_source,
-                    qqq_source=qqq_source,
-                    ratio_meta=ratio_meta,
-                    sentiment_score=sentiment_score,
-                    fg=fg,
-                    event_risk=event_risk,
-                    market_data=market_data,
-                    trade_bias_engine=trade_bias_engine,
-                    alert_center=alert_center,
-                    reaction_stats_df=reaction_stats_df,
-                    nq_data=nq_data,
-                    nq_day_change_pct=nq_day_change_pct,
-                )
-
-                playbook = _build_morning_playbook(
-                    data_0dte=data_0dte,
-                    data_weekly=data_weekly,
-                    nq_now=nq_now,
-                    event_risk=event_risk,
-                )
-                with st.expander("Deep Dive Modules", expanded=False):
-                    d1, d2 = st.columns(2)
-                    with d1:
-                        _render_trade_bias_panel(trade_bias_engine)
-                    with d2:
-                        _render_alert_center_panel(alert_center)
-                    _render_open_playbook_panel(
-                        playbook=playbook,
-                        data_0dte=data_0dte,
-                        nq_now=nq_now,
-                    )
-                    _render_trade_plan_panel(
-                        playbook=playbook,
-                        data_0dte=data_0dte,
-                        nq_now=nq_now,
-                        event_risk=event_risk,
-                    )
-                    r1, r2 = st.columns(2)
-                    with r1:
-                        _render_overview_reference_snapshot(data_0dte, nq_now)
-                    with r2:
-                        _render_overview_event_strip(event_risk)
-                    r3, r4 = st.columns(2)
-                    with r3:
-                        _render_contract_roll_panel(rollover_status)
-                    with r4:
-                        _render_level_reaction_panel(reaction_stats_df)
-            else:
-                st.info("No 0DTE data available for compact overview.")
-
-        elif active_view == "🧪 Execution Lab":
-            if not data_0dte:
-                st.info("Execution Lab requires options data.")
-            else:
-                _render_regime_engine_panel(regime_engine)
-                _render_opening_structure_panel(opening_structure)
-                _render_dealer_forward_pressure_panel(dealer_forward_pressure)
-                _render_microstructure_panel(microstructure_snapshot)
-                _render_reference_levels_panel(
-                    data_0dte=data_0dte,
-                    reference_levels=reference_levels,
-                    opening_structure=opening_structure,
-                    nq_now=nq_now,
-                    event_risk=event_risk,
-                )
-                _render_level_quality_panel(
-                    data_0dte=data_0dte,
-                    data_weekly=data_weekly,
-                    nq_now=nq_now,
-                    level_interactions_df=level_interactions_df,
-                )
-
-        elif active_view == "📈 Initial Balance":
-            _render_initial_balance_report_panel(finnhub_key=finnhub_key)
-
-        elif active_view == "🌐 Macro & Breadth":
-            _render_futures_indices_panel(
+        with st.expander("Data Health & Feed Diagnostics", expanded=False):
+            _render_data_health_strip(
+                nq_source=nq_source,
+                qqq_source=qqq_source,
+                ratio_meta=ratio_meta,
+                data_0dte=data_0dte,
                 market_data=market_data,
+                finnhub_key=finnhub_key,
+            )
+        if active_view == "🏠 Dashboard":
+            _render_clean_dashboard(
                 nq_now=nq_now,
                 nq_day_change_pct=nq_day_change_pct,
                 nq_source=nq_source,
+                qqq_price=qqq_price,
+                qqq_source=qqq_source,
+                nq_data=nq_data,
                 data_0dte=data_0dte,
-                level_interactions_df=level_interactions_df,
-            )
-            _render_cross_asset_driver_matrix_panel(cross_asset_matrix)
-            _render_cot_dealer_panel(cot_dealer)
-            _render_breadth_internals_panel(
-                breadth_data=breadth_internals,
-                nq_day_change_pct=nq_day_change_pct,
-                es_change_pct=float((market_data.get("es", {}) or {}).get("change_pct", 0.0)),
                 market_data=market_data,
+                event_risk=event_risk,
             )
-            _render_heatmap_panel()
-
-        elif active_view == "🚨 Event Intel":
-            _render_event_risk_panel(event_risk)
-            _render_event_surprise_panel(event_surprise_engine)
-
-        elif active_view == "🌐 Multi-Asset":
-            st.subheader("🌐 Multi-Asset Comparison Dashboard")
-            multi_asset_data = process_multi_asset()
-            if multi_asset_data:
-                comparison_data = []
-                for asset_name in ["SPY", "QQQ", "IWM", "DIA"]:
-                    if asset_name not in multi_asset_data:
-                        continue
-                    asset = multi_asset_data[asset_name]
-                    data_0 = asset.get("data_0dte")
-                    if not data_0:
-                        continue
-                    futures_price = asset["futures_price"]
-                    comparison_data.append(
-                        {
-                            "Index": f"{asset['name']} ({asset_name})",
-                            "Futures Price": f"{futures_price:,.2f}",
-                            "Delta Neutral": f"{data_0['dn_nq']:,.2f}",
-                            "Gamma Flip": f"{data_0['g_flip_nq']:,.2f}",
-                            "Net Delta": f"{data_0['net_delta']:,.0f}",
-                        }
-                    )
-                if comparison_data:
-                    st.dataframe(pd.DataFrame(comparison_data), width="stretch", hide_index=True)
-            else:
-                st.error("Could not load multi-asset data")
-
         elif active_view == "📊 NQ Level Builder":
             _render_nq_level_builder_panel(
                 data_0dte=data_0dte,
                 data_weekly=data_weekly,
             )
-
-        elif active_view in {"📊 0DTE Levels", "📊 Weekly Levels", "📊 Monthly Levels"}:
-            view_map = {
-                "📊 0DTE Levels": ("0DTE", data_0dte, exp_0dte),
-                "📊 Weekly Levels": ("Weekly", data_weekly, exp_weekly),
-                "📊 Monthly Levels": ("Monthly", data_monthly, exp_monthly),
-            }
-            label, selected_data, selected_exp = view_map[active_view]
-            if selected_data and selected_exp:
-                st.subheader(f"{label} Analysis - {selected_exp.strftime('%Y-%m-%d')}")
-                d1, d2, d3, d4 = st.columns(4)
-                d1.metric("Delta Neutral", f"{selected_data['dn_nq']:.2f}")
-                d2.metric("Gamma Flip", f"{selected_data['g_flip_nq']:.2f}")
-                d3.metric("Net Delta", f"{selected_data['net_delta']:,.0f}")
-                d4.metric("Expected Move", f"±{selected_data['nq_em_full']:.0f}")
-                data_meta = selected_data.get("data_meta", {})
-                freshness = data_meta.get("options_freshness", "unknown")
-                latency = data_meta.get("options_latency_s")
-                source = data_meta.get("options_source", "CBOE")
-                conf_mult = data_meta.get("confidence_multiplier", 1.0)
-                st.caption(
-                    f"Options data: {source} | freshness: {freshness} | latency: "
-                    f"{latency if latency is not None else 'n/a'}s | confidence x{conf_mult:.2f}"
-                )
-                if freshness == "stale_hard":
-                    st.warning("Options chain is stale (hard). Confidence has been heavily penalized.")
-                elif freshness == "stale_soft":
-                    st.warning("Options chain is stale (soft). Confidence has been reduced.")
-                results_df = pd.DataFrame(selected_data["results"], columns=["Level", "Price", "Width", "Icon"])
-                conf_map = selected_data.get("level_confidence", {})
-                results_df["Confidence"] = results_df["Level"].map(
-                    lambda lvl: conf_map.get(lvl, {}).get("label", "-")
-                )
-                results_df["Conf Score"] = results_df["Level"].map(
-                    lambda lvl: conf_map.get(lvl, {}).get("score", 0)
-                )
-                conf_snapshot = results_df[["Level", "Confidence", "Conf Score"]].copy()
-                conf_snapshot["Conf Score"] = conf_snapshot["Conf Score"].fillna(0).astype(int)
-                conf_snapshot = conf_snapshot.sort_values("Conf Score", ascending=False)
-                high_ct = int((conf_snapshot["Confidence"] == "High").sum())
-                med_ct = int((conf_snapshot["Confidence"] == "Medium").sum())
-                low_ct = int((conf_snapshot["Confidence"] == "Low").sum())
-
-                st.markdown("**Level Confidence Snapshot**")
-                c_high, c_med, c_low = st.columns(3)
-                c_high.metric("High Confidence", str(high_ct))
-                c_med.metric("Medium Confidence", str(med_ct))
-                c_low.metric("Low Confidence", str(low_ct))
-                st.dataframe(
-                    conf_snapshot.head(8),
-                    width="stretch",
-                    hide_index=True,
-                    height=320,
-                )
-
-                table_height = max(300, min(650, 52 + (len(results_df) + 1) * 35))
-                st.dataframe(
-                    results_df[["Icon", "Level", "Confidence", "Conf Score", "Price", "Width"]],
-                    width="stretch",
-                    hide_index=True,
-                    height=table_height,
-                )
-
-                current_levels = {
-                    "Delta Neutral": selected_data["dn_nq"],
-                    "Gamma Flip": selected_data["g_flip_nq"],
-                    "Primary Wall": selected_data["p_wall"],
-                    "Primary Floor": selected_data["p_floor"],
-                    "Secondary Wall": selected_data["s_wall"],
-                    "Secondary Floor": selected_data["s_floor"],
-                }
-                tracker_key = f"level_tracker::{label}::{selected_exp.strftime('%Y-%m-%d')}"
-                changes_df, prev_ts = _track_level_changes(tracker_key, current_levels)
-                st.markdown("**Level Change Tracker**")
-                if changes_df is not None and not changes_df.empty:
-                    changes_df["Current"] = changes_df["Current"].map(lambda v: round(v, 2))
-                    changes_df["Prev"] = changes_df["Prev"].map(lambda v: round(v, 2))
-                    changes_df["Change (pts)"] = changes_df["Change (pts)"].map(lambda v: round(v, 2))
-                    st.caption(f"Compared with previous snapshot at {prev_ts}")
-                    st.dataframe(changes_df, width="stretch", hide_index=True)
-                else:
-                    st.caption("Waiting for next refresh to compute level changes.")
-            else:
-                st.info("No data available for this timeframe.")
-
-        elif active_view == "🗓 Economic Calendar":
-            st.subheader("🗓 Economic Calendar")
-            st.caption("Week view (next 7 days, ET). High impact = red, medium = orange/yellow.")
-
-            econ_df = get_economic_calendar_window(finnhub_key, days=7)
-            econ_health = get_dataset_freshness("econ_calendar", max_age_sec=120)
-            raw_counts = st.session_state.get("econ_source_counts_raw", {})
-            final_counts = st.session_state.get("econ_source_counts_final", {})
-            if raw_counts:
-                st.caption(
-                    "Sources (raw -> final): "
-                    + ", ".join(
-                        f"{k}: {raw_counts.get(k, 0)} -> {final_counts.get(k, 0)}"
-                        for k in sorted(raw_counts.keys())
-                    )
-                )
-            else:
-                st.caption("Sources (raw -> final): no events returned from provider APIs")
-            st.caption(
-                f"Calendar health: {econ_health.get('status', 'unknown')} | "
-                f"latency {_latency_label(econ_health.get('latency_s'))} | "
-                f"asof {econ_health.get('asof_utc') if econ_health.get('asof_utc') else 'n/a'}"
-            )
-            if econ_df is None or econ_df.empty:
-                st.info("No economic events available for this window.")
-            else:
-                et_now = datetime.now(ZoneInfo("America/New_York"))
-                week_dates = [et_now.date() + timedelta(days=i) for i in range(7)]
-
-                for day in week_dates:
-                    day_key = day.isoformat()
-                    dt = datetime.strptime(day_key, "%Y-%m-%d")
-                    st.markdown(f"**{dt.strftime('%a %b %d')} Release**")
-                    st.markdown(
-                        '<div class="econ-header"><div></div><div>Release</div><div>Impact</div><div>Actual</div><div>Expected</div><div>Prior</div><div></div><div>Alerts</div></div>',
-                        unsafe_allow_html=True,
-                    )
-
-                    day_df = econ_df[econ_df["date_et"] == day_key].copy()
-                    if day_df.empty:
-                        st.markdown(
-                            '<div class="econ-row low"><div>•</div><div>No major events</div><div><span class="impact-chip low">LOW</span></div><div>-</div><div>-</div><div>-</div><div></div><div>-</div></div>',
-                            unsafe_allow_html=True,
-                        )
-                        continue
-
-                    for _, r in day_df.iterrows():
-                        impact = str(r.get("impact", "medium")).lower()
-                        impact_label = "HIGH" if impact == "high" else "MED" if impact == "medium" else "LOW"
-                        row_source = str(r.get("source", "unknown"))
-                        row_conf = int(r.get("confidence_score", 0) or 0)
-                        row_conf_label = str(r.get("confidence_label", "Low"))
-                        row_latency = _latency_from_asof_utc(r.get("asof_utc"))
-                        row_latency_txt = _latency_label(row_latency)
-                        event_iso = r.get("event_dt_iso")
-                        countdown_html = ""
-                        try:
-                            event_dt = datetime.fromisoformat(str(event_iso))
-                            if event_dt.tzinfo is None:
-                                event_dt = event_dt.replace(tzinfo=ZoneInfo("America/New_York"))
-                            secs = int((event_dt - et_now).total_seconds())
-                            if 0 <= secs <= 60:
-                                countdown_html = f'<span class="count-chip">T-{secs}s</span>'
-                        except Exception:
-                            countdown_html = ""
-
-                        st.markdown(
-                            f"""
-                            <div class="econ-row {impact}">
-                                <div>›</div>
-                                <div>
-                                    <div>{r.get("time_et", "")}  {html.escape(str(r.get("event", "")))}</div>
-                                    <div style="font-size:11px;color:#9fb0c7;">{html.escape(row_source)} • {row_conf_label} {row_conf}% • age {row_latency_txt}</div>
-                                </div>
-                                <div><span class="impact-chip {impact}">{impact_label}</span></div>
-                                <div>{html.escape(_fmt_econ_value(r.get("actual", "-")))}</div>
-                                <div>{html.escape(_fmt_econ_value(r.get("expected", "-")))}</div>
-                                <div>{html.escape(_fmt_econ_value(r.get("prior", "-")))}</div>
-                                <div>{countdown_html}</div>
-                                <div>🔔</div>
-                            </div>
-                            """,
-                            unsafe_allow_html=True,
-                        )
-                    st.markdown("")
-
-        elif active_view == "📅 Earnings Calendar":
-            st.subheader("📅 Earnings Calendar")
-            ec1, ec2 = st.columns([1, 4])
-            with ec1:
-                st.toggle("Major Only", key="earnings_major_only")
-            with ec2:
-                st.caption("Focused list for highest-impact NQ / ES / YM earnings names.")
-
-            earnings_df = get_earnings_calendar_multi(
-                finnhub_key,
-                days=5,
-                major_only=st.session_state.earnings_major_only,
-            )
-            earnings_health = get_dataset_freshness("earnings_calendar", max_age_sec=900)
-            st.caption(
-                f"Earnings health: {earnings_health.get('status', 'unknown')} | "
-                f"latency {_latency_label(earnings_health.get('latency_s'))} | "
-                f"asof {earnings_health.get('asof_utc') if earnings_health.get('asof_utc') else 'n/a'}"
-            )
-            if earnings_df is None or earnings_df.empty:
-                st.info("No earnings found for this window.")
-            else:
-                et_today = datetime.now().date()
-                day_list = [et_today + timedelta(days=i) for i in range(5)]
-                cols = st.columns(5)
-                for i, day in enumerate(day_list):
-                    with cols[i]:
-                        st.markdown(
-                            f'<div class="earn-day-title">{day.strftime("%a %b %d")}</div>',
-                            unsafe_allow_html=True,
-                        )
-                        day_df = earnings_df[earnings_df["date"] == day].copy()
-                        for bucket in ["Before Open", "After Close", "Time TBA"]:
-                            bucket_df = day_df[day_df["time"] == bucket].copy()
-                            if bucket_df.empty:
-                                continue
-                            st.markdown(
-                                f'<div class="earn-time-title">{bucket}</div>',
-                                unsafe_allow_html=True,
-                            )
-                            for _, row in bucket_df.head(12).iterrows():
-                                eps_est = row.get("eps_estimate")
-                                rev_est = row.get("revenue_estimate")
-                                eps_txt = f"EPS est: {eps_est:.2f}" if pd.notna(eps_est) else "EPS est: n/a"
-                                rev_txt = (
-                                    f"Rev est: {float(rev_est)/1_000_000:.0f}M"
-                                    if pd.notna(rev_est)
-                                    else "Rev est: n/a"
-                                )
-                                row_latency = _latency_from_asof_utc(row.get("asof_utc"))
-                                row_latency_txt = _latency_label(row_latency)
-                                conf_label = row.get("confidence_label", "Low")
-                                conf_score = int(row.get("confidence_score", 0) or 0)
-                                st.markdown(
-                                    f"""
-                                    <div class="earn-card">
-                                        <div class="sym">{row['symbol']}</div>
-                                        <div class="meta">{eps_txt} • {rev_txt}</div>
-                                        <div class="meta">{row.get('source', 'Source n/a')} • {conf_label} {conf_score}% • age {row_latency_txt}</div>
-                                    </div>
-                                    """,
-                                    unsafe_allow_html=True,
-                                )
-                                if st.button(
-                                    f"View {row['symbol']}",
-                                    key=f"earn_view_{row['symbol']}_{row['date']}_{row['time']}",
-                                    use_container_width=True,
-                                ):
-                                    st.session_state.selected_earnings = {
-                                        "symbol": row["symbol"],
-                                        "date": str(row["date"]),
-                                        "time": row["time"],
-                                        "source": row.get("source", ""),
-                                        "eps_estimate": row.get("eps_estimate"),
-                                        "revenue_estimate": row.get("revenue_estimate"),
-                                        "confidence_label": row.get("confidence_label", "Low"),
-                                        "confidence_score": int(row.get("confidence_score", 0) or 0),
-                                        "asof_utc": row.get("asof_utc"),
-                                    }
-                                    st.rerun()
-
-        elif active_view == "🍞 Daily Bread":
-            st.subheader("🍞 Daily Bread")
-            if data_0dte:
-                events = get_economic_calendar(finnhub_key)
-                news = get_rss_news(finnhub_key)
-                daily_bread = generate_daily_bread(data_0dte, data_weekly, nq_now, market_data, fg, events, news)
-                st.markdown(f"**{daily_bread.get('session', '')}**")
-                st.caption(daily_bread.get("timestamp", ""))
-                st.markdown(daily_bread.get("summary", ""))
-                with st.expander("Key Levels"):
-                    st.markdown(daily_bread.get("levels", ""))
-                with st.expander("Market Drivers"):
-                    st.markdown(daily_bread.get("drivers", ""))
-                with st.expander("Trading Strategy"):
-                    st.markdown(daily_bread.get("strategy", ""))
-                with st.expander("Tomorrow Watch List"):
-                    st.markdown(daily_bread.get("watch_list", ""))
-            else:
-                st.info("No 0DTE data available for Daily Bread analysis")
-
-        elif active_view == "📈 GEX Charts":
-            st.subheader("📈 Trinity-Style Dealer Exposure")
-            st.caption("Two-panel horizontal GEX map for SPY and QQQ (0DTE). Monthly view removed.")
-
-            g1, g2, g3, g4 = st.columns(4)
-            with g1:
-                zoom_preset = st.selectbox(
-                    "Zoom Preset",
-                    options=["Tight (±2.5%)", "Balanced (±5.0%)", "Wide (±8.0%)", "Custom"],
-                    index=1,
-                    key="gex_zoom_preset",
-                )
-            with g2:
-                max_rows = st.slider(
-                    "Ladder Rows",
-                    min_value=18,
-                    max_value=90,
-                    value=48,
-                    step=2,
-                    key="gex_max_rows",
-                )
-            with g3:
-                row_mode = st.selectbox(
-                    "Row Selection",
-                    options=["Top |GEX|", "Nearest Spot"],
-                    index=0,
-                    key="gex_row_mode",
-                )
-            with g4:
-                label_density = st.selectbox(
-                    "Value Labels",
-                    options=["Auto", "Top 8", "Top 16", "Top 24", "None"],
-                    index=1,
-                    key="gex_label_density",
-                )
-
-            preset_to_window = {
-                "Tight (±2.5%)": 2.5,
-                "Balanced (±5.0%)": 5.0,
-                "Wide (±8.0%)": 8.0,
-            }
-            if zoom_preset == "Custom":
-                strike_window_pct = st.slider(
-                    "Custom Spot Window (%)",
-                    min_value=1.0,
-                    max_value=15.0,
-                    value=4.0,
-                    step=0.5,
-                    key="gex_window_pct_custom",
-                )
-            else:
-                strike_window_pct = float(preset_to_window.get(zoom_preset, 5.0))
-                st.caption(f"Current zoom: ±{strike_window_pct:.1f}% around spot.")
-
-            st.caption("GEX panel refreshes with each app cycle. Use mouse wheel/pinch to zoom further.")
-
-            multi_asset_data = process_multi_asset()
-
-            def _render_gex_heatmap(asset_label, asset_payload):
-                def _fmt_notional(v):
-                    av = abs(float(v))
-                    sign = "-" if float(v) < 0 else ""
-                    if av >= 1_000_000_000:
-                        return f"{sign}${av/1_000_000_000:.1f}B"
-                    if av >= 1_000_000:
-                        return f"{sign}${av/1_000_000:.1f}M"
-                    if av >= 1_000:
-                        return f"{sign}${av/1_000:.1f}K"
-                    return f"{sign}${av:,.0f}"
-
-                if not asset_payload:
-                    st.info(f"{asset_label}: no data")
-                    return
-                ticker = asset_payload.get("ticker", asset_label)
-                df_raw, etf_price = get_cboe_options_live(ticker)
-                if df_raw is None or df_raw.empty or not etf_price:
-                    st.info(f"{asset_label}: no options chain")
-                    return
-                health = get_dataset_freshness(
-                    f"options:{str(ticker).upper()}",
-                    max_age_sec=180,
-                )
-                health_status = health.get("status", "unknown")
-                health_latency = health.get("latency_s")
-                health_source = health.get("source", "CBOE")
-                health_asof = health.get("asof_utc")
-                health_mult = float(health.get("confidence_multiplier", 1.0))
-                st.caption(
-                    f"{asset_label} chain: {health_source} | {health_status} | "
-                    f"latency {health_latency if health_latency is not None else 'n/a'}s | conf x{health_mult:.2f} | "
-                    f"asof {health_asof if health_asof else 'n/a'}"
-                )
-                if health_status == "stale_hard":
-                    st.warning(f"{asset_label}: stale_hard options chain; levels may be lagging.")
-                elif health_status == "stale_soft":
-                    st.info(f"{asset_label}: stale_soft options chain; confidence reduced.")
-
-                spot = float(asset_payload.get("etf_price", 0) or etf_price or 0)
-                anchor = float(spot if spot > 0 else etf_price)
-
-                # Build chart from a wider, display-only strike universe.
-                df_plot = df_raw.copy()
-                df_plot = df_plot[df_plot["open_interest"] > 0].copy()
-                df_plot = df_plot[df_plot["iv"] > 0].copy()
-                window = float(strike_window_pct) / 100.0
-                low = anchor * (1.0 - window)
-                high = anchor * (1.0 + window)
-                df_plot = df_plot[(df_plot["strike"] >= low) & (df_plot["strike"] <= high)].copy()
-                if df_plot.empty:
-                    st.info(f"{asset_label}: no strikes in display window")
-                    return
-
-                df_plot["GEX"] = df_plot.apply(
-                    lambda x: x["open_interest"] * x["gamma"] * (etf_price ** 2) * 0.01 * (1 if x["type"] == "call" else -1),
-                    axis=1,
-                )
-                gex_by_strike = df_plot.groupby("strike", as_index=False)["GEX"].sum().sort_values("strike", ascending=False)
-                if gex_by_strike.empty:
-                    st.info(f"{asset_label}: empty strike map")
-                    return
-
-                # Keep the strongest ladders or rows nearest spot.
-                if len(gex_by_strike) > max_rows:
-                    if row_mode == "Nearest Spot" and spot > 0:
-                        keep_idx = (
-                            gex_by_strike.assign(spot_dist=(gex_by_strike["strike"] - spot).abs())
-                            .nsmallest(max_rows, "spot_dist")
-                            .index
-                        )
-                    else:
-                        keep_idx = (
-                            gex_by_strike.assign(abs_gex=gex_by_strike["GEX"].abs())
-                            .nlargest(max_rows, "abs_gex")
-                            .index
-                        )
-                    gex_by_strike = gex_by_strike.loc[keep_idx].sort_values("strike", ascending=False)
-
-                z = gex_by_strike["GEX"].to_numpy().reshape(-1, 1)
-                y = gex_by_strike["strike"].astype(float).to_list()
-                x = [asset_label]
-                max_abs = float(max(1.0, gex_by_strike["GEX"].abs().max()))
-                y_min = float(gex_by_strike["strike"].min())
-                y_max = float(gex_by_strike["strike"].max())
-
-                fig = go.Figure(
-                    data=go.Heatmap(
-                        z=z,
-                        x=x,
-                        y=y,
-                        colorscale=[
-                            [0.00, "#4c1049"],
-                            [0.18, "#283c66"],
-                            [0.50, "#1a2432"],
-                            [0.78, "#2fae74"],
-                            [1.00, "#f0dc1f"],
-                        ],
-                        reversescale=False,
-                        showscale=False,
-                        zmid=0,
-                        zmin=-max_abs,
-                        zmax=max_abs,
-                        hovertemplate="Strike %{y:.2f}<br>GEX %{z:,.0f}<br>Notional %{text}<extra></extra>",
-                        text=[[ _fmt_notional(v[0]) ] for v in z],
-                    )
-                )
-
-                # Mark nearest strike to spot.
-                if spot > 0:
-                    nearest_idx = (gex_by_strike["strike"] - spot).abs().idxmin()
-                    nearest_strike = float(gex_by_strike.loc[nearest_idx, "strike"])
-                    fig.add_hline(
-                        y=nearest_strike,
-                        line_dash="dot",
-                        line_color="#ffffff",
-                        opacity=0.8,
-                    )
-                    fig.add_annotation(
-                        x=asset_label,
-                        y=nearest_strike,
-                        text=f"Spot {spot:.2f}",
-                        showarrow=False,
-                        xanchor="left",
-                        yanchor="bottom",
-                        font=dict(size=10, color="#dfe6f3"),
-                        bgcolor="rgba(12,18,28,0.65)",
-                    )
-
-                # Right-side value ladder text, with adaptive density to avoid overlap.
-                label_df = gex_by_strike.copy()
-                if label_density == "None":
-                    label_df = label_df.iloc[0:0]
-                elif label_density.startswith("Top "):
-                    try:
-                        keep_n = int(label_density.split("Top ", 1)[1])
-                    except Exception:
-                        keep_n = 8
-                    label_df = (
-                        label_df.assign(abs_gex=label_df["GEX"].abs())
-                        .nlargest(keep_n, "abs_gex")[["strike", "GEX"]]
-                        .sort_values("strike", ascending=False)
-                    )
-                elif len(label_df) > 36:
-                    key_abs = (
-                        label_df.assign(abs_gex=label_df["GEX"].abs())
-                        .nlargest(12, "abs_gex")[["strike", "GEX"]]
-                    )
-                    if spot > 0:
-                        key_spot = (
-                            label_df.assign(spot_dist=(label_df["strike"] - spot).abs())
-                            .nsmallest(8, "spot_dist")[["strike", "GEX"]]
-                        )
-                        label_df = pd.concat([key_abs, key_spot], ignore_index=True).drop_duplicates(subset=["strike"])
-                    else:
-                        label_df = key_abs
-                    label_df = label_df.sort_values("strike", ascending=False)
-
-                for _, row in label_df.iterrows():
-                    fig.add_annotation(
-                        x=0.985,
-                        xref="paper",
-                        y=float(row["strike"]),
-                        yref="y",
-                        text=_fmt_notional(row["GEX"]),
-                        showarrow=False,
-                        xanchor="right",
-                        yanchor="middle",
-                        font=dict(size=10, color="#dbe6f7"),
-                    )
-
-                fig.update_layout(
-                    template="plotly_dark" if st.session_state.theme == "dark" else "plotly_white",
-                    height=700,
-                    margin=dict(l=10, r=10, t=30, b=10),
-                    xaxis_title="",
-                    yaxis_title="Strike",
-                    dragmode="zoom",
-                    uirevision=f"{asset_label}-{strike_window_pct}-{max_rows}-{row_mode}-{label_density}",
-                )
-                fig.update_yaxes(
-                    autorange="reversed",
-                    range=[y_max, y_min],
-                    tickformat=".0f",
-                    showgrid=False,
-                    tickmode="linear",
-                    dtick=max(1.0, round((y_max - y_min) / 16.0, 2)),
-                )
-                st.plotly_chart(
-                    fig,
-                    use_container_width=True,
-                    config={"scrollZoom": True, "displayModeBar": True, "doubleClick": "reset"},
-                )
-
-            c_spy, c_qqq = st.columns(2)
-            with c_spy:
-                st.markdown("**SPY**")
-                _render_gex_heatmap("SPY", multi_asset_data.get("SPY") if multi_asset_data else None)
-            with c_qqq:
-                st.markdown("**QQQ**")
-                _render_gex_heatmap("QQQ", multi_asset_data.get("QQQ") if multi_asset_data else None)
-
-        elif active_view == "⚖️ Delta Charts":
-            st.subheader("⚖️ Cumulative Delta")
-            delta_views = [("0DTE", data_0dte), ("Weekly", data_weekly)]
-            if st.session_state.get("show_monthly_views", False):
-                delta_views.append(("Monthly", data_monthly))
-            for name, selected_data in delta_views:
-                if not selected_data:
-                    continue
-                st.markdown(f"**{name}**")
-                fig = go.Figure()
-                fig.add_trace(
-                    go.Scatter(
-                        x=selected_data["strike_delta"]["strike"],
-                        y=selected_data["strike_delta"]["cumulative_delta"],
-                        mode="lines",
-                        line=dict(color="#00D9FF", width=3),
-                        fill="tozeroy",
-                    )
-                )
-                fig.add_hline(y=0, line_dash="dash", line_color="white")
-                fig.add_vline(x=selected_data["dn_strike"], line_dash="dot", line_color="#FFD700", annotation_text="Delta Neutral")
-                fig.update_layout(template="plotly_dark" if st.session_state.theme == "dark" else "plotly_white", height=360)
-                st.plotly_chart(fig, use_container_width=True)
 
     if right_col is not None:
         with right_col:
