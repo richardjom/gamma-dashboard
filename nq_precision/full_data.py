@@ -3232,14 +3232,22 @@ def get_expirations_by_type(df):
 
 def calculate_delta_neutral(df, qqq_price):
     df_calc = df.copy()
+    if "delta" not in df_calc.columns:
+        df_calc["delta"] = 0.0
+    # Normalize delta sign by option type so math is consistent across feeds.
+    # Some sources may emit put deltas as positive magnitudes.
+    df_calc["delta"] = pd.to_numeric(df_calc["delta"], errors="coerce").fillna(0.0)
+    call_mask = df_calc["type"].astype(str).str.lower().eq("call")
+    put_mask = df_calc["type"].astype(str).str.lower().eq("put")
+    df_calc.loc[call_mask, "delta"] = df_calc.loc[call_mask, "delta"].abs()
+    df_calc.loc[put_mask, "delta"] = -df_calc.loc[put_mask, "delta"].abs()
+    df_calc["delta"] = df_calc["delta"].clip(lower=-1.0, upper=1.0)
 
     calls = df_calc[df_calc["type"] == "call"].copy()
     calls["delta_notional"] = calls["open_interest"] * calls["delta"] * 100 * qqq_price
 
     puts = df_calc[df_calc["type"] == "put"].copy()
-    puts["delta_notional"] = (
-        puts["open_interest"] * puts["delta"] * 100 * qqq_price * -1
-    )
+    puts["delta_notional"] = puts["open_interest"] * puts["delta"] * 100 * qqq_price
 
     all_delta = pd.concat([calls, puts])
     strike_delta = all_delta.groupby("strike")["delta_notional"].sum().reset_index()
@@ -3267,10 +3275,7 @@ def calculate_delta_neutral(df, qqq_price):
         min_idx = strike_delta["cumulative_delta"].abs().idxmin()
         dn_strike = float(strike_delta.loc[min_idx, "strike"])
 
-    df_calc["delta_exposure"] = df_calc.apply(
-        lambda x: x["open_interest"] * x["delta"] * 100 * (1 if x["type"] == "call" else -1),
-        axis=1,
-    )
+    df_calc["delta_exposure"] = df_calc["open_interest"] * df_calc["delta"] * 100
 
     return dn_strike, strike_delta, df_calc
 
