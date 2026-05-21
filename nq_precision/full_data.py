@@ -4290,6 +4290,49 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
             if below:
                 p_floor_strike = float(min(below, key=lambda s: abs(s - lower_cap)))
 
+    # Anchor primaries to strongest directional gamma walls/floors near spot.
+    def _pick_gamma_anchor(strike_frame, side):
+        if strike_frame is None or strike_frame.empty:
+            return None
+        frame = strike_frame.copy()
+        frame["gex_abs"] = frame["GEX"].abs()
+        if side == "call":
+            frame = frame[
+                (frame["strike"] > qqq_price)
+                & (frame["strike"] <= upper_cap)
+                & (frame["GEX"] > 0)
+            ]
+        else:
+            frame = frame[
+                (frame["strike"] < qqq_price)
+                & (frame["strike"] >= lower_cap)
+                & (frame["GEX"] < 0)
+            ]
+        if frame.empty:
+            return None
+        frame = frame.sort_values(
+            ["gex_abs", "LIQ", "OI", "VOL"],
+            ascending=[False, False, False, False],
+        )
+        top = frame.head(3).copy()
+        # If top gamma clusters are similar strength, prefer the one closer to spot.
+        if len(top) >= 2:
+            lead = float(top.iloc[0]["gex_abs"])
+            nxt = float(top.iloc[1]["gex_abs"])
+            if lead > 0 and ((lead - nxt) / lead) < 0.12:
+                top = top.sort_values(
+                    ["dist_pct", "gex_abs", "LIQ"],
+                    ascending=[True, False, False],
+                )
+        return float(top.iloc[0]["strike"])
+
+    gamma_wall_strike = _pick_gamma_anchor(call_strikes, side="call")
+    gamma_floor_strike = _pick_gamma_anchor(put_strikes, side="put")
+    if gamma_wall_strike is not None:
+        p_wall_strike = float(gamma_wall_strike)
+    if gamma_floor_strike is not None:
+        p_floor_strike = float(gamma_floor_strike)
+
     # Guardrail: keep floor below wall; if violated, force directional picks.
     if p_floor_strike >= p_wall_strike:
         alt_wall = call_scored[call_scored["strike"] > qqq_price]
@@ -4527,7 +4570,7 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
             "options_latency_s": options_health.get("latency_s"),
             "options_freshness": options_health.get("status", "unknown"),
             "confidence_multiplier": conf_mult,
-            "wall_model": "zone_v2",
+            "wall_model": "zone_v3_gamma_anchor",
             "strike_window_pct": round(float(strike_window_pct), 4),
             "primary_side_cap_pct": round(float(side_cap_pct), 4),
             "liq_quantile": float(liq_q),
