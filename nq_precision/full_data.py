@@ -4296,7 +4296,7 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
                 p_floor_strike = float(min(below, key=lambda s: abs(s - lower_cap)))
 
     # Anchor primaries to strongest directional gamma walls/floors near spot.
-    def _pick_gamma_anchor(strike_frame, side):
+    def _pick_gamma_anchor(strike_frame, side, scored_frame=None):
         if strike_frame is None or strike_frame.empty:
             return None
         frame = strike_frame.copy()
@@ -4316,24 +4316,47 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
             ]
         if frame.empty:
             return None
+        gex_max = max(1.0, float(frame["gex_abs"].max()))
+        frame["gex_norm"] = frame["gex_abs"] / gex_max
+
+        struct_lookup = {}
+        if scored_frame is not None and not scored_frame.empty:
+            sf = scored_frame.copy()
+            sf["strike"] = pd.to_numeric(sf["strike"], errors="coerce")
+            sf = sf[sf["strike"].notna()].copy()
+            sf = sf.sort_values("strike")
+            for _, row in sf.iterrows():
+                struct_lookup[float(row["strike"])] = float(
+                    row.get("zone_confidence_score", row.get("confidence_score", row.get("score", 0.0)))
+                )
+        struct_max = max(1.0, max(struct_lookup.values())) if struct_lookup else 1.0
+
+        def _nearest_struct_norm(strike_val):
+            if not struct_lookup:
+                return 0.0
+            near = min(struct_lookup.keys(), key=lambda s: abs(float(s) - float(strike_val)))
+            return float(struct_lookup.get(near, 0.0)) / struct_max
+
+        frame["struct_norm"] = frame["strike"].map(_nearest_struct_norm)
+        # Balanced mode: 70% gamma anchor, 30% strike-structure confidence.
+        frame["blend_score"] = (0.70 * frame["gex_norm"]) + (0.30 * frame["struct_norm"])
         frame = frame.sort_values(
-            ["gex_abs", "LIQ", "OI", "VOL"],
-            ascending=[False, False, False, False],
+            ["blend_score", "gex_abs", "LIQ", "OI", "VOL"],
+            ascending=[False, False, False, False, False],
         )
         top = frame.head(3).copy()
-        # If top gamma clusters are similar strength, prefer the one closer to spot.
         if len(top) >= 2:
-            lead = float(top.iloc[0]["gex_abs"])
-            nxt = float(top.iloc[1]["gex_abs"])
-            if lead > 0 and ((lead - nxt) / lead) < 0.12:
+            lead = float(top.iloc[0]["blend_score"])
+            nxt = float(top.iloc[1]["blend_score"])
+            if lead > 0 and ((lead - nxt) / lead) < 0.08:
                 top = top.sort_values(
-                    ["dist_pct", "gex_abs", "LIQ"],
-                    ascending=[True, False, False],
+                    ["dist_pct", "blend_score", "gex_abs", "LIQ"],
+                    ascending=[True, False, False, False],
                 )
         return float(top.iloc[0]["strike"])
 
-    gamma_wall_strike = _pick_gamma_anchor(call_strikes, side="call")
-    gamma_floor_strike = _pick_gamma_anchor(put_strikes, side="put")
+    gamma_wall_strike = _pick_gamma_anchor(call_strikes, side="call", scored_frame=call_scored)
+    gamma_floor_strike = _pick_gamma_anchor(put_strikes, side="put", scored_frame=put_scored)
     if gamma_wall_strike is not None:
         p_wall_strike = float(gamma_wall_strike)
     if gamma_floor_strike is not None:
@@ -4576,7 +4599,7 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
             "options_latency_s": options_health.get("latency_s"),
             "options_freshness": options_health.get("status", "unknown"),
             "confidence_multiplier": conf_mult,
-            "wall_model": "zone_v3_gamma_anchor",
+            "wall_model": "zone_v4_gamma_structure_blend",
             "strike_window_pct": round(float(strike_window_pct), 4),
             "primary_side_cap_pct": round(float(side_cap_pct), 4),
             "liq_quantile": float(liq_q),
