@@ -4376,6 +4376,57 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
             p_floor_strike = (below[-1] if below else (qqq_price * 0.995))
             p_wall_strike = (above[0] if above else (qqq_price * 1.005))
 
+    # If walls are overly compressed, widen toward expected-move-consistent strikes.
+    # This keeps levels realistic while still sourced from ranked gamma/structure ladders.
+    if dte_days == 0:
+        min_span_nq = max(float(nq_em_full) * 0.72, float(nq_now) * 0.0058)
+    elif dte_days <= 7:
+        min_span_nq = max(float(nq_em_full) * 0.82, float(nq_now) * 0.0068)
+    else:
+        min_span_nq = max(float(nq_em_full) * 0.90, float(nq_now) * 0.0078)
+    min_span_strike = max(min_separation * 2.0, float(min_span_nq / max(1e-6, ratio)))
+    current_span_strike = float(p_wall_strike - p_floor_strike)
+
+    def _widen_candidate(frame, current_strike, target_strike, direction):
+        if frame is None or frame.empty:
+            return current_strike
+        if direction == "up":
+            pool = frame[frame["strike"] > current_strike].copy()
+        else:
+            pool = frame[frame["strike"] < current_strike].copy()
+        if pool.empty:
+            return current_strike
+        pool["score_core"] = pool.get(
+            "zone_confidence_score",
+            pool.get("confidence_score", pool.get("score", 0.0)),
+        )
+        max_core = max(1.0, float(pool["score_core"].max()))
+        pool["core_norm"] = pool["score_core"] / max_core
+        pool["target_dist"] = (pool["strike"] - float(target_strike)).abs()
+        # Prefer high-quality levels nearest the target widening point.
+        pool = pool.sort_values(
+            ["target_dist", "core_norm", "score", "dist_pct"],
+            ascending=[True, False, False, True],
+        )
+        near = pool.head(6).copy()
+        if near.empty:
+            return current_strike
+        near = near.sort_values(
+            ["core_norm", "score", "target_dist"],
+            ascending=[False, False, True],
+        )
+        return float(near.iloc[0]["strike"])
+
+    if current_span_strike < min_span_strike:
+        target_half = min_span_strike * 0.5
+        target_wall = float(qqq_price + target_half)
+        target_floor = float(qqq_price - target_half)
+        widened_wall = _widen_candidate(call_scored, p_wall_strike, target_wall, "up")
+        widened_floor = _widen_candidate(put_scored, p_floor_strike, target_floor, "down")
+        if widened_floor < widened_wall:
+            p_wall_strike = float(widened_wall)
+            p_floor_strike = float(widened_floor)
+
     s_wall_strike = _pick_secondary(call_scored, p_wall_strike, direction="up")
     s_floor_strike = _pick_secondary(put_scored, p_floor_strike, direction="down")
 
@@ -4602,6 +4653,7 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
             "wall_model": "zone_v4_gamma_structure_blend",
             "strike_window_pct": round(float(strike_window_pct), 4),
             "primary_side_cap_pct": round(float(side_cap_pct), 4),
+            "min_primary_span_nq": round(float(min_span_nq), 2),
             "liq_quantile": float(liq_q),
             "structure_compressed": bool(wall_structure_compressed or floor_structure_compressed),
         },
