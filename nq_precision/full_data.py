@@ -4379,17 +4379,19 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
     # Keep primary wall/floor span inside an expected-move-consistent band.
     # This avoids both over-compression and over-expansion.
     if dte_days == 0:
-        min_span_nq = max(float(nq_em_full) * 0.55, float(nq_now) * 0.0046)
-        max_span_nq = min(float(nq_em_full) * 1.22, float(nq_now) * 0.0108)
+        base_span_nq = max(float(nq_em_full) * 0.75, float(nq_now) * 0.0042)
+        min_span_nq = max(base_span_nq * 0.72, float(nq_now) * 0.0038)
+        max_span_nq = min(base_span_nq * 1.28, float(nq_now) * 0.0082)
     elif dte_days <= 7:
-        min_span_nq = max(float(nq_em_full) * 0.65, float(nq_now) * 0.0056)
-        max_span_nq = min(float(nq_em_full) * 1.30, float(nq_now) * 0.0138)
+        base_span_nq = max(float(nq_em_full) * 0.82, float(nq_now) * 0.0052)
+        min_span_nq = max(base_span_nq * 0.74, float(nq_now) * 0.0046)
+        max_span_nq = min(base_span_nq * 1.34, float(nq_now) * 0.0108)
     else:
-        min_span_nq = max(float(nq_em_full) * 0.75, float(nq_now) * 0.0068)
-        max_span_nq = min(float(nq_em_full) * 1.38, float(nq_now) * 0.0170)
+        base_span_nq = max(float(nq_em_full) * 0.90, float(nq_now) * 0.0062)
+        min_span_nq = max(base_span_nq * 0.76, float(nq_now) * 0.0054)
+        max_span_nq = min(base_span_nq * 1.38, float(nq_now) * 0.0138)
 
-    min_span_nq = max(float(min_span_nq), float(nq_now) * 0.0038)
-    max_span_nq = max(float(max_span_nq), float(min_span_nq) + (float(nq_now) * 0.0016))
+    max_span_nq = max(float(max_span_nq), float(min_span_nq) + (float(nq_now) * 0.0012))
 
     min_span_strike = max(min_separation * 2.0, float(min_span_nq / max(1e-6, ratio)))
     max_span_strike = max(min_span_strike + min_separation, float(max_span_nq / max(1e-6, ratio)))
