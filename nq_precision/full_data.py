@@ -4062,6 +4062,16 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
         0.02,
         min(0.12, strike_window_pct * (1.10 if dte_days == 0 else 1.25)),
     )
+    # Keep primary walls inside a practical intraday range around spot.
+    # This prevents far OI clusters from overpowering near-spot structure.
+    if dte_days == 0:
+        side_cap_pct = min(0.0090, max(0.0045, (em_pct * 0.70)))
+    elif dte_days <= 7:
+        side_cap_pct = min(0.0140, max(0.0060, (em_pct * 0.95)))
+    else:
+        side_cap_pct = min(0.0200, max(0.0085, (em_pct * 1.10)))
+    side_cap_abs = qqq_price * side_cap_pct
+
     dist_decay = max(0.003, min(0.03, dist_cap_pct * 0.55))
     uniq_strikes = sorted(df["strike"].dropna().unique().tolist())
     if len(uniq_strikes) >= 2:
@@ -4243,6 +4253,42 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
         p_wall_strike = qqq_price * 1.01
     if p_floor_strike is None:
         p_floor_strike = qqq_price * 0.99
+
+    # Cap primary wall/floor distance from spot to avoid over-wide ranges.
+    upper_cap = qqq_price + side_cap_abs
+    lower_cap = qqq_price - side_cap_abs
+    if p_wall_strike > upper_cap:
+        cap_pool = call_scored[
+            (call_scored["strike"] > qqq_price) & (call_scored["strike"] <= upper_cap)
+        ].copy()
+        if not cap_pool.empty:
+            cap_pool = cap_pool.sort_values(
+                ["zone_confidence_score", "confidence_score", "score", "dist_pct"],
+                ascending=[False, False, False, True],
+            )
+            p_wall_strike = float(cap_pool.iloc[0]["strike"])
+        else:
+            above = sorted(
+                [float(s) for s in calls["strike"].dropna().unique().tolist() if float(s) > qqq_price]
+            )
+            if above:
+                p_wall_strike = float(min(above, key=lambda s: abs(s - upper_cap)))
+    if p_floor_strike < lower_cap:
+        cap_pool = put_scored[
+            (put_scored["strike"] < qqq_price) & (put_scored["strike"] >= lower_cap)
+        ].copy()
+        if not cap_pool.empty:
+            cap_pool = cap_pool.sort_values(
+                ["zone_confidence_score", "confidence_score", "score", "dist_pct"],
+                ascending=[False, False, False, True],
+            )
+            p_floor_strike = float(cap_pool.iloc[0]["strike"])
+        else:
+            below = sorted(
+                [float(s) for s in puts["strike"].dropna().unique().tolist() if float(s) < qqq_price]
+            )
+            if below:
+                p_floor_strike = float(min(below, key=lambda s: abs(s - lower_cap)))
 
     # Guardrail: keep floor below wall; if violated, force directional picks.
     if p_floor_strike >= p_wall_strike:
@@ -4483,6 +4529,7 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
             "confidence_multiplier": conf_mult,
             "wall_model": "zone_v2",
             "strike_window_pct": round(float(strike_window_pct), 4),
+            "primary_side_cap_pct": round(float(side_cap_pct), 4),
             "liq_quantile": float(liq_q),
             "structure_compressed": bool(wall_structure_compressed or floor_structure_compressed),
         },
