@@ -1109,18 +1109,25 @@ def _compute_tight_ratio(nq_now, qqq_price, nq_source="", qqq_source=""):
     abs_dev_series = (recent_series - med_ratio).abs()
     mad_ratio = float(abs_dev_series.median()) if len(abs_dev_series) > 0 else 0.0
 
-    # Prevent overreaction when history is thin or noise is tiny.
+    # Keep live mapping responsive; apply history as a light stabilizer, not a hard anchor.
     floor_band = max(0.00020, med_ratio * 0.00020)  # 2 bps floor
     dyn_band = max(floor_band, 4.0 * mad_ratio)
-    low_band = med_ratio - dyn_band
-    high_band = med_ratio + dyn_band
-    clamped_ratio = min(max(raw_ratio, low_band), high_band)
-    outlier_clamped = abs(raw_ratio - clamped_ratio) > 1e-12
+    dev_pct_from_med = abs(raw_ratio - med_ratio) / max(1e-9, med_ratio) * 100.0
+    outlier_clamped = False
+    clamped_ratio = raw_ratio
+    if dev_pct_from_med > 2.5:
+        low_band = med_ratio - dyn_band
+        high_band = med_ratio + dyn_band
+        clamped_ratio = min(max(raw_ratio, low_band), high_band)
+        outlier_clamped = abs(raw_ratio - clamped_ratio) > 1e-12
 
     if len(recent_series) >= 8:
-        tight_ratio = (0.72 * clamped_ratio) + (0.28 * med_ratio)
+        if dev_pct_from_med <= 0.35:
+            tight_ratio = (0.85 * raw_ratio) + (0.15 * med_ratio)
+        else:
+            tight_ratio = (0.95 * clamped_ratio) + (0.05 * med_ratio)
     elif len(recent_series) >= 3:
-        tight_ratio = (0.84 * raw_ratio) + (0.16 * med_ratio)
+        tight_ratio = (0.92 * raw_ratio) + (0.08 * med_ratio)
     else:
         tight_ratio = raw_ratio
 
@@ -1174,19 +1181,15 @@ def _stabilize_level_mapping(nq_now, qqq_price_live, cboe_price, ratio_meta):
 
     if qqq_live > 0 and qqq_cboe > 0:
         q_dev_pct = abs(qqq_live - qqq_cboe) / qqq_cboe * 100.0
-        if q_dev_pct > 1.75:
-            qqq_level_anchor = qqq_cboe
-            mode = "CBOE Anchored"
-            note = (
-                f"QQQ live vs CBOE diverged by {q_dev_pct:.2f}%. "
-                f"Level engine anchored to CBOE spot ({qqq_cboe:.2f})."
-            )
-        elif q_dev_pct > 0.75:
-            qqq_level_anchor = (0.70 * qqq_live) + (0.30 * qqq_cboe)
-            mode = "Blended Live/CBOE"
+        if q_dev_pct <= 1.25:
+            qqq_level_anchor = (0.85 * qqq_live) + (0.15 * qqq_cboe)
+            mode = "Live/CBOE Blend"
+        else:
+            qqq_level_anchor = qqq_live
+            mode = "Live Anchor"
             note = (
                 f"QQQ live vs CBOE divergence {q_dev_pct:.2f}%. "
-                "Using blended anchor for level mapping."
+                "Using live anchor to avoid delayed-chain bias."
             )
 
     ratio_live = float(ratio_meta.get("ratio", 0.0) or 0.0)
