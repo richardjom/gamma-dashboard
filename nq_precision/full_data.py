@@ -4376,24 +4376,36 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
             p_floor_strike = (below[-1] if below else (qqq_price * 0.995))
             p_wall_strike = (above[0] if above else (qqq_price * 1.005))
 
-    # If walls are overly compressed, widen toward expected-move-consistent strikes.
-    # This keeps levels realistic while still sourced from ranked gamma/structure ladders.
+    # Keep primary wall/floor span inside an expected-move-consistent band.
+    # This avoids both over-compression and over-expansion.
     if dte_days == 0:
-        min_span_nq = max(float(nq_em_full) * 0.72, float(nq_now) * 0.0058)
+        min_span_nq = max(float(nq_em_full) * 0.55, float(nq_now) * 0.0046)
+        max_span_nq = min(float(nq_em_full) * 1.22, float(nq_now) * 0.0108)
     elif dte_days <= 7:
-        min_span_nq = max(float(nq_em_full) * 0.82, float(nq_now) * 0.0068)
+        min_span_nq = max(float(nq_em_full) * 0.65, float(nq_now) * 0.0056)
+        max_span_nq = min(float(nq_em_full) * 1.30, float(nq_now) * 0.0138)
     else:
-        min_span_nq = max(float(nq_em_full) * 0.90, float(nq_now) * 0.0078)
+        min_span_nq = max(float(nq_em_full) * 0.75, float(nq_now) * 0.0068)
+        max_span_nq = min(float(nq_em_full) * 1.38, float(nq_now) * 0.0170)
+
+    min_span_nq = max(float(min_span_nq), float(nq_now) * 0.0038)
+    max_span_nq = max(float(max_span_nq), float(min_span_nq) + (float(nq_now) * 0.0016))
+
     min_span_strike = max(min_separation * 2.0, float(min_span_nq / max(1e-6, ratio)))
+    max_span_strike = max(min_span_strike + min_separation, float(max_span_nq / max(1e-6, ratio)))
     current_span_strike = float(p_wall_strike - p_floor_strike)
 
-    def _widen_candidate(frame, current_strike, target_strike, direction):
+    def _recenter_candidate(frame, current_strike, target_strike, mode):
         if frame is None or frame.empty:
             return current_strike
-        if direction == "up":
+        if mode == "widen_up":
             pool = frame[frame["strike"] > current_strike].copy()
-        else:
+        elif mode == "widen_down":
             pool = frame[frame["strike"] < current_strike].copy()
+        elif mode == "tighten_down":
+            pool = frame[frame["strike"] < current_strike].copy()
+        else:  # tighten_up
+            pool = frame[frame["strike"] > current_strike].copy()
         if pool.empty:
             return current_strike
         pool["score_core"] = pool.get(
@@ -4421,11 +4433,39 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
         target_half = min_span_strike * 0.5
         target_wall = float(qqq_price + target_half)
         target_floor = float(qqq_price - target_half)
-        widened_wall = _widen_candidate(call_scored, p_wall_strike, target_wall, "up")
-        widened_floor = _widen_candidate(put_scored, p_floor_strike, target_floor, "down")
+        widened_wall = _recenter_candidate(call_scored, p_wall_strike, target_wall, "widen_up")
+        widened_floor = _recenter_candidate(put_scored, p_floor_strike, target_floor, "widen_down")
         if widened_floor < widened_wall:
             p_wall_strike = float(widened_wall)
             p_floor_strike = float(widened_floor)
+    elif current_span_strike > max_span_strike:
+        target_half = max_span_strike * 0.5
+        target_wall = float(qqq_price + target_half)
+        target_floor = float(qqq_price - target_half)
+        tightened_wall = _recenter_candidate(call_scored, p_wall_strike, target_wall, "tighten_down")
+        tightened_floor = _recenter_candidate(put_scored, p_floor_strike, target_floor, "tighten_up")
+        # Keep directional validity after tightening.
+        if tightened_wall <= qqq_price:
+            candidates = call_scored[call_scored["strike"] > qqq_price].copy()
+            if not candidates.empty:
+                candidates = candidates.sort_values(
+                    ["dist_pct", "zone_confidence_score", "confidence_score", "score"],
+                    ascending=[True, False, False, False],
+                )
+                tightened_wall = float(candidates.iloc[0]["strike"])
+        if tightened_floor >= qqq_price:
+            candidates = put_scored[put_scored["strike"] < qqq_price].copy()
+            if not candidates.empty:
+                candidates = candidates.sort_values(
+                    ["dist_pct", "zone_confidence_score", "confidence_score", "score"],
+                    ascending=[True, False, False, False],
+                )
+                tightened_floor = float(candidates.iloc[0]["strike"])
+        if tightened_floor < tightened_wall:
+            p_wall_strike = float(tightened_wall)
+            p_floor_strike = float(tightened_floor)
+
+    current_span_nq = float((p_wall_strike - p_floor_strike) * ratio)
 
     s_wall_strike = _pick_secondary(call_scored, p_wall_strike, direction="up")
     s_floor_strike = _pick_secondary(put_scored, p_floor_strike, direction="down")
@@ -4654,6 +4694,8 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
             "strike_window_pct": round(float(strike_window_pct), 4),
             "primary_side_cap_pct": round(float(side_cap_pct), 4),
             "min_primary_span_nq": round(float(min_span_nq), 2),
+            "max_primary_span_nq": round(float(max_span_nq), 2),
+            "current_primary_span_nq": round(float(current_span_nq), 2),
             "liq_quantile": float(liq_q),
             "structure_compressed": bool(wall_structure_compressed or floor_structure_compressed),
         },
