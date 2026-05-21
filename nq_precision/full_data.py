@@ -4296,6 +4296,7 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
             return None
         frame = strike_frame.copy()
         frame["gex_abs"] = frame["GEX"].abs()
+        frame["dist_pct"] = (frame["strike"] - qqq_price).abs() / max(1.0, qqq_price)
         if side == "call":
             frame = frame[
                 (frame["strike"] > qqq_price)
