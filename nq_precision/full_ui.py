@@ -57,7 +57,7 @@ def _quote_timestamp_ms(symbol):
         return None
 
 
-def _feed_runtime_status(nq_source, qqq_source):
+def _feed_runtime_status(nq_source, qqq_source, enforce_options_gate=True):
     hard_quote_age_sec = int(st.secrets.get("HARD_QUOTE_MAX_AGE_SEC", 60))
     hard_sync_lag_sec = int(st.secrets.get("HARD_RATIO_SYNC_MAX_LAG_SEC", 10))
     options_hard_age_sec = int(st.secrets.get("HARD_OPTIONS_MAX_AGE_SEC", 150))
@@ -94,9 +94,8 @@ def _feed_runtime_status(nq_source, qqq_source):
         freeze = True
         reasons.append(f"QQQ age {qqq_age}s > {hard_quote_age_sec}s")
     if sync_lag_s is not None and sync_lag_s > hard_sync_lag_sec:
-        freeze = True
         reasons.append(f"NQ/QQQ sync lag {sync_lag_s:.1f}s > {hard_sync_lag_sec}s")
-    if options_status == "stale_hard":
+    if enforce_options_gate and options_status == "stale_hard":
         freeze = True
         reasons.append("Options chain stale_hard")
 
@@ -4913,14 +4912,18 @@ def run_full_app():
                 )
                 nq_source = "Manual Fallback"
 
-        feed_status = _feed_runtime_status(nq_source=nq_source, qqq_source=qqq_source)
+        feed_status_pre = _feed_runtime_status(
+            nq_source=nq_source,
+            qqq_source=qqq_source,
+            enforce_options_gate=False,
+        )
         ratio_meta = _compute_tight_ratio(
             nq_now=nq_now,
             qqq_price=qqq_price,
             nq_source=nq_source,
             qqq_source=qqq_source,
-            sync_lag_s=feed_status.get("sync_lag_s"),
-            max_sync_lag_s=float(feed_status.get("hard_sync_lag_sec", 10)),
+            sync_lag_s=feed_status_pre.get("sync_lag_s"),
+            max_sync_lag_s=float(feed_status_pre.get("hard_sync_lag_sec", 10)),
         )
         ratio = float(ratio_meta.get("ratio", 0.0) or 0.0)
         nq_day_change_pct = 0.0
@@ -4955,6 +4958,11 @@ def run_full_app():
             qqq_price_live=qqq_price,
             cboe_price=cboe_price,
             ratio_meta=ratio_meta,
+        )
+        feed_status = _feed_runtime_status(
+            nq_source=nq_source,
+            qqq_source=qqq_source,
+            enforce_options_gate=True,
         )
 
         levels_cache_key = "levels_last_good::QQQ"
