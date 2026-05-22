@@ -4712,6 +4712,43 @@ def _render_nq_level_builder_panel(data_0dte=None, data_weekly=None):
     ]
     output_string = ",".join(f"{v:.2f}" for v in values)
 
+    copy_payload = html.escape(output_string)
+    components.html(
+        f"""
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+            <button id="copy-levels-btn" style="
+                background:#1f9cff;
+                color:white;
+                border:none;
+                border-radius:8px;
+                padding:8px 12px;
+                font-weight:600;
+                cursor:pointer;
+            ">📋 Copy Levels String</button>
+            <span id="copy-levels-status" style="font-size:13px; color:#9ecbff;"></span>
+            <textarea id="copy-levels-src" style="position:absolute; left:-9999px;">{copy_payload}</textarea>
+        </div>
+        <script>
+            const btn = document.getElementById("copy-levels-btn");
+            const status = document.getElementById("copy-levels-status");
+            const src = document.getElementById("copy-levels-src");
+            btn.addEventListener("click", async () => {{
+                try {{
+                    await navigator.clipboard.writeText(src.value);
+                    status.textContent = "Copied!";
+                    setTimeout(() => {{ status.textContent = ""; }}, 1500);
+                }} catch (err) {{
+                    src.select();
+                    document.execCommand("copy");
+                    status.textContent = "Copied!";
+                    setTimeout(() => {{ status.textContent = ""; }}, 1500);
+                }}
+            }});
+        </script>
+        """,
+        height=52,
+    )
+
     st.text_area(
         label="Copy this → paste into Pine Script 'Price Levels' input",
         value=output_string,
