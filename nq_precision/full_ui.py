@@ -36,6 +36,7 @@ from nq_precision.full_data import (
     get_intraday_history,
     get_nq_intraday_data,
     get_nq_price_auto,
+    get_quote_age_seconds,
     get_quote_age_label,
     get_qqq_price_with_source,
     get_runtime_health,
@@ -45,6 +46,72 @@ from nq_precision.full_data import (
     process_multi_asset,
     schwab_is_configured,
 )
+
+
+def _quote_timestamp_ms(symbol):
+    meta = st.session_state.get(f"quote_meta::{symbol}", {}) or {}
+    ts = meta.get("timestamp_ms")
+    try:
+        return int(ts) if ts else None
+    except Exception:
+        return None
+
+
+def _feed_runtime_status(nq_source, qqq_source):
+    hard_quote_age_sec = int(st.secrets.get("HARD_QUOTE_MAX_AGE_SEC", 60))
+    hard_sync_lag_sec = int(st.secrets.get("HARD_RATIO_SYNC_MAX_LAG_SEC", 10))
+    options_hard_age_sec = int(st.secrets.get("HARD_OPTIONS_MAX_AGE_SEC", 150))
+
+    nq_age = get_quote_age_seconds("NQ=F")
+    qqq_age = get_quote_age_seconds("QQQ")
+    nq_ts = _quote_timestamp_ms("NQ=F")
+    qqq_ts = _quote_timestamp_ms("QQQ")
+    sync_lag_s = None
+    if nq_ts and qqq_ts:
+        sync_lag_s = abs(int(nq_ts) - int(qqq_ts)) / 1000.0
+
+    options_health = get_dataset_freshness("options:QQQ", max_age_sec=options_hard_age_sec)
+    options_src = str(options_health.get("source", "unknown")).lower()
+    options_status = str(options_health.get("status", "unknown")).lower()
+
+    nq_rt = "schwab" in str(nq_source or "").lower()
+    qqq_rt = "schwab" in str(qqq_source or "").lower()
+    opt_rt = "schwab" in options_src
+
+    if nq_rt and qqq_rt and opt_rt:
+        mode = "Realtime"
+    elif nq_rt and qqq_rt and not opt_rt:
+        mode = "Mixed (Realtime Quotes / Delayed Options)"
+    else:
+        mode = "Fallback/Delayed"
+
+    reasons = []
+    freeze = False
+    if nq_age is not None and nq_age > hard_quote_age_sec:
+        freeze = True
+        reasons.append(f"NQ age {nq_age}s > {hard_quote_age_sec}s")
+    if qqq_age is not None and qqq_age > hard_quote_age_sec:
+        freeze = True
+        reasons.append(f"QQQ age {qqq_age}s > {hard_quote_age_sec}s")
+    if sync_lag_s is not None and sync_lag_s > hard_sync_lag_sec:
+        freeze = True
+        reasons.append(f"NQ/QQQ sync lag {sync_lag_s:.1f}s > {hard_sync_lag_sec}s")
+    if options_status == "stale_hard":
+        freeze = True
+        reasons.append("Options chain stale_hard")
+
+    return {
+        "mode": mode,
+        "freeze_levels": bool(freeze),
+        "reasons": reasons,
+        "sync_lag_s": sync_lag_s,
+        "nq_age_s": nq_age,
+        "qqq_age_s": qqq_age,
+        "options_status": options_status,
+        "options_source": options_health.get("source", "unknown"),
+        "hard_quote_age_sec": hard_quote_age_sec,
+        "hard_sync_lag_sec": hard_sync_lag_sec,
+    }
 
 
 def _theme_css(bg_color, card_bg, text_color, accent_color, border_color, compact_mode=False):
@@ -1063,8 +1130,26 @@ def _ratio_source_tag(src):
     return token[:48] or "unknown"
 
 
-def _compute_tight_ratio(nq_now, qqq_price, nq_source="", qqq_source=""):
+def _compute_tight_ratio(
+    nq_now,
+    qqq_price,
+    nq_source="",
+    qqq_source="",
+    sync_lag_s=None,
+    max_sync_lag_s=10,
+):
     raw_ratio = float(nq_now / qqq_price) if qqq_price and qqq_price > 0 else 0.0
+    sync_lag = float(sync_lag_s) if sync_lag_s is not None else None
+    if sync_lag is not None and sync_lag > float(max_sync_lag_s):
+        held = st.session_state.get("ratio_last_good::NQ_QQQ")
+        if held and float(held.get("ratio", 0.0) or 0.0) > 0:
+            out = dict(held)
+            out["ratio_mode"] = f"Sync Hold ({sync_lag:.1f}s lag)"
+            out["confidence_label"] = "Low"
+            out["confidence_score"] = int(min(54, int(out.get("confidence_score", 50) or 50)))
+            out["source_pair"] = f"{nq_source} / {qqq_source}"
+            out["sync_lag_s"] = sync_lag
+            return out
     now_ts = float(time.time())
     nq_tag = _ratio_source_tag(nq_source)
     qqq_tag = _ratio_source_tag(qqq_source)
@@ -1089,7 +1174,7 @@ def _compute_tight_ratio(nq_now, qqq_price, nq_source="", qqq_source=""):
     st.session_state[hist_key] = history
 
     if raw_ratio <= 0:
-        return {
+        out = {
             "ratio": 0.0,
             "raw_ratio": 0.0,
             "median_ratio": 0.0,
@@ -1101,7 +1186,9 @@ def _compute_tight_ratio(nq_now, qqq_price, nq_source="", qqq_source=""):
             "deviation_bps": 0.0,
             "uncertainty_pts": 0.0,
             "source_pair": f"{nq_source} / {qqq_source}",
+            "sync_lag_s": sync_lag,
         }
+        return out
 
     ratio_series = pd.Series([float(h["ratio"]) for h in history], dtype="float64")
     recent_series = ratio_series.tail(min(30, len(ratio_series)))
@@ -1155,7 +1242,7 @@ def _compute_tight_ratio(nq_now, qqq_price, nq_source="", qqq_source=""):
     conf_i = int(round(conf))
     conf_label = "High" if conf_i >= 78 else "Medium" if conf_i >= 55 else "Low"
 
-    return {
+    out = {
         "ratio": float(tight_ratio),
         "raw_ratio": float(raw_ratio),
         "median_ratio": float(med_ratio),
@@ -1167,7 +1254,11 @@ def _compute_tight_ratio(nq_now, qqq_price, nq_source="", qqq_source=""):
         "deviation_bps": float(dev_bps),
         "uncertainty_pts": float(uncertainty_pts),
         "source_pair": f"{nq_source} / {qqq_source}",
+        "sync_lag_s": sync_lag,
     }
+    if sync_lag is None or sync_lag <= float(max_sync_lag_s):
+        st.session_state["ratio_last_good::NQ_QQQ"] = dict(out)
+    return out
 
 
 def _stabilize_level_mapping(nq_now, qqq_price_live, cboe_price, ratio_meta):
@@ -1761,6 +1852,38 @@ def _freshness_class(status):
     if s in {"stale_soft", "unknown"}:
         return "warn"
     return "bad"
+
+
+def _render_runtime_mode_banner(feed_status):
+    if not feed_status:
+        return
+    mode = str(feed_status.get("mode", "Unknown"))
+    freeze = bool(feed_status.get("freeze_levels"))
+    nq_age = feed_status.get("nq_age_s")
+    qqq_age = feed_status.get("qqq_age_s")
+    sync_lag = feed_status.get("sync_lag_s")
+    options_status = str(feed_status.get("options_status", "unknown"))
+    details = (
+        f"Mode: {mode} | NQ age: {nq_age if nq_age is not None else 'n/a'}s | "
+        f"QQQ age: {qqq_age if qqq_age is not None else 'n/a'}s | "
+        f"Sync lag: {sync_lag:.1f}s" if sync_lag is not None else
+        f"Mode: {mode} | NQ age: {nq_age if nq_age is not None else 'n/a'}s | "
+        f"QQQ age: {qqq_age if qqq_age is not None else 'n/a'}s | Sync lag: n/a"
+    )
+    details = f"{details} | Options: {options_status}"
+    reasons = feed_status.get("reasons", []) or []
+    if freeze:
+        msg = "Data quality lock active: levels frozen to last valid snapshot."
+        if reasons:
+            msg += " " + " • ".join(reasons)
+        st.error(msg)
+        st.caption(details)
+    elif "fallback" in mode.lower() or "mixed" in mode.lower():
+        st.warning("Running in fallback/delayed mode. Treat levels as lower confidence.")
+        st.caption(details)
+    else:
+        st.success("Realtime mode active.")
+        st.caption(details)
 
 
 def _render_data_health_strip(nq_source, qqq_source, ratio_meta, data_0dte, market_data, finnhub_key):
@@ -4759,6 +4882,7 @@ def run_full_app():
         st.stop()
 
     level_mapping_note = ""
+    feed_status = None
 
     with st.spinner("🔄 Loading multi-timeframe data..."):
         qqq_price, qqq_source = get_qqq_price_with_source(finnhub_key)
@@ -4789,11 +4913,14 @@ def run_full_app():
                 )
                 nq_source = "Manual Fallback"
 
+        feed_status = _feed_runtime_status(nq_source=nq_source, qqq_source=qqq_source)
         ratio_meta = _compute_tight_ratio(
             nq_now=nq_now,
             qqq_price=qqq_price,
             nq_source=nq_source,
             qqq_source=qqq_source,
+            sync_lag_s=feed_status.get("sync_lag_s"),
+            max_sync_lag_s=float(feed_status.get("hard_sync_lag_sec", 10)),
         )
         ratio = float(ratio_meta.get("ratio", 0.0) or 0.0)
         nq_day_change_pct = 0.0
@@ -4830,26 +4957,50 @@ def run_full_app():
             ratio_meta=ratio_meta,
         )
 
-        exp_0dte, exp_weekly, exp_monthly = get_expirations_by_type(df_raw)
+        levels_cache_key = "levels_last_good::QQQ"
+        cached_levels = st.session_state.get(levels_cache_key)
+        freeze_levels = bool((feed_status or {}).get("freeze_levels"))
 
         data_0dte = None
         data_weekly = None
         data_monthly = None
 
-        if exp_0dte:
-            data_0dte = process_expiration(
-                df_raw, exp_0dte, qqq_price_levels, ratio, nq_now, options_ticker="QQQ"
-            )
+        if freeze_levels and cached_levels:
+            data_0dte = cached_levels.get("data_0dte")
+            data_weekly = cached_levels.get("data_weekly")
+            data_monthly = cached_levels.get("data_monthly")
+            ratio = float(cached_levels.get("ratio", ratio) or ratio)
+            ratio_meta = dict(ratio_meta or {})
+            ratio_meta["ratio"] = ratio
+            ratio_meta["ratio_mode"] = f"{ratio_meta.get('ratio_mode', 'Live')} (frozen snapshot)"
+            note_lock = "Level engine locked to last good snapshot due data-quality guardrails."
+            level_mapping_note = f"{level_mapping_note} {note_lock}".strip()
+        else:
+            exp_0dte, exp_weekly, exp_monthly = get_expirations_by_type(df_raw)
 
-        if exp_weekly and exp_weekly != exp_0dte:
-            data_weekly = process_expiration(
-                df_raw, exp_weekly, qqq_price_levels, ratio, nq_now, options_ticker="QQQ"
-            )
+            if exp_0dte:
+                data_0dte = process_expiration(
+                    df_raw, exp_0dte, qqq_price_levels, ratio, nq_now, options_ticker="QQQ"
+                )
 
-        if exp_monthly and exp_monthly not in [exp_0dte, exp_weekly]:
-            data_monthly = process_expiration(
-                df_raw, exp_monthly, qqq_price_levels, ratio, nq_now, options_ticker="QQQ"
-            )
+            if exp_weekly and exp_weekly != exp_0dte:
+                data_weekly = process_expiration(
+                    df_raw, exp_weekly, qqq_price_levels, ratio, nq_now, options_ticker="QQQ"
+                )
+
+            if exp_monthly and exp_monthly not in [exp_0dte, exp_weekly]:
+                data_monthly = process_expiration(
+                    df_raw, exp_monthly, qqq_price_levels, ratio, nq_now, options_ticker="QQQ"
+                )
+
+            if data_0dte and not freeze_levels:
+                st.session_state[levels_cache_key] = {
+                    "data_0dte": data_0dte,
+                    "data_weekly": data_weekly,
+                    "data_monthly": data_monthly,
+                    "ratio": float(ratio),
+                    "saved_at": datetime.now().isoformat(),
+                }
 
         market_data = get_market_overview_yahoo()
         event_risk = get_event_risk_snapshot(finnhub_key, hours_ahead=24)
@@ -4873,6 +5024,7 @@ def run_full_app():
         active_view = _render_left_nav(nav_sections)
 
     with center_col:
+        _render_runtime_mode_banner(feed_status)
         if level_mapping_note:
             st.warning(level_mapping_note)
         with st.expander("Data Health & Feed Diagnostics", expanded=False):
