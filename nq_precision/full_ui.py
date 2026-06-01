@@ -13,6 +13,7 @@ import streamlit.components.v1 as components
 import yfinance as yf
 
 from nq_precision.full_data import (
+    _get_secret,
     calculate_sentiment_score,
     exchange_schwab_auth_code,
     generate_daily_bread,
@@ -58,9 +59,9 @@ def _quote_timestamp_ms(symbol):
 
 
 def _feed_runtime_status(nq_source, qqq_source, enforce_options_gate=True):
-    hard_quote_age_sec = int(st.secrets.get("HARD_QUOTE_MAX_AGE_SEC", 60))
-    hard_sync_lag_sec = int(st.secrets.get("HARD_RATIO_SYNC_MAX_LAG_SEC", 10))
-    options_hard_age_sec = int(st.secrets.get("HARD_OPTIONS_MAX_AGE_SEC", 150))
+    hard_quote_age_sec = int(_get_secret("HARD_QUOTE_MAX_AGE_SEC", 60))
+    hard_sync_lag_sec = int(_get_secret("HARD_RATIO_SYNC_MAX_LAG_SEC", 10))
+    options_hard_age_sec = int(_get_secret("HARD_OPTIONS_MAX_AGE_SEC", 150))
 
     nq_age = get_quote_age_seconds("NQ=F")
     qqq_age = get_quote_age_seconds("QQQ")
@@ -4839,7 +4840,7 @@ def run_full_app():
 
     default_key = ""
     try:
-        default_key = st.secrets.get("FINNHUB_KEY", "")
+        default_key = _get_secret("FINNHUB_KEY", "")
     except Exception:
         default_key = ""
 
@@ -4862,11 +4863,16 @@ def run_full_app():
     with st.sidebar.expander("Schwab OAuth (one-time setup)", expanded=False):
         default_redirect = "https://developer.schwab.com/oauth2-redirect.html"
         try:
-            default_redirect = st.secrets.get("SCHWAB_REDIRECT_URI", default_redirect)
+            default_redirect = _get_secret("SCHWAB_REDIRECT_URI", default_redirect)
         except Exception:
             pass
         redirect_uri = st.text_input("Redirect URI", value=default_redirect, key="schwab_redirect_uri")
         auth_code = st.text_input("Auth Code", value="", key="schwab_auth_code")
+        st.caption(
+            "For Hugging Face Spaces, save SCHWAB_APP_KEY, SCHWAB_APP_SECRET, "
+            "SCHWAB_REFRESH_TOKEN, and SCHWAB_REDIRECT_URI in Space Secrets or Variables. "
+            "Do not rely on SCHWAB_ACCESS_TOKEN by itself because it expires quickly."
+        )
         if st.button("Exchange Code for Tokens"):
             token_payload, err = exchange_schwab_auth_code(auth_code, redirect_uri)
             if err:
@@ -4878,9 +4884,9 @@ def run_full_app():
                 st.code(
                     "\n".join(
                         [
-                            "# Add these to .streamlit/secrets.toml",
+                            "# Add these to .streamlit/secrets.toml or your Hugging Face Space Secrets",
                             f'SCHWAB_REFRESH_TOKEN = "{refresh_token}"',
-                            f'# Optional short-lived token: SCHWAB_ACCESS_TOKEN = "{access_token}"',
+                            f'# Optional short-lived token for local testing only: SCHWAB_ACCESS_TOKEN = "{access_token}"',
                         ]
                     ),
                     language="toml",

@@ -35,6 +35,8 @@ FINNHUB_KEY = "..."
 SCHWAB_APP_KEY = "..."
 SCHWAB_APP_SECRET = "..."
 SCHWAB_REFRESH_TOKEN = "..."
+# Optional short-lived token for local testing only:
+# SCHWAB_ACCESS_TOKEN = "..."
 # Optional tuning:
 # SCHWAB_MAX_STALE_SECONDS = 180
 # MAX_ONE_TICK_JUMP_PCT = 5
@@ -53,6 +55,8 @@ streamlit run nq_app.py
 
 Notes:
 - `.venv` is gitignored. Use the `requirements.txt` for reproducible installs.
+- For Hugging Face Spaces, set the same names in Space `Settings -> Variables and secrets`.
+- Do not deploy with only `SCHWAB_ACCESS_TOKEN`; it expires quickly and will lead to quote failures once Schwab returns `401`.
 
 ## Deploy to Hugging Face Space via GitHub Actions
 

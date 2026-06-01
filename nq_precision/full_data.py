@@ -1,8 +1,9 @@
+import io
+import math
+import os
 import re
 import time
 from datetime import datetime, timezone, timedelta, time as dt_time
-import math
-import io
 from zoneinfo import ZoneInfo
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -51,9 +52,30 @@ MAJOR_INDEX_IMPACT_TICKERS = {
 
 def _get_secret(name, default=""):
     try:
-        return st.secrets.get(name, default)
+        value = st.secrets.get(name, default)
+        if value not in (None, ""):
+            return value
     except Exception:
-        return default
+        pass
+    return os.getenv(name, default)
+
+
+def _set_schwab_auth_status(status, detail=""):
+    st.session_state["schwab_auth_status"] = status
+    if detail:
+        st.session_state["schwab_auth_status_detail"] = detail
+    else:
+        st.session_state.pop("schwab_auth_status_detail", None)
+
+
+def _format_schwab_auth_status(default="Failed/unavailable"):
+    status = str(st.session_state.get("schwab_auth_status", "") or "").strip()
+    detail = str(st.session_state.get("schwab_auth_status_detail", "") or "").strip()
+    if status and detail:
+        return f"{status}: {detail}"
+    if status:
+        return status
+    return default
 
 
 def _set_quote_meta(symbol, source, timestamp_ms=None):
@@ -151,7 +173,11 @@ def get_dataset_freshness(dataset_key, max_age_sec=None):
 
 
 def schwab_is_configured():
-    return bool(_get_secret("SCHWAB_APP_KEY") and _get_secret("SCHWAB_APP_SECRET"))
+    return bool(
+        _get_secret("SCHWAB_APP_KEY")
+        and _get_secret("SCHWAB_APP_SECRET")
+        and (_get_secret("SCHWAB_REFRESH_TOKEN") or _get_secret("SCHWAB_ACCESS_TOKEN"))
+    )
 
 
 def _next_quarterly_contracts(count=3):
@@ -225,18 +251,33 @@ def _candidate_schwab_symbols(futures_symbol):
 def _get_schwab_access_token(force_refresh=False):
     static_token = _get_secret("SCHWAB_ACCESS_TOKEN")
     if static_token and not force_refresh:
+        _set_schwab_auth_status(
+            "using_static_access_token",
+            "SCHWAB_ACCESS_TOKEN is set; if quotes start failing with 401, rotate it or provide SCHWAB_REFRESH_TOKEN.",
+        )
         return static_token
 
     now = time.time()
     cached_token = st.session_state.get("schwab_access_token")
     cached_exp = st.session_state.get("schwab_access_expires_at", 0)
     if cached_token and now < (cached_exp - 30) and not force_refresh:
+        _set_schwab_auth_status("using_cached_access_token")
         return cached_token
 
     app_key = _get_secret("SCHWAB_APP_KEY")
     app_secret = _get_secret("SCHWAB_APP_SECRET")
     refresh_token = _get_secret("SCHWAB_REFRESH_TOKEN")
     if not (app_key and app_secret and refresh_token):
+        missing = [
+            name
+            for name, value in (
+                ("SCHWAB_APP_KEY", app_key),
+                ("SCHWAB_APP_SECRET", app_secret),
+                ("SCHWAB_REFRESH_TOKEN", refresh_token),
+            )
+            if not value
+        ]
+        _set_schwab_auth_status("missing_schwab_oauth_secret", ", ".join(missing))
         return None
 
     try:
@@ -247,16 +288,23 @@ def _get_schwab_access_token(force_refresh=False):
             timeout=10,
         )
         if response.status_code != 200:
+            hint = ""
+            if response.status_code in (400, 401):
+                hint = "Refresh token expired/invalid, or app key/secret do not match the token."
+            _set_schwab_auth_status(f"refresh_http_{response.status_code}", hint)
             return None
         payload = response.json()
         token = payload.get("access_token")
         if not token:
+            _set_schwab_auth_status("refresh_payload_missing_access_token")
             return None
         expires_in = int(payload.get("expires_in", 1800))
         st.session_state["schwab_access_token"] = token
         st.session_state["schwab_access_expires_at"] = now + expires_in
+        _set_schwab_auth_status("refresh_ok", f"expires_in={expires_in}s")
         return token
-    except Exception:
+    except Exception as exc:
+        _set_schwab_auth_status("refresh_exception", str(exc)[:160])
         return None
 
 
@@ -406,7 +454,7 @@ def _get_schwab_quotes(symbols):
 def _get_schwab_quotes_with_status(symbols):
     token = _get_schwab_access_token()
     if not token:
-        return {}, "token_unavailable"
+        return {}, _format_schwab_auth_status("token_unavailable")
     try:
         response = requests.get(
             SCHWAB_QUOTES_URL,
@@ -419,7 +467,7 @@ def _get_schwab_quotes_with_status(symbols):
             st.session_state.pop("schwab_access_expires_at", None)
             retry_token = _get_schwab_access_token(force_refresh=True)
             if not retry_token:
-                return {}, "auth_401_refresh_failed"
+                return {}, f"auth_401_refresh_failed; {_format_schwab_auth_status()}"
             response = requests.get(
                 SCHWAB_QUOTES_URL,
                 params={"symbols": ",".join(symbols), "fields": "quote"},
@@ -541,6 +589,7 @@ def get_runtime_health():
     app_key = _get_secret("SCHWAB_APP_KEY")
     app_secret = _get_secret("SCHWAB_APP_SECRET")
     refresh = _get_secret("SCHWAB_REFRESH_TOKEN")
+    access = _get_secret("SCHWAB_ACCESS_TOKEN")
     redirect = _get_secret("SCHWAB_REDIRECT_URI")
     checks.append(("SCHWAB_APP_KEY", bool(app_key), "Present" if app_key else "Missing"))
     checks.append(("SCHWAB_APP_SECRET", bool(app_secret), "Present" if app_secret else "Missing"))
@@ -548,10 +597,15 @@ def get_runtime_health():
         ("SCHWAB_REFRESH_TOKEN", bool(refresh), "Present" if refresh else "Missing (OAuth required)")
     )
     checks.append(
+        ("SCHWAB_ACCESS_TOKEN", bool(access), "Present (short-lived)" if access else "Not set")
+    )
+    checks.append(
         ("SCHWAB_REDIRECT_URI", bool(redirect), redirect if redirect else "Missing")
     )
     token = _get_schwab_access_token() if (app_key and app_secret and refresh) else None
-    checks.append(("Schwab token refresh", bool(token), "OK" if token else "Failed/unavailable"))
+    checks.append(
+        ("Schwab token refresh", bool(token), "OK" if token else _format_schwab_auth_status())
+    )
 
     nq_probe_price, nq_probe_source = _get_schwab_futures_price("NQ=F")
     if nq_probe_price:
