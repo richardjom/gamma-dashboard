@@ -3736,6 +3736,7 @@ def _render_clean_dashboard(
     qqq_source,
     nq_data,
     data_0dte,
+    data_weekly,
     market_data,
     event_risk,
 ):
@@ -3765,6 +3766,16 @@ def _render_clean_dashboard(
     c6.metric("CL", f"{_safe_float(cl.get('price'), 0.0):,.2f}", f"{_safe_float(cl.get('change_pct'), 0.0):+.2f}%")
     c6.caption(str(cl.get("source", "source n/a")))
     st.markdown("</div></div>", unsafe_allow_html=True)
+
+    dashboard_output_string = _build_generated_levels_output_string(data_0dte, data_weekly)
+    if dashboard_output_string:
+        with st.expander("📋 Copy Levels From Dashboard", expanded=False):
+            _render_copy_levels_widget(
+                output_string=dashboard_output_string,
+                widget_key="dashboard-levels",
+                label="Copy this → paste into Pine Script 'Price Levels' input",
+                caption="Generated from the current 0DTE and weekly dashboard levels.",
+            )
 
     main_col, side_col = st.columns([4.6, 1.6], gap="small")
     with main_col:
@@ -4589,6 +4600,71 @@ def _extract_builder_seed(level_data, prefix):
     return out
 
 
+def _render_copy_levels_widget(output_string, widget_key, label, caption=None, height=80):
+    copy_payload = html.escape(output_string)
+    safe_key = re.sub(r"[^a-zA-Z0-9_-]", "-", str(widget_key))
+    components.html(
+        f"""
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+            <button id="copy-levels-btn-{safe_key}" style="
+                background:#1f9cff;
+                color:white;
+                border:none;
+                border-radius:8px;
+                padding:8px 12px;
+                font-weight:600;
+                cursor:pointer;
+            ">📋 Copy Levels String</button>
+            <span id="copy-levels-status-{safe_key}" style="font-size:13px; color:#9ecbff;"></span>
+            <textarea id="copy-levels-src-{safe_key}" style="position:absolute; left:-9999px;">{copy_payload}</textarea>
+        </div>
+        <script>
+            const btn = document.getElementById("copy-levels-btn-{safe_key}");
+            const status = document.getElementById("copy-levels-status-{safe_key}");
+            const src = document.getElementById("copy-levels-src-{safe_key}");
+            btn.addEventListener("click", async () => {{
+                try {{
+                    await navigator.clipboard.writeText(src.value);
+                    status.textContent = "Copied!";
+                    setTimeout(() => {{ status.textContent = ""; }}, 1500);
+                }} catch (err) {{
+                    src.select();
+                    document.execCommand("copy");
+                    status.textContent = "Copied!";
+                    setTimeout(() => {{ status.textContent = ""; }}, 1500);
+                }}
+            }});
+        </script>
+        """,
+        height=52,
+    )
+    if caption:
+        st.caption(caption)
+    st.text_area(
+        label=label,
+        value=output_string,
+        height=height,
+        key=f"{safe_key}_levels_text",
+    )
+
+
+def _build_generated_levels_output_string(data_0dte=None, data_weekly=None):
+    daily = _extract_builder_seed(data_0dte, "d")
+    weekly = _extract_builder_seed(data_weekly, "w")
+    ordered_keys = [
+        "builder_d_res", "builder_d_wall", "builder_d_floor", "builder_d_supp",
+        "builder_d_swall", "builder_d_sfloor", "builder_d_flip", "builder_d_dn",
+        "builder_d_u50", "builder_d_u25", "builder_d_l25", "builder_d_l50",
+        "builder_w_res", "builder_w_wall", "builder_w_floor", "builder_w_supp",
+        "builder_w_swall", "builder_w_sfloor", "builder_w_flip", "builder_w_dn",
+        "builder_w_u50", "builder_w_u25", "builder_w_l25", "builder_w_l50",
+    ]
+    merged = {**daily, **weekly}
+    if any(key not in merged for key in ordered_keys):
+        return None
+    return ",".join(f"{float(merged[key]):.2f}" for key in ordered_keys)
+
+
 def _render_nq_level_builder_panel(data_0dte=None, data_weekly=None):
     st.subheader("📊 NQ Level Builder")
     st.caption("Update daily/weekly levels and copy the export string.")
@@ -4717,47 +4793,10 @@ def _render_nq_level_builder_panel(data_0dte=None, data_weekly=None):
     ]
     output_string = ",".join(f"{v:.2f}" for v in values)
 
-    copy_payload = html.escape(output_string)
-    components.html(
-        f"""
-        <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
-            <button id="copy-levels-btn" style="
-                background:#1f9cff;
-                color:white;
-                border:none;
-                border-radius:8px;
-                padding:8px 12px;
-                font-weight:600;
-                cursor:pointer;
-            ">📋 Copy Levels String</button>
-            <span id="copy-levels-status" style="font-size:13px; color:#9ecbff;"></span>
-            <textarea id="copy-levels-src" style="position:absolute; left:-9999px;">{copy_payload}</textarea>
-        </div>
-        <script>
-            const btn = document.getElementById("copy-levels-btn");
-            const status = document.getElementById("copy-levels-status");
-            const src = document.getElementById("copy-levels-src");
-            btn.addEventListener("click", async () => {{
-                try {{
-                    await navigator.clipboard.writeText(src.value);
-                    status.textContent = "Copied!";
-                    setTimeout(() => {{ status.textContent = ""; }}, 1500);
-                }} catch (err) {{
-                    src.select();
-                    document.execCommand("copy");
-                    status.textContent = "Copied!";
-                    setTimeout(() => {{ status.textContent = ""; }}, 1500);
-                }}
-            }});
-        </script>
-        """,
-        height=52,
-    )
-
-    st.text_area(
+    _render_copy_levels_widget(
+        output_string=output_string,
+        widget_key="builder-levels",
         label="Copy this → paste into Pine Script 'Price Levels' input",
-        value=output_string,
-        height=80,
     )
 
     with st.expander("Preview all levels"):
@@ -5100,6 +5139,7 @@ def run_full_app():
                 qqq_source=qqq_source,
                 nq_data=nq_data,
                 data_0dte=data_0dte,
+                data_weekly=data_weekly,
                 market_data=market_data,
                 event_risk=event_risk,
             )
