@@ -15,6 +15,32 @@ import streamlit as st
 import yfinance as yf
 from bs4 import BeautifulSoup
 
+from nq_precision.auth_schwab import (
+    exchange_schwab_auth_code as _auth_exchange_schwab_auth_code,
+    format_schwab_auth_status as _auth_format_schwab_auth_status,
+    get_schwab_access_token as _auth_get_schwab_access_token,
+    set_schwab_auth_status as _auth_set_schwab_auth_status,
+    schwab_is_configured as _auth_schwab_is_configured,
+)
+from nq_precision.config import get_secret as _config_get_secret
+from nq_precision.quotes import (
+    candidate_schwab_symbols as _quotes_candidate_schwab_symbols,
+    extract_quote_price as _quotes_extract_quote_price,
+    extract_quote_timestamp_ms as _quotes_extract_quote_timestamp_ms,
+    get_schwab_futures_price as _quotes_get_schwab_futures_price,
+    get_schwab_quotes as _quotes_get_schwab_quotes,
+    get_schwab_quotes_with_status as _quotes_get_schwab_quotes_with_status,
+    get_yahoo_chart_price as _quotes_get_yahoo_chart_price,
+    map_futures_symbol as _quotes_map_futures_symbol,
+    next_quarterly_contracts as _quotes_next_quarterly_contracts,
+    schwab_cross_source_check as _quotes_schwab_cross_source_check,
+    schwab_cross_source_ok as _quotes_schwab_cross_source_ok,
+    set_quote_meta as _quotes_set_quote_meta,
+    validate_jump as _quotes_validate_jump,
+    validate_price_range as _quotes_validate_price_range,
+    validate_stale_quote as _quotes_validate_stale_quote,
+)
+
 
 SCHWAB_TOKEN_URL = "https://api.schwabapi.com/v1/oauth/token"
 SCHWAB_QUOTES_URL = "https://api.schwabapi.com/marketdata/v1/quotes"
@@ -51,40 +77,19 @@ MAJOR_INDEX_IMPACT_TICKERS = {
 
 
 def _get_secret(name, default=""):
-    try:
-        value = st.secrets.get(name, default)
-        if value not in (None, ""):
-            return value
-    except Exception:
-        pass
-    return os.getenv(name, default)
+    return _config_get_secret(name, default)
 
 
 def _set_schwab_auth_status(status, detail=""):
-    st.session_state["schwab_auth_status"] = status
-    if detail:
-        st.session_state["schwab_auth_status_detail"] = detail
-    else:
-        st.session_state.pop("schwab_auth_status_detail", None)
+    return _auth_set_schwab_auth_status(status, detail, session_state=st.session_state)
 
 
 def _format_schwab_auth_status(default="Failed/unavailable"):
-    status = str(st.session_state.get("schwab_auth_status", "") or "").strip()
-    detail = str(st.session_state.get("schwab_auth_status_detail", "") or "").strip()
-    if status and detail:
-        return f"{status}: {detail}"
-    if status:
-        return status
-    return default
+    return _auth_format_schwab_auth_status(default=default, session_state=st.session_state)
 
 
 def _set_quote_meta(symbol, source, timestamp_ms=None):
-    if timestamp_ms is None:
-        timestamp_ms = int(time.time() * 1000)
-    st.session_state[f"quote_meta::{symbol}"] = {
-        "source": source,
-        "timestamp_ms": int(timestamp_ms),
-    }
+    return _quotes_set_quote_meta(symbol, source, timestamp_ms=timestamp_ms, session_state=st.session_state)
 
 
 def get_quote_age_seconds(symbol):
@@ -173,415 +178,117 @@ def get_dataset_freshness(dataset_key, max_age_sec=None):
 
 
 def schwab_is_configured():
-    return bool(
-        _get_secret("SCHWAB_APP_KEY")
-        and _get_secret("SCHWAB_APP_SECRET")
-        and (_get_secret("SCHWAB_REFRESH_TOKEN") or _get_secret("SCHWAB_ACCESS_TOKEN"))
-    )
+    return _auth_schwab_is_configured(secret_getter=_config_get_secret)
 
 
 def _next_quarterly_contracts(count=3):
-    now = datetime.now(timezone.utc)
-    quarter_months = [3, 6, 9, 12]
-    contracts = []
-    year = now.year
-    month = now.month
-    while len(contracts) < count:
-        for q_month in quarter_months:
-            if year == now.year and q_month < month:
-                continue
-            contracts.append((year, q_month))
-            if len(contracts) == count:
-                break
-        year += 1
-    return contracts
+    return _quotes_next_quarterly_contracts(count=count)
 
 
 def _map_futures_symbol(futures_symbol):
-    overrides = {
-        "NQ=F": _get_secret("SCHWAB_SYMBOL_NQ", ""),
-        "ES=F": _get_secret("SCHWAB_SYMBOL_ES", ""),
-        "YM=F": _get_secret("SCHWAB_SYMBOL_YM", ""),
-        "RTY=F": _get_secret("SCHWAB_SYMBOL_RTY", ""),
-        "DX=F": _get_secret("SCHWAB_SYMBOL_DX", ""),
-        "GC=F": _get_secret("SCHWAB_SYMBOL_GC", ""),
-        "CL=F": _get_secret("SCHWAB_SYMBOL_CL", ""),
-    }
-    if overrides.get(futures_symbol):
-        return overrides[futures_symbol]
-    defaults = {
-        "NQ=F": "/NQ",
-        "ES=F": "/ES",
-        "YM=F": "/YM",
-        "RTY=F": "/RTY",
-        "DX=F": "/DX",
-        "GC=F": "/GC",
-        "CL=F": "/CL",
-    }
-    return defaults.get(futures_symbol, futures_symbol)
+    return _quotes_map_futures_symbol(futures_symbol, secret_getter=_config_get_secret)
 
 
 def _candidate_schwab_symbols(futures_symbol):
-    mapped = _map_futures_symbol(futures_symbol)
-    # If user provides explicit contract override, trust it as-is.
-    if any(ch.isdigit() for ch in mapped):
-        return [mapped]
-    candidates = [mapped]
-    if not mapped.startswith("/"):
-        return candidates
-
-    for year, month in _next_quarterly_contracts(count=4):
-        month_code = FUTURES_MONTH_CODES[month]
-        yy = str(year)[-2:]
-        yyyy = str(year)
-        candidates.append(f"{mapped}{month_code}{yy}")
-        candidates.append(f"{mapped}{month_code}{yyyy}")
-
-    # Keep order stable but unique.
-    seen = set()
-    deduped = []
-    for sym in candidates:
-        if sym in seen:
-            continue
-        seen.add(sym)
-        deduped.append(sym)
-    return deduped
+    return _quotes_candidate_schwab_symbols(futures_symbol, secret_getter=_config_get_secret)
 
 
 def _get_schwab_access_token(force_refresh=False):
-    static_token = _get_secret("SCHWAB_ACCESS_TOKEN")
-    if static_token and not force_refresh:
-        _set_schwab_auth_status(
-            "using_static_access_token",
-            "SCHWAB_ACCESS_TOKEN is set; if quotes start failing with 401, rotate it or provide SCHWAB_REFRESH_TOKEN.",
-        )
-        return static_token
-
-    now = time.time()
-    cached_token = st.session_state.get("schwab_access_token")
-    cached_exp = st.session_state.get("schwab_access_expires_at", 0)
-    if cached_token and now < (cached_exp - 30) and not force_refresh:
-        _set_schwab_auth_status("using_cached_access_token")
-        return cached_token
-
-    app_key = _get_secret("SCHWAB_APP_KEY")
-    app_secret = _get_secret("SCHWAB_APP_SECRET")
-    refresh_token = _get_secret("SCHWAB_REFRESH_TOKEN")
-    if not (app_key and app_secret and refresh_token):
-        missing = [
-            name
-            for name, value in (
-                ("SCHWAB_APP_KEY", app_key),
-                ("SCHWAB_APP_SECRET", app_secret),
-                ("SCHWAB_REFRESH_TOKEN", refresh_token),
-            )
-            if not value
-        ]
-        _set_schwab_auth_status("missing_schwab_oauth_secret", ", ".join(missing))
-        return None
-
-    try:
-        response = requests.post(
-            SCHWAB_TOKEN_URL,
-            data={"grant_type": "refresh_token", "refresh_token": refresh_token},
-            auth=(app_key, app_secret),
-            timeout=10,
-        )
-        if response.status_code != 200:
-            hint = ""
-            if response.status_code in (400, 401):
-                hint = "Refresh token expired/invalid, or app key/secret do not match the token."
-            _set_schwab_auth_status(f"refresh_http_{response.status_code}", hint)
-            return None
-        payload = response.json()
-        token = payload.get("access_token")
-        if not token:
-            _set_schwab_auth_status("refresh_payload_missing_access_token")
-            return None
-        expires_in = int(payload.get("expires_in", 1800))
-        st.session_state["schwab_access_token"] = token
-        st.session_state["schwab_access_expires_at"] = now + expires_in
-        _set_schwab_auth_status("refresh_ok", f"expires_in={expires_in}s")
-        return token
-    except Exception as exc:
-        _set_schwab_auth_status("refresh_exception", str(exc)[:160])
-        return None
+    return _auth_get_schwab_access_token(
+        force_refresh=force_refresh,
+        secret_getter=_config_get_secret,
+        session_state=st.session_state,
+    )
 
 
 def exchange_schwab_auth_code(auth_code, redirect_uri):
-    app_key = _get_secret("SCHWAB_APP_KEY")
-    app_secret = _get_secret("SCHWAB_APP_SECRET")
-    if not (app_key and app_secret):
-        return None, "Missing SCHWAB_APP_KEY or SCHWAB_APP_SECRET in secrets."
-    if not auth_code:
-        return None, "Authorization code is required."
-
-    # Accept either raw code or full redirect URL pasted by user.
-    code_input = str(auth_code).strip()
-    if code_input.startswith("http://") or code_input.startswith("https://"):
-        try:
-            parsed = urlparse(code_input)
-            code_input = parse_qs(parsed.query).get("code", [code_input])[0]
-        except Exception:
-            pass
-    elif "code=" in code_input:
-        try:
-            parsed = urlparse(code_input)
-            code_input = parse_qs(parsed.query).get("code", [code_input])[0]
-        except Exception:
-            code_input = code_input.split("code=", 1)[-1]
-            if "&" in code_input:
-                code_input = code_input.split("&", 1)[0]
-
-    # URL decode and hard-trim accidental session/query remnants.
-    code_input = unquote(code_input).strip()
-    if "&" in code_input:
-        code_input = code_input.split("&", 1)[0].strip()
-
-    try:
-        response = requests.post(
-            SCHWAB_TOKEN_URL,
-            data={
-                "grant_type": "authorization_code",
-                "code": code_input,
-                "redirect_uri": redirect_uri,
-            },
-            auth=(app_key, app_secret),
-            timeout=15,
-        )
-        if response.status_code != 200:
-            return None, f"Token exchange failed ({response.status_code}): {response.text[:200]}"
-        return response.json(), None
-    except Exception as e:
-        return None, f"Token exchange failed: {e}"
+    return _auth_exchange_schwab_auth_code(
+        auth_code,
+        redirect_uri,
+        secret_getter=_config_get_secret,
+    )
 
 
 def _extract_quote_price(quote_obj):
-    if not isinstance(quote_obj, dict):
-        return None
-    nested_quote = quote_obj.get("quote", {})
-    candidates = [
-        nested_quote.get("lastPrice"),
-        nested_quote.get("mark"),
-        nested_quote.get("closePrice"),
-        quote_obj.get("lastPrice"),
-        quote_obj.get("mark"),
-        quote_obj.get("closePrice"),
-    ]
-    for value in candidates:
-        if value in (None, "", 0):
-            continue
-        try:
-            price = float(value)
-            if price > 0:
-                return price
-        except Exception:
-            continue
-    return None
+    return _quotes_extract_quote_price(quote_obj)
 
 
 def _extract_quote_timestamp_ms(quote_obj):
-    if not isinstance(quote_obj, dict):
-        return None
-    nested = quote_obj.get("quote", {})
-    for key in (
-        "quoteTime",
-        "tradeTime",
-        "lastTradeTime",
-        "regularMarketTradeTime",
-        "timestamp",
-    ):
-        raw = nested.get(key, quote_obj.get(key))
-        if raw in (None, ""):
-            continue
-        try:
-            value = int(float(raw))
-            # Normalize seconds/microseconds to milliseconds.
-            if value < 10**11:
-                value *= 1000
-            if value > 10**14:
-                value //= 1000
-            return value
-        except Exception:
-            continue
-    return None
+    return _quotes_extract_quote_timestamp_ms(quote_obj)
 
 
 def _validate_price_range(symbol, price):
-    symbol_ranges = {
-        "NQ=F": (10000, 50000),
-        "ES=F": (1000, 10000),
-        "YM=F": (10000, 100000),
-        "RTY=F": (500, 5000),
-        "DX=F": (50, 200),
-        "GC=F": (1000, 5000),
-        "CL=F": (20, 200),
-    }
-    min_p, max_p = symbol_ranges.get(symbol, (0.01, 1e9))
-    return min_p <= price <= max_p
+    return _quotes_validate_price_range(symbol, price)
 
 
 def _validate_stale_quote(timestamp_ms):
-    if not timestamp_ms:
-        return True
-    max_stale_sec = int(_get_secret("SCHWAB_MAX_STALE_SECONDS", 180))
-    now_ms = int(time.time() * 1000)
-    return (now_ms - timestamp_ms) <= (max_stale_sec * 1000)
+    return _quotes_validate_stale_quote(timestamp_ms, secret_getter=_config_get_secret)
 
 
 def _validate_jump(symbol, price):
-    key = f"last_good_price::{symbol}"
-    previous = st.session_state.get(key)
-    if not previous:
-        st.session_state[key] = price
-        return True
-    if previous <= 0:
-        st.session_state[key] = price
-        return True
-    jump_pct = abs(price - previous) / previous * 100
-    max_jump_pct = float(_get_secret("MAX_ONE_TICK_JUMP_PCT", 5.0))
-    if jump_pct > max_jump_pct:
-        return False
-    st.session_state[key] = price
-    return True
+    return _quotes_validate_jump(symbol, price, session_state=st.session_state, secret_getter=_config_get_secret)
 
 
 def _get_schwab_quotes(symbols):
-    quotes, _status = _get_schwab_quotes_with_status(symbols)
-    return quotes
+    return _quotes_get_schwab_quotes(
+        symbols,
+        access_token_getter=lambda force_refresh=False: _auth_get_schwab_access_token(
+            force_refresh=force_refresh,
+            secret_getter=_config_get_secret,
+            session_state=st.session_state,
+        ),
+        auth_status_formatter=_auth_format_schwab_auth_status,
+        session_state=st.session_state,
+    )
 
 
 def _get_schwab_quotes_with_status(symbols):
-    token = _get_schwab_access_token()
-    if not token:
-        return {}, _format_schwab_auth_status("token_unavailable")
-    try:
-        response = requests.get(
-            SCHWAB_QUOTES_URL,
-            params={"symbols": ",".join(symbols), "fields": "quote"},
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=10,
-        )
-        if response.status_code == 401:
-            st.session_state.pop("schwab_access_token", None)
-            st.session_state.pop("schwab_access_expires_at", None)
-            retry_token = _get_schwab_access_token(force_refresh=True)
-            if not retry_token:
-                return {}, f"auth_401_refresh_failed; {_format_schwab_auth_status()}"
-            response = requests.get(
-                SCHWAB_QUOTES_URL,
-                params={"symbols": ",".join(symbols), "fields": "quote"},
-                headers={"Authorization": f"Bearer {retry_token}"},
-                timeout=10,
-            )
-            if response.status_code == 401:
-                return {}, "auth_401_after_refresh"
-        if response.status_code != 200:
-            return {}, f"http_{response.status_code}"
-        payload = response.json()
-        if not isinstance(payload, dict):
-            return {}, "payload_invalid"
-        if not payload:
-            return {}, "empty_payload"
-        return payload, "ok"
-    except Exception:
-        return {}, "request_exception"
+    return _quotes_get_schwab_quotes_with_status(
+        symbols,
+        access_token_getter=lambda force_refresh=False: _auth_get_schwab_access_token(
+            force_refresh=force_refresh,
+            secret_getter=_config_get_secret,
+            session_state=st.session_state,
+        ),
+        auth_status_formatter=_auth_format_schwab_auth_status,
+        session_state=st.session_state,
+    )
 
 
 def _get_schwab_futures_price(futures_symbol):
-    candidates = _candidate_schwab_symbols(futures_symbol)
-    quotes, quote_status = _get_schwab_quotes_with_status(candidates)
-    if not quotes:
-        return None, f"Schwab unavailable ({quote_status})"
-
-    lookup_keys = []
-    for sym in candidates:
-        lookup_keys.extend([sym, sym.lstrip("/")])
-    lookup_keys.append(futures_symbol)
-
-    rejects = {
-        "missing_price": 0,
-        "range": 0,
-        "stale": 0,
-        "jump": 0,
-    }
-
-    for key in lookup_keys:
-        if key in quotes:
-            price = _extract_quote_price(quotes[key])
-            ts = _extract_quote_timestamp_ms(quotes[key])
-            if not price:
-                rejects["missing_price"] += 1
-                continue
-            if not _validate_price_range(futures_symbol, price):
-                rejects["range"] += 1
-                continue
-            if not _validate_stale_quote(ts):
-                rejects["stale"] += 1
-                continue
-            if not _validate_jump(futures_symbol, price):
-                rejects["jump"] += 1
-                continue
-            _set_quote_meta(futures_symbol, f"Schwab ({key})", ts or int(time.time() * 1000))
-            return price, f"Schwab ({key})"
-
-    for quote_key, value in quotes.items():
-        price = _extract_quote_price(value)
-        ts = _extract_quote_timestamp_ms(value)
-        if not price:
-            rejects["missing_price"] += 1
-            continue
-        if not _validate_price_range(futures_symbol, price):
-            rejects["range"] += 1
-            continue
-        if not _validate_stale_quote(ts):
-            rejects["stale"] += 1
-            continue
-        if not _validate_jump(futures_symbol, price):
-            rejects["jump"] += 1
-            continue
-        _set_quote_meta(
-            futures_symbol,
-            f"Schwab ({quote_key})",
-            ts or int(time.time() * 1000),
-        )
-        return price, f"Schwab ({quote_key})"
-
-    detail = (
-        f"quote_rejects missing={rejects['missing_price']} "
-        f"range={rejects['range']} stale={rejects['stale']} jump={rejects['jump']}"
+    return _quotes_get_schwab_futures_price(
+        futures_symbol,
+        secret_getter=_config_get_secret,
+        access_token_getter=lambda force_refresh=False: _auth_get_schwab_access_token(
+            force_refresh=force_refresh,
+            secret_getter=_config_get_secret,
+            session_state=st.session_state,
+        ),
+        auth_status_formatter=_auth_format_schwab_auth_status,
+        session_state=st.session_state,
     )
-    return None, f"Schwab unavailable ({detail})"
 
 
 def _get_yahoo_chart_price(symbol, min_price=0):
-    try:
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(url, headers=headers, timeout=5)
-        if response.status_code == 200:
-            data = response.json()
-            price = data["chart"]["result"][0]["meta"]["regularMarketPrice"]
-            if price and price > min_price:
-                _set_quote_meta(symbol, "Yahoo Finance")
-                return float(price)
-    except Exception:
-        pass
-    return None
+    return _quotes_get_yahoo_chart_price(symbol, min_price=min_price, session_state=st.session_state)
 
 
 def _schwab_cross_source_check(yahoo_symbol, schwab_price):
-    yahoo_price = _get_yahoo_chart_price(yahoo_symbol, min_price=0)
-    if not yahoo_price:
-        return True, None, None, None
-    allowed_dev_pct = float(_get_secret("MAX_CROSS_SOURCE_DEVIATION_PCT", 3.0))
-    deviation = abs(schwab_price - yahoo_price) / yahoo_price * 100
-    return deviation <= allowed_dev_pct, float(deviation), float(allowed_dev_pct), float(yahoo_price)
+    return _quotes_schwab_cross_source_check(
+        yahoo_symbol,
+        schwab_price,
+        secret_getter=_config_get_secret,
+        yahoo_price_getter=_get_yahoo_chart_price,
+    )
 
 
 def _schwab_cross_source_ok(yahoo_symbol, schwab_price):
-    ok, _dev, _allowed, _yahoo = _schwab_cross_source_check(yahoo_symbol, schwab_price)
-    return ok
+    return _quotes_schwab_cross_source_ok(
+        yahoo_symbol,
+        schwab_price,
+        secret_getter=_config_get_secret,
+        yahoo_price_getter=_get_yahoo_chart_price,
+    )
 
 
 def get_runtime_health():
@@ -4702,6 +4409,41 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
         max_age_sec=int(_get_secret("OPTIONS_MAX_STALE_SECONDS", 180)),
     )
     conf_mult = float(options_health.get("confidence_multiplier", 1.0))
+
+    if dte_days == 0:
+        target_offset_cap_mult = 0.26
+    elif dte_days <= 7:
+        target_offset_cap_mult = 0.32
+    else:
+        target_offset_cap_mult = 0.38
+    target_offset_floor_nq = max(10.0, float(nq_now) * 0.0006)
+    target_offset_base_nq = (0.16 * float(nq_em_full)) + (0.08 * float(current_span_nq))
+    target_offset_cap_nq = min(65.0, float(nq_em_full) * target_offset_cap_mult)
+    target_offset_nq = max(target_offset_floor_nq, min(target_offset_base_nq, target_offset_cap_nq))
+    if wall_structure_compressed or floor_structure_compressed:
+        target_offset_nq *= 0.82
+    if conf_mult < 1.0:
+        target_offset_nq *= max(0.82, conf_mult)
+    target_offset_nq = max(target_offset_floor_nq, round(float(target_offset_nq), 2))
+    target_resistance_nq = float((p_wall_strike * ratio) + target_offset_nq)
+    target_support_nq = float((p_floor_strike * ratio) - target_offset_nq)
+
+    target_distance_pressure = min(
+        1.0,
+        float(target_offset_nq) / max(target_offset_floor_nq, float(nq_em_full) * 0.30, 1.0),
+    )
+    target_base_penalty = int(round(8 + (10 * target_distance_pressure)))
+    wall_target_penalty = target_base_penalty + (6 if wall_structure_compressed else 0)
+    floor_target_penalty = target_base_penalty + (6 if floor_structure_compressed else 0)
+    level_confidence["Target Resistance"]["score"] = max(
+        25,
+        int(level_confidence["Primary Wall"]["score"]) - wall_target_penalty,
+    )
+    level_confidence["Target Support"]["score"] = max(
+        25,
+        int(level_confidence["Primary Floor"]["score"]) - floor_target_penalty,
+    )
+
     for key, val in level_confidence.items():
         base_score = int(val.get("score", 0))
         adj_score = int(round(base_score * conf_mult))
@@ -4717,10 +4459,10 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
         val["label"] = adj_label
 
     results = [
-        ("Target Resistance", (p_wall_strike * ratio) + 35, 3.0, "🎯"),
+        ("Target Resistance", target_resistance_nq, 3.0, "🎯"),
         ("Primary Wall", p_wall_strike * ratio, 5.0, "🔴"),
         ("Primary Floor", p_floor_strike * ratio, 5.0, "🟢"),
-        ("Target Support", (p_floor_strike * ratio) - 35, 3.0, "🎯"),
+        ("Target Support", target_support_nq, 3.0, "🎯"),
         ("Secondary Wall", s_wall_strike * ratio, 3.0, "🟠"),
         ("Secondary Floor", s_floor_strike * ratio, 3.0, "🟡"),
         ("Gamma Flip", g_flip_strike * ratio, 10.0, "⚡"),
@@ -4738,6 +4480,9 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
         "g_flip_strike": g_flip_strike,
         "g_flip_nq": g_flip_strike * ratio,
         "net_delta": net_delta,
+        "target_resistance": target_resistance_nq,
+        "target_support": target_support_nq,
+        "target_offset_nq": target_offset_nq,
         "p_wall": p_wall_strike * ratio,
         "p_floor": p_floor_strike * ratio,
         "s_wall": s_wall_strike * ratio,
@@ -4759,6 +4504,7 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
             "min_primary_span_nq": round(float(min_span_nq), 2),
             "max_primary_span_nq": round(float(max_span_nq), 2),
             "current_primary_span_nq": round(float(current_span_nq), 2),
+            "target_offset_nq": round(float(target_offset_nq), 2),
             "liq_quantile": float(liq_q),
             "structure_compressed": bool(wall_structure_compressed or floor_structure_compressed),
         },
