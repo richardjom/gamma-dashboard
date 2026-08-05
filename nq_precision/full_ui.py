@@ -1858,6 +1858,7 @@ def _render_runtime_mode_banner(feed_status):
     if not feed_status:
         return
     mode = str(feed_status.get("mode", "Unknown"))
+    mode_l = mode.lower()
     freeze = bool(feed_status.get("freeze_levels"))
     nq_age = feed_status.get("nq_age_s")
     qqq_age = feed_status.get("qqq_age_s")
@@ -1878,7 +1879,10 @@ def _render_runtime_mode_banner(feed_status):
             msg += " " + " • ".join(reasons)
         st.error(msg)
         st.caption(details)
-    elif "fallback" in mode.lower() or "mixed" in mode.lower():
+    elif "mixed" in mode_l:
+        st.warning("Running in mixed mode: realtime quotes with delayed options. Treat levels as lower confidence.")
+        st.caption(details)
+    elif "fallback" in mode_l:
         st.warning("Running in fallback/delayed mode. Treat levels as lower confidence.")
         st.caption(details)
     else:

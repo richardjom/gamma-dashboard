@@ -603,8 +603,15 @@ def get_runtime_health():
         ("SCHWAB_REDIRECT_URI", bool(redirect), redirect if redirect else "Missing")
     )
     token = _get_schwab_access_token() if (app_key and app_secret and refresh) else None
+    auth_status = str(st.session_state.get("schwab_auth_status", "") or "").strip()
+    auth_detail = _format_schwab_auth_status("Failed/unavailable")
+    refresh_ok = bool(token) and auth_status in {"refresh_ok", "using_cached_access_token"}
     checks.append(
-        ("Schwab token refresh", bool(token), "OK" if token else _format_schwab_auth_status())
+        (
+            "Schwab token refresh",
+            refresh_ok,
+            auth_detail if auth_detail else ("OK" if refresh_ok else "Failed/unavailable"),
+        )
     )
 
     nq_probe_price, nq_probe_source = _get_schwab_futures_price("NQ=F")
