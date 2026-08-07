@@ -731,6 +731,284 @@ def _theme_css(bg_color, card_bg, text_color, accent_color, border_color, compac
         font-size: 10px;
         color: #89a1be;
     }}
+    .command-layout {{
+        display: grid;
+        grid-template-columns: 84px minmax(0, 1fr);
+        gap: 14px;
+        align-items: start;
+        margin-top: 8px;
+    }}
+    .command-rail {{
+        position: sticky;
+        top: 10px;
+        border: 1px solid #2f3a4a;
+        border-radius: 28px;
+        background:
+            radial-gradient(circle at 50% 0%, rgba(98, 126, 255, 0.34), transparent 38%),
+            linear-gradient(180deg, rgba(27, 42, 72, 0.96) 0%, rgba(11, 18, 30, 0.98) 100%);
+        box-shadow: 0 16px 36px rgba(5, 10, 24, 0.46);
+        padding: 14px 10px;
+        min-height: 720px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 14px;
+    }}
+    .command-rail-logo {{
+        width: 46px;
+        height: 46px;
+        border-radius: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #eff5ff;
+        font-size: 13px;
+        font-weight: 800;
+        letter-spacing: 0.7px;
+        background: linear-gradient(180deg, #6e86ff 0%, #3d63ff 100%);
+        box-shadow: 0 10px 24px rgba(60, 91, 255, 0.44);
+    }}
+    .command-rail-stack {{
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        width: 100%;
+        align-items: center;
+    }}
+    .command-rail-item {{
+        width: 42px;
+        height: 42px;
+        border-radius: 14px;
+        border: 1px solid #334155;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #95a9c8;
+        background: rgba(17, 25, 38, 0.82);
+        font-size: 14px;
+        font-weight: 700;
+    }}
+    .command-rail-item.active {{
+        color: #eff5ff;
+        border-color: rgba(113, 134, 255, 0.75);
+        background: linear-gradient(180deg, rgba(92, 115, 255, 0.84) 0%, rgba(53, 83, 222, 0.96) 100%);
+        box-shadow: 0 8px 20px rgba(61, 88, 240, 0.34);
+    }}
+    .command-rail-label {{
+        margin-top: auto;
+        padding-top: 8px;
+        color: #8ea4c6;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.35px;
+        text-transform: uppercase;
+    }}
+    .command-main {{
+        min-width: 0;
+    }}
+    .command-topbar {{
+        border: 1px solid #2c3646;
+        border-radius: 28px;
+        padding: 18px 22px;
+        margin-bottom: 12px;
+        background:
+            radial-gradient(circle at 78% 0%, rgba(88, 110, 255, 0.24), transparent 30%),
+            radial-gradient(circle at 15% 110%, rgba(61, 221, 255, 0.11), transparent 34%),
+            linear-gradient(135deg, rgba(15, 24, 39, 0.96) 0%, rgba(7, 13, 24, 0.98) 100%);
+        box-shadow: 0 18px 42px rgba(2, 8, 18, 0.46);
+    }}
+    .command-topbar-grid {{
+        display: grid;
+        grid-template-columns: 1.15fr 1.4fr 0.9fr;
+        gap: 12px;
+        align-items: center;
+    }}
+    .command-brand-kicker {{
+        margin: 0;
+        color: #90a4c5;
+        text-transform: uppercase;
+        letter-spacing: 0.35px;
+        font-size: 11px;
+        font-weight: 700;
+    }}
+    .command-brand-title {{
+        margin: 2px 0 0 0;
+        color: #f1f6ff;
+        font-size: clamp(30px, 4vw, 44px);
+        line-height: 1.02;
+        font-weight: 700;
+    }}
+    .command-brand-sub {{
+        margin: 6px 0 0 0;
+        color: #95a9c6;
+        font-size: 13px;
+        max-width: 560px;
+    }}
+    .command-search {{
+        height: 58px;
+        border-radius: 18px;
+        border: 1px solid #2e3b4e;
+        background: rgba(14, 21, 34, 0.78);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 16px 0 18px;
+        color: #8095b3;
+        font-size: 14px;
+        font-weight: 600;
+    }}
+    .command-search-kbd {{
+        padding: 5px 8px;
+        border-radius: 10px;
+        border: 1px solid #334255;
+        background: rgba(24, 34, 49, 0.95);
+        color: #b3c0d8;
+        font-size: 11px;
+        font-weight: 700;
+    }}
+    .command-meta {{
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+    }}
+    .command-meta-chip {{
+        border: 1px solid #304055;
+        border-radius: 16px;
+        background: rgba(16, 24, 37, 0.85);
+        padding: 10px 12px;
+    }}
+    .command-meta-chip .k {{
+        margin: 0;
+        color: #8ca0bc;
+        font-size: 10px;
+        letter-spacing: 0.28px;
+        text-transform: uppercase;
+        font-weight: 700;
+    }}
+    .command-meta-chip .v {{
+        margin: 5px 0 0 0;
+        color: #ecf3ff;
+        font-size: 15px;
+        font-weight: 700;
+    }}
+    .command-status-row {{
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+        margin-top: 14px;
+    }}
+    .command-status-card {{
+        border: 1px solid #2c3747;
+        border-radius: 16px;
+        padding: 10px 12px;
+        background: rgba(16, 24, 38, 0.78);
+    }}
+    .command-status-card .k {{
+        margin: 0;
+        color: #8ca0bc;
+        font-size: 10px;
+        letter-spacing: 0.28px;
+        text-transform: uppercase;
+        font-weight: 700;
+    }}
+    .command-status-card .v {{
+        margin: 5px 0 0 0;
+        color: #edf4ff;
+        font-size: 16px;
+        font-weight: 700;
+    }}
+    .command-status-card .s {{
+        margin: 4px 0 0 0;
+        color: #89a0bc;
+        font-size: 11px;
+        line-height: 1.2;
+    }}
+    .command-status-card .v.pos {{ color: #9cffca; }}
+    .command-status-card .v.warn {{ color: #ffe3a4; }}
+    .command-status-card .v.neg {{ color: #ffbfbe; }}
+    .command-mini-card {{
+        border: 1px solid #2d394b;
+        border-radius: 18px;
+        padding: 14px 14px 12px 14px;
+        background:
+            radial-gradient(circle at 110% -10%, rgba(84, 99, 255, 0.18), transparent 32%),
+            linear-gradient(180deg, rgba(19, 28, 42, 0.96) 0%, rgba(12, 18, 30, 0.98) 100%);
+        box-shadow: 0 12px 28px rgba(2, 8, 18, 0.28);
+        min-height: 100%;
+    }}
+    .command-mini-card .eyebrow {{
+        margin: 0;
+        color: #90a4c5;
+        font-size: 10px;
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
+        font-weight: 700;
+    }}
+    .command-mini-card .headline {{
+        margin: 6px 0 0 0;
+        color: #eff4ff;
+        font-size: 21px;
+        line-height: 1.05;
+        font-weight: 700;
+    }}
+    .command-mini-card .subcopy {{
+        margin: 6px 0 0 0;
+        color: #8ea2bf;
+        font-size: 12px;
+        line-height: 1.35;
+    }}
+    .command-mini-list {{
+        margin-top: 10px;
+        display: grid;
+        gap: 8px;
+    }}
+    .command-mini-row {{
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        align-items: baseline;
+        padding-bottom: 7px;
+        border-bottom: 1px solid rgba(47, 60, 79, 0.68);
+    }}
+    .command-mini-row:last-child {{
+        border-bottom: none;
+        padding-bottom: 0;
+    }}
+    .command-mini-row .label {{
+        color: #9baec9;
+        font-size: 12px;
+    }}
+    .command-mini-row .value {{
+        color: #f0f5ff;
+        font-size: 13px;
+        font-weight: 700;
+        text-align: right;
+    }}
+    .command-list-block {{
+        margin-top: 10px;
+        display: grid;
+        gap: 8px;
+    }}
+    .command-list-item {{
+        border: 1px solid #2e394a;
+        border-radius: 14px;
+        padding: 10px 12px;
+        background: rgba(15, 22, 35, 0.72);
+    }}
+    .command-list-item .top {{
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        color: #ecf2ff;
+        font-size: 13px;
+        font-weight: 700;
+    }}
+    .command-list-item .meta {{
+        margin-top: 5px;
+        color: #8ea4c1;
+        font-size: 11px;
+        line-height: 1.3;
+    }}
     .sentiment-meter {{
         height: 22px;
         background: linear-gradient(90deg, #FF4444 0%, #FFAA00 50%, #44FF44 100%);
@@ -860,6 +1138,12 @@ def _theme_css(bg_color, card_bg, text_color, accent_color, border_color, compac
         color: #b6ffd8;
     }}
     @media (max-width: 1400px) {{
+        .command-topbar-grid {{
+            grid-template-columns: 1fr;
+        }}
+        .command-status-row {{
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }}
         .terminal-command-grid {{
             grid-template-columns: repeat(3, minmax(0, 1fr));
         }}
@@ -874,6 +1158,32 @@ def _theme_css(bg_color, card_bg, text_color, accent_color, border_color, compac
         }}
     }}
     @media (max-width: 900px) {{
+        .command-layout {{
+            grid-template-columns: 1fr;
+        }}
+        .command-rail {{
+            min-height: auto;
+            position: relative;
+            flex-direction: row;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 14px;
+        }}
+        .command-rail-stack {{
+            flex-direction: row;
+            justify-content: center;
+            width: auto;
+        }}
+        .command-rail-label {{
+            margin-top: 0;
+            padding-top: 0;
+        }}
+        .command-status-row {{
+            grid-template-columns: 1fr;
+        }}
+        .command-meta {{
+            grid-template-columns: 1fr;
+        }}
         .terminal-command-grid {{
             grid-template-columns: repeat(2, minmax(0, 1fr));
         }}
@@ -3739,164 +4049,303 @@ def _render_clean_dashboard(
     data_weekly,
     market_data,
     event_risk,
+    ratio_meta,
+    sentiment_score,
+    fg,
+    trade_bias_engine,
+    alert_center,
+    level_interactions_df,
+    opening_structure,
+    reference_levels,
+    cross_asset_matrix,
+    playbook,
+    breadth_internals,
+    contract_roll,
 ):
-    st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🛰 Asset Command Strip</div></div><div class="terminal-body">',
-        unsafe_allow_html=True,
-    )
-    es = market_data.get("es", {}) or {}
-    rty = market_data.get("rty", {}) or {}
-    iwm = market_data.get("iwm", {}) or {}
-    dia = market_data.get("dia", {}) or {}
-    gc = market_data.get("gc", {}) or {}
-    cl = market_data.get("cl", {}) or {}
+    alert_rows = alert_center or []
+    ratio_label = str((ratio_meta or {}).get("confidence_label", "Low"))
+    ratio_conf = int((ratio_meta or {}).get("confidence_score", 0) or 0)
+    ratio_cls = "pos" if ratio_label.lower() == "high" else "warn" if ratio_label.lower() == "medium" else "neg"
+    event_lock = bool((event_risk or {}).get("lockout_active"))
+    lock_cls = "neg" if event_lock else "warn" if (event_risk or {}).get("today_high_count", 0) else "pos"
+    bias = str((trade_bias_engine or {}).get("bias", "NEUTRAL")).upper()
+    bias_score = int((trade_bias_engine or {}).get("score", 0) or 0)
+    conviction = str((trade_bias_engine or {}).get("conviction", "Low"))
+    macro_regime = str((cross_asset_matrix or {}).get("regime", "Mixed"))
+    macro_composite = float((cross_asset_matrix or {}).get("composite", 0.0) or 0.0)
+    next_high = (event_risk or {}).get("next_high")
+    next_event_text = "No high-impact event queued"
+    if next_high:
+        next_event_text = (
+            f"{next_high.get('time_et', 'n/a')} • {next_high.get('event', 'High-impact event')} "
+            f"({_countdown_label(next_high.get('seconds_to', 0))})"
+        )
 
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
-    nq_change = float(nq_now * (_safe_float(nq_day_change_pct, 0.0) / 100.0))
-    c1.metric("NQ", f"{nq_now:,.2f}", f"{nq_change:+.2f} ({_safe_float(nq_day_change_pct, 0.0):+.2f}%)")
-    c1.caption(f"{nq_source} • {get_quote_age_label('NQ=F')}")
-    c2.metric("ES", f"{_safe_float(es.get('price'), 0.0):,.2f}", f"{_safe_float(es.get('change_pct'), 0.0):+.2f}%")
-    c2.caption(str(es.get("source", "source n/a")))
-    c3.metric("IWM", f"{_safe_float(iwm.get('price'), 0.0):,.2f}", f"{_safe_float(iwm.get('change_pct'), 0.0):+.2f}%")
-    c3.caption(str(iwm.get("source", "source n/a")))
-    c4.metric("DIA", f"{_safe_float(dia.get('price'), 0.0):,.2f}", f"{_safe_float(dia.get('change_pct'), 0.0):+.2f}%")
-    c4.caption(str(dia.get("source", "source n/a")))
-    c5.metric("GC", f"{_safe_float(gc.get('price'), 0.0):,.2f}", f"{_safe_float(gc.get('change_pct'), 0.0):+.2f}%")
-    c5.caption(str(gc.get("source", "source n/a")))
-    c6.metric("CL", f"{_safe_float(cl.get('price'), 0.0):,.2f}", f"{_safe_float(cl.get('change_pct'), 0.0):+.2f}%")
-    c6.caption(str(cl.get("source", "source n/a")))
-    st.markdown("</div></div>", unsafe_allow_html=True)
+    top_longs = (playbook or {}).get("long_setups", [])[:3]
+    top_shorts = (playbook or {}).get("short_setups", [])[:3]
+    no_trade = (playbook or {}).get("no_trade", [])[:3]
+    no_trade_items = [
+        {"event": item, "time_et": "Risk", "impact": "WATCH", "countdown": ""}
+        for item in no_trade
+    ]
+    catalyst_rows = (playbook or {}).get("catalysts", [])[:4]
+    alert_items = alert_rows[:4]
 
-    dashboard_output_string = _build_generated_levels_output_string(data_0dte, data_weekly)
-    if dashboard_output_string:
-        with st.expander("📋 Copy Levels From Dashboard", expanded=False):
-            _render_copy_levels_widget(
-                output_string=dashboard_output_string,
-                widget_key="dashboard-levels",
-                label="Copy this → paste into Pine Script 'Price Levels' input",
-                caption="Generated from the current 0DTE and weekly dashboard levels.",
-            )
+    def _card_list(items, formatter, empty_text):
+        if not items:
+            return f'<div class="command-list-item"><div class="meta">{html.escape(empty_text)}</div></div>'
+        rendered = []
+        for item in items:
+            rendered.append(formatter(item))
+        return "".join(rendered)
 
-    main_col, side_col = st.columns([4.6, 1.6], gap="small")
+    def _fmt_level_item(item):
+        return (
+            '<div class="command-list-item">'
+            f'<div class="top"><span>{html.escape(str(item.get("level", "Level")))}</span>'
+            f'<span>{float(item.get("price", 0.0)):.2f}</span></div>'
+            f'<div class="meta">{float(item.get("distance", 0.0)):+.0f} pts • score {int(item.get("score", 0) or 0)}</div>'
+            '</div>'
+        )
+
+    def _fmt_alert_item(item):
+        return (
+            '<div class="command-list-item">'
+            f'<div class="top"><span>{html.escape(str(item.get("Alert", "Alert")))}</span>'
+            f'<span>{html.escape(str(item.get("Severity", "LOW")).upper())}</span></div>'
+            f'<div class="meta">{html.escape(str(item.get("Detail", "")))}</div>'
+            '</div>'
+        )
+
+    def _fmt_catalyst_item(item):
+        return (
+            '<div class="command-list-item">'
+            f'<div class="top"><span>{html.escape(str(item.get("event", "Catalyst")))}</span>'
+            f'<span>{html.escape(str(item.get("time_et", "")))}</span></div>'
+            f'<div class="meta">{html.escape(str(item.get("impact", "")))} • {html.escape(str(item.get("countdown", "")))}</div>'
+            '</div>'
+        )
+
+    st.markdown('<div class="command-layout">', unsafe_allow_html=True)
+    rail_col, main_col = st.columns([0.55, 7.2], gap="small")
+
+    with rail_col:
+        st.markdown(
+            """
+            <div class="command-rail">
+                <div class="command-rail-logo">GAM</div>
+                <div class="command-rail-stack">
+                    <div class="command-rail-item active">NQ</div>
+                    <div class="command-rail-item">LVL</div>
+                    <div class="command-rail-item">GEX</div>
+                    <div class="command-rail-item">MAC</div>
+                    <div class="command-rail-item">RSK</div>
+                </div>
+                <div class="command-rail-label">Single View</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
     with main_col:
         st.markdown(
-            '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📈 NQ Tape</div></div><div class="terminal-body">',
+            f"""
+            <div class="command-main">
+                <div class="command-topbar">
+                    <div class="command-topbar-grid">
+                        <div>
+                            <p class="command-brand-kicker">Gamma Dashboard</p>
+                            <p class="command-brand-title">NQ Command Center</p>
+                            <p class="command-brand-sub">
+                                One-screen workflow for levels, tape, catalysts, and export. The old builder-only workflow is folded into this view.
+                            </p>
+                        </div>
+                        <div class="command-search">
+                            <span>Search level, ticker, catalyst, setup...</span>
+                            <span class="command-search-kbd">live</span>
+                        </div>
+                        <div class="command-meta">
+                            <div class="command-meta-chip">
+                                <p class="k">Bias</p>
+                                <p class="v">{html.escape(bias)} ({bias_score:+d})</p>
+                            </div>
+                            <div class="command-meta-chip">
+                                <p class="k">Clock</p>
+                                <p class="v">{datetime.now().strftime("%I:%M %p ET")}</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="command-status-row">
+                        <div class="command-status-card">
+                            <p class="k">NQ Feed</p>
+                            <p class="v">{html.escape(str(nq_source))}</p>
+                            <p class="s">{html.escape(get_quote_age_label("NQ=F"))}</p>
+                        </div>
+                        <div class="command-status-card">
+                            <p class="k">QQQ Feed</p>
+                            <p class="v">{html.escape(str(qqq_source))}</p>
+                            <p class="s">Spot {float(qqq_price):.2f}</p>
+                        </div>
+                        <div class="command-status-card">
+                            <p class="k">Ratio Quality</p>
+                            <p class="v {ratio_cls}">{html.escape(ratio_label.upper())} {ratio_conf}%</p>
+                            <p class="s">Mapping confidence for translated levels</p>
+                        </div>
+                        <div class="command-status-card">
+                            <p class="k">Event Guardrail</p>
+                            <p class="v {lock_cls}">{'LOCKOUT' if event_lock else 'CLEAR'}</p>
+                            <p class="s">{html.escape(next_event_text)}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            """,
             unsafe_allow_html=True,
         )
-        if nq_data is not None and not nq_data.empty and "Close" in nq_data.columns:
-            close = nq_data["Close"].astype(float)
-            fig_nq = go.Figure()
-            fig_nq.add_trace(
-                go.Scatter(
-                    x=close.index,
-                    y=close.values,
-                    mode="lines",
-                    line=dict(color="#7ed7ff", width=2),
-                    fill="tozeroy",
-                    fillcolor="rgba(126,215,255,0.12)",
-                    name="NQ",
-                )
-            )
-            if data_0dte:
-                fig_nq.add_hline(
-                    y=float(data_0dte.get("g_flip_nq", nq_now)),
-                    line_color="#ffd37f",
-                    line_dash="dot",
-                    annotation_text="Gamma Flip",
-                )
-                fig_nq.add_hline(
-                    y=float(data_0dte.get("dn_nq", nq_now)),
-                    line_color="#9ee6c2",
-                    line_dash="dot",
-                    annotation_text="Delta Neutral",
-                )
-            _style_dashboard_figure(fig_nq, height=370, margin=dict(l=14, r=10, t=24, b=14))
-            st.plotly_chart(fig_nq, use_container_width=True)
-        else:
-            st.info("NQ intraday feed unavailable.")
-        st.markdown("</div></div>", unsafe_allow_html=True)
 
-        st.markdown(
-            '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧲 QQQ Gamma by Strike</div></div><div class="terminal-body">',
-            unsafe_allow_html=True,
+        _render_market_overview_visuals(
+            data_0dte=data_0dte,
+            nq_now=nq_now,
+            qqq_price=qqq_price,
+            nq_source=nq_source,
+            qqq_source=qqq_source,
+            ratio_meta=ratio_meta,
+            sentiment_score=sentiment_score,
+            fg=fg,
+            event_risk=event_risk,
+            market_data=market_data,
+            trade_bias_engine=trade_bias_engine,
+            alert_center=alert_center,
+            reaction_stats_df=None,
+            nq_data=nq_data,
+            nq_day_change_pct=nq_day_change_pct,
         )
-        gex_df = (data_0dte or {}).get("df")
-        qqq_spot = _safe_float(qqq_price, None)
-        if gex_df is not None and not gex_df.empty and qqq_spot and qqq_spot > 0 and "GEX" in gex_df.columns:
-            strike_map = (
-                gex_df.groupby("strike", as_index=False)["GEX"]
-                .sum()
-                .sort_values("strike")
-                .copy()
-            )
-            low = float(qqq_spot * 0.94)
-            high = float(qqq_spot * 1.06)
-            strike_map = strike_map[(strike_map["strike"] >= low) & (strike_map["strike"] <= high)].copy()
-            if strike_map.empty:
-                strike_map = (
-                    gex_df.groupby("strike", as_index=False)["GEX"]
-                    .sum()
-                    .assign(spot_dist=lambda d: (d["strike"] - float(qqq_spot)).abs())
-                    .nsmallest(24, "spot_dist")
-                )
-            if len(strike_map) > 28:
-                strike_map = (
-                    strike_map.assign(abs_gex=lambda d: d["GEX"].abs())
-                    .nlargest(28, "abs_gex")
-                    .sort_values("strike")
-                )
-            colors = ["#77ddb0" if float(v) >= 0 else "#f29595" for v in strike_map["GEX"]]
-            fig_gex = go.Figure(
-                data=[
-                    go.Bar(
-                        x=strike_map["GEX"],
-                        y=strike_map["strike"].astype(float),
-                        orientation="h",
-                        marker=dict(color=colors),
-                        text=[f"{float(v)/1_000_000:.1f}M" for v in strike_map["GEX"]],
-                        textposition="outside",
-                    )
-                ]
-            )
-            fig_gex.add_vline(x=0, line_color="#7e90ab", line_dash="dot")
-            fig_gex.add_hline(
-                y=float(qqq_spot),
-                line_color="#38d7ff",
-                line_dash="dash",
-                annotation_text=f"QQQ Spot {float(qqq_spot):.2f}",
-            )
-            g_flip = _safe_float((data_0dte or {}).get("g_flip_strike"), None)
-            if g_flip:
-                fig_gex.add_hline(y=float(g_flip), line_color="#ffd37f", line_dash="dot", annotation_text="Gamma Flip")
-            fig_gex.update_xaxes(title_text="Net GEX")
-            fig_gex.update_yaxes(title_text="QQQ Strike", tickformat=".2f")
-            _style_dashboard_figure(fig_gex, height=340, margin=dict(l=14, r=10, t=24, b=14))
-            st.plotly_chart(fig_gex, use_container_width=True)
-            st.caption(f"QQQ source: {qqq_source}")
-        else:
-            st.info("QQQ gamma map unavailable.")
-        st.markdown("</div></div>", unsafe_allow_html=True)
 
-    with side_col:
-        st.markdown(
-            '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🏦 Rates & Macro</div></div><div class="terminal-body">',
-            unsafe_allow_html=True,
-        )
-        tnx = market_data.get("10y", {}) or {}
-        dxy = market_data.get("dxy", {}) or {}
-        vix = market_data.get("vix", {}) or {}
-        vvix = market_data.get("vvix", {}) or {}
-        st.metric("US10Y", f"{_safe_float(tnx.get('price'), 0.0):.2f}", f"{_safe_float(tnx.get('change'), 0.0):+.2f}")
-        st.metric("DXY", f"{_safe_float(dxy.get('price'), 0.0):.2f}", f"{_safe_float(dxy.get('change_pct'), 0.0):+.2f}%")
-        st.metric("VIX", f"{_safe_float(vix.get('price'), 0.0):.2f}", f"{_safe_float(vix.get('change_pct'), 0.0):+.2f}%")
-        st.metric("VVIX", f"{_safe_float(vvix.get('price'), 0.0):.2f}", f"{_safe_float(vvix.get('change_pct'), 0.0):+.2f}%")
-        nh = (event_risk or {}).get("next_high")
-        if nh:
-            st.caption(f"Next high-impact: {nh.get('time_et', 'n/a')} {nh.get('event', '')}")
-            st.caption(f"Countdown: {_countdown_label(nh.get('seconds_to', 0))}")
-        else:
-            st.caption("No high-impact events in near horizon.")
-        st.markdown("</div></div>", unsafe_allow_html=True)
+        c1, c2, c3 = st.columns([1.35, 1.0, 1.0], gap="small")
+        with c1:
+            st.markdown(
+                """
+                <div class="command-mini-card">
+                    <p class="eyebrow">Export</p>
+                    <p class="headline">Copy dashboard levels</p>
+                    <p class="subcopy">Pull the current daily + weekly level string from the live dashboard without jumping to a second tool.</p>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            dashboard_output_string = _build_generated_levels_output_string(data_0dte, data_weekly)
+            if dashboard_output_string:
+                _render_copy_levels_widget(
+                    output_string=dashboard_output_string,
+                    widget_key="dashboard-levels",
+                    label="Paste this into Pine Script 'Price Levels'",
+                    caption="Generated from the current 0DTE and weekly live dashboard levels.",
+                    height=110,
+                )
+            else:
+                st.info("Level export string unavailable.")
+
+        with c2:
+            st.markdown(
+                f"""
+                <div class="command-mini-card">
+                    <p class="eyebrow">Trade Bias</p>
+                    <p class="headline">{html.escape(bias)} / {html.escape(conviction)}</p>
+                    <p class="subcopy">Composite score {bias_score:+d} with macro regime {html.escape(macro_regime)} ({macro_composite:+.2f}).</p>
+                    <div class="command-mini-list">
+                        <div class="command-mini-row"><span class="label">Sentiment</span><span class="value">{int(sentiment_score)}/100</span></div>
+                        <div class="command-mini-row"><span class="label">Fear &amp; Greed</span><span class="value">{int((fg or {}).get("score", 50) or 50)}/100</span></div>
+                        <div class="command-mini-row"><span class="label">Contract</span><span class="value">{html.escape(str((contract_roll or {}).get("current", "N/A")))}</span></div>
+                    </div>
+                    <div class="command-list-block">
+                        {_card_list(alert_items, _fmt_alert_item, "No active alerts right now.")}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        with c3:
+            st.markdown(
+                f"""
+                <div class="command-mini-card">
+                    <p class="eyebrow">Execution Guardrails</p>
+                    <p class="headline">{html.escape(str((opening_structure or {}).get("open_drive_signal", "Balanced")))}</p>
+                    <p class="subcopy">Opening type {html.escape(str((opening_structure or {}).get("opening_type", "N/A")))} • VWAP {html.escape(str((opening_structure or {}).get("vwap_relation", "N/A")))}</p>
+                    <div class="command-list-block">
+                        {_card_list(catalyst_rows, _fmt_catalyst_item, "No high/medium catalysts in the near window.")}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        d1, d2 = st.columns([1.15, 1.0], gap="small")
+        with d1:
+            st.markdown(
+                f"""
+                <div class="command-mini-card">
+                    <p class="eyebrow">Top Long Setups</p>
+                    <p class="headline">{html.escape(str((playbook or {}).get("regime", "No regime")))}</p>
+                    <p class="subcopy">Bias: {html.escape(str((playbook or {}).get("bias", "N/A")))} • Focus on the highest-confidence supports and reclaim zones.</p>
+                    <div class="command-list-block">
+                        {_card_list(top_longs, _fmt_level_item, "No long setups available.")}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        with d2:
+            st.markdown(
+                f"""
+                <div class="command-mini-card">
+                    <p class="eyebrow">Top Short Setups</p>
+                    <p class="headline">Fade / reject map</p>
+                    <p class="subcopy">Best short-side levels ranked by current dashboard structure, distance, and confidence.</p>
+                    <div class="command-list-block">
+                        {_card_list(top_shorts, _fmt_level_item, "No short setups available.")}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        if no_trade:
+            st.markdown(
+                f"""
+                <div class="command-mini-card" style="margin-bottom:10px;">
+                    <p class="eyebrow">No-Trade Conditions</p>
+                    <p class="headline">Guardrails before size</p>
+                    <div class="command-list-block">
+                        {_card_list(no_trade_items, _fmt_catalyst_item, "No hard no-trade conditions right now.")}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        p1, p2 = st.columns([1.1, 0.9], gap="small")
+        with p1:
+            _render_trade_plan_panel(playbook, data_0dte, nq_now, event_risk)
+            _render_reference_levels_panel(data_0dte, reference_levels, opening_structure, nq_now, event_risk)
+        with p2:
+            _render_level_quality_panel(data_0dte, data_weekly, nq_now, level_interactions_df=level_interactions_df)
+            _render_open_playbook_panel(playbook, data_0dte, nq_now)
+
+        q1, q2 = st.columns([1.1, 0.9], gap="small")
+        with q1:
+            _render_opening_structure_panel(opening_structure)
+            _render_breadth_internals_panel(
+                breadth_internals,
+                nq_day_change_pct,
+                _safe_float((market_data.get("es", {}) or {}).get("change_pct"), 0.0),
+                market_data,
+            )
+        with q2:
+            _render_overview_event_strip(event_risk)
+            _render_contract_roll_panel(contract_roll)
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def _render_overview_reference_snapshot(data_0dte, nq_now):
@@ -4878,9 +5327,6 @@ def run_full_app():
         compact_mode=st.session_state.compact_mode,
     )
 
-    st.title("📊 NQ Precision Map")
-    st.markdown("**Multi-Timeframe GEX & Delta Analysis** • Powered by CBOE Data")
-
     default_key = ""
     try:
         default_key = _get_secret("FINNHUB_KEY", "")
@@ -5098,146 +5544,83 @@ def run_full_app():
 
         market_data = get_market_overview_yahoo()
         event_risk = get_event_risk_snapshot(finnhub_key, hours_ahead=24)
+        opening_structure = get_futures_opening_structure("NQ=F")
+        reference_levels = get_futures_reference_levels("NQ=F", finnhub_key)
+        breadth_internals = get_futures_breadth_internals()
+        fg = get_fear_greed_index()
 
     nq_data = None
     if data_0dte:
         nq_data = get_nq_intraday_data()
+    level_interactions_df = _build_level_interactions(nq_data, data_0dte)
+    cross_asset_matrix = _build_cross_asset_driver_matrix(market_data, nq_day_change_pct)
+    regime_engine = _build_regime_engine(
+        data_0dte,
+        data_weekly,
+        nq_now,
+        market_data,
+        opening_structure,
+        event_risk,
+        nq_data,
+    )
+    trade_bias_engine = _build_trade_bias_engine(
+        data_0dte,
+        nq_now,
+        regime_engine,
+        cross_asset_matrix,
+        event_risk,
+        opening_structure,
+        breadth_internals,
+    )
+    playbook = _build_morning_playbook(data_0dte, data_weekly, nq_now, event_risk)
+    alert_center = _build_alert_center(data_0dte, nq_now, event_risk, ratio_meta, nq_source, qqq_source)
+    vix_level = _safe_float((market_data.get("vix", {}) or {}).get("price"), 0.0) or 0.0
+    sentiment_score = calculate_sentiment_score(
+        data_0dte,
+        nq_now,
+        vix_level,
+        int((fg or {}).get("score", 50) or 50),
+    )
+    contract_roll = _build_contract_roll_status(nq_source)
 
-    nav_sections = {
-        "Workspace": [("🏠 Dashboard", "🏠 Dashboard")],
-        "Tools": [("📊 NQ Level Builder", "📊 NQ Level Builder")],
-    }
-    available_views = {value for items in nav_sections.values() for _, value in items}
-    if st.session_state.get("main_left_nav") not in available_views:
-        st.session_state.main_left_nav = "🏠 Dashboard"
+    _render_runtime_mode_banner(feed_status)
+    if level_mapping_note:
+        st.warning(level_mapping_note)
+    with st.expander("Data Health & Feed Diagnostics", expanded=False):
+        _render_data_health_strip(
+            nq_source=nq_source,
+            qqq_source=qqq_source,
+            ratio_meta=ratio_meta,
+            data_0dte=data_0dte,
+            market_data=market_data,
+            finnhub_key=finnhub_key,
+        )
 
-    nav_col, center_col = st.columns([0.95, 6.40], gap="small")
-    right_col = None
+    _render_clean_dashboard(
+        nq_now=nq_now,
+        nq_day_change_pct=nq_day_change_pct,
+        nq_source=nq_source,
+        qqq_price=qqq_price,
+        qqq_source=qqq_source,
+        nq_data=nq_data,
+        data_0dte=data_0dte,
+        data_weekly=data_weekly,
+        market_data=market_data,
+        event_risk=event_risk,
+        ratio_meta=ratio_meta,
+        sentiment_score=sentiment_score,
+        fg=fg,
+        trade_bias_engine=trade_bias_engine,
+        alert_center=alert_center,
+        level_interactions_df=level_interactions_df,
+        opening_structure=opening_structure,
+        reference_levels=reference_levels,
+        cross_asset_matrix=cross_asset_matrix,
+        playbook=playbook,
+        breadth_internals=breadth_internals,
+        contract_roll=contract_roll,
+    )
 
-    with nav_col:
-        active_view = _render_left_nav(nav_sections)
-
-    with center_col:
-        _render_runtime_mode_banner(feed_status)
-        if level_mapping_note:
-            st.warning(level_mapping_note)
-        with st.expander("Data Health & Feed Diagnostics", expanded=False):
-            _render_data_health_strip(
-                nq_source=nq_source,
-                qqq_source=qqq_source,
-                ratio_meta=ratio_meta,
-                data_0dte=data_0dte,
-                market_data=market_data,
-                finnhub_key=finnhub_key,
-            )
-        if active_view == "🏠 Dashboard":
-            _render_clean_dashboard(
-                nq_now=nq_now,
-                nq_day_change_pct=nq_day_change_pct,
-                nq_source=nq_source,
-                qqq_price=qqq_price,
-                qqq_source=qqq_source,
-                nq_data=nq_data,
-                data_0dte=data_0dte,
-                data_weekly=data_weekly,
-                market_data=market_data,
-                event_risk=event_risk,
-            )
-        elif active_view == "📊 NQ Level Builder":
-            _render_nq_level_builder_panel(
-                data_0dte=data_0dte,
-                data_weekly=data_weekly,
-            )
-
-    if right_col is not None:
-        with right_col:
-            if active_view == "📅 Earnings Calendar":
-                st.markdown(
-                    '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📊 Earnings Detail</div></div><div class="terminal-body">',
-                    unsafe_allow_html=True,
-                )
-                selected = st.session_state.get("selected_earnings")
-                if selected and selected.get("symbol"):
-                    symbol = selected["symbol"]
-                    detail = get_earnings_detail(symbol, finnhub_key)
-                    st.markdown(f"### {detail.get('name', symbol)} ({symbol})")
-                    c1, c2 = st.columns(2)
-                    price_val = detail.get("price")
-                    chg = detail.get("change")
-                    dp = detail.get("change_pct")
-                    c1.metric("Price", f"${price_val:,.2f}" if price_val not in (None, "") else "N/A")
-                    c2.metric(
-                        "Change",
-                        f"{chg:+.2f}" if chg not in (None, "") else "N/A",
-                        f"{dp:+.2f}%" if dp not in (None, "") else None,
-                    )
-                    st.caption(
-                        f"Date: {selected.get('date', 'N/A')} • {selected.get('time', 'Time TBA')} • "
-                        f"Source: {selected.get('source', 'N/A')} • "
-                        f"Confidence: {selected.get('confidence_label', 'Low')} {selected.get('confidence_score', 0)}% • "
-                        f"AsOf: {selected.get('asof_utc', 'n/a')}"
-                    )
-                    st.markdown(
-                        f"Industry: `{detail.get('industry', 'N/A')}`  \n"
-                        f"Market Cap: `{detail.get('market_cap', 'N/A')}`  \n"
-                        f"Next Earnings: `{detail.get('next_earnings', 'N/A')}`"
-                    )
-                    hist = detail.get("history", [])
-                    if hist:
-                        hist_df = pd.DataFrame(hist)
-                        st.markdown("**Recent Earnings History**")
-                        st.dataframe(hist_df, width="stretch", hide_index=True)
-                    else:
-                        st.info("No earnings history available.")
-                else:
-                    st.info("Select an earnings card from the calendar to view details here.")
-                st.markdown("</div></div>", unsafe_allow_html=True)
-            else:
-                st.markdown(
-                    '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📰 Live News Feed</div></div><div class="terminal-body">',
-                    unsafe_allow_html=True,
-                )
-                rss_news = get_rss_news(finnhub_key)
-                base_news = [
-                    article
-                    for article in (rss_news or [])
-                    if str(article.get("headline", "")).strip()
-                ]
-                news_mode = str(st.session_state.get("news_signal_mode", "High-Signal"))
-                if news_mode == "High-Signal":
-                    visible_news = [a for a in base_news if _is_high_signal_news(a)]
-                else:
-                    visible_news = list(base_news)
-                if not visible_news and base_news:
-                    visible_news = base_news[:12]
-                st.caption(
-                    f"{len(visible_news)} headlines • mode: {news_mode} • refreshes on app cycle"
-                )
-                st.markdown('<div class="news-rail">', unsafe_allow_html=True)
-                if visible_news:
-                    for article in visible_news[:20]:
-                        raw_headline = str(article.get("headline", "No title")).strip()
-                        headline_short = (raw_headline[:177] + "…") if len(raw_headline) > 178 else raw_headline
-                        headline = html.escape(headline_short)
-                        source = html.escape(str(article.get("source", "Unknown")))
-                        link = article.get("link", "#")
-                        published = html.escape(str(article.get("published", "")))
-                        st.markdown(
-                            f"""
-                            <div class="news-item">
-                                <div style="font-weight:700;color:#e9eef7;font-size:14px;line-height:1.3;">{headline}</div>
-                                <div style="color:#9da8ba;font-size:11px;margin-top:5px;">{source} • {published}</div>
-                                <div style="margin-top:7px;"><a href="{link}" target="_blank">Open</a></div>
-                            </div>
-                            """,
-                            unsafe_allow_html=True,
-                        )
-                else:
-                    st.info("News feed temporarily unavailable")
-                st.markdown("</div>", unsafe_allow_html=True)
-                st.markdown("</div></div>", unsafe_allow_html=True)
-
-    st.markdown("---")
     st.caption(f"Updated: {datetime.now().strftime('%H:%M:%S')} | CBOE • {nq_source}")
 
     if st.sidebar.button("🔄 Refresh Now", use_container_width=True):
