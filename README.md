@@ -42,7 +42,7 @@ SCHWAB_REFRESH_TOKEN = "..."
 # MAX_ONE_TICK_JUMP_PCT = 5
 # MAX_CROSS_SOURCE_DEVIATION_PCT = 3
 # Optional overrides if your Schwab symbols differ:
-# SCHWAB_SYMBOL_NQ = "/NQH26"
+# SCHWAB_SYMBOL_NQ = "/NQZ26"  # Optional; stale quarterly overrides auto-roll forward.
 # SCHWAB_SYMBOL_ES = "/ESH26"
 # SCHWAB_SYMBOL_GC = "/GCG26"
 ```

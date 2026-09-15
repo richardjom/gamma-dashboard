@@ -47,6 +47,7 @@ from nq_precision.full_data import (
     process_multi_asset,
     schwab_is_configured,
 )
+from nq_precision.quotes import expected_quarterly_symbol
 
 
 def _quote_timestamp_ms(symbol):
@@ -2927,40 +2928,11 @@ def _render_alert_center_panel(alerts):
     st.markdown("</div></div>", unsafe_allow_html=True)
 
 
-def _third_friday(year, month):
-    d = datetime(year, month, 1)
-    offset = (4 - d.weekday()) % 7
-    first_friday = d + timedelta(days=offset)
-    return first_friday + timedelta(days=14)
-
-
 def _expected_nq_front_contract(now_et=None):
     if now_et is None:
         now_et = datetime.now(ZoneInfo("America/New_York"))
-    q_months = [3, 6, 9, 12]
-    year = now_et.year
-
-    def _next_quarter(y, m):
-        idx = q_months.index(m)
-        if idx == len(q_months) - 1:
-            return y + 1, q_months[0]
-        return y, q_months[idx + 1]
-
-    quarter = None
-    for qm in q_months:
-        if now_et.month <= qm:
-            quarter = qm
-            break
-    if quarter is None:
-        year += 1
-        quarter = 3
-
-    expiry = _third_friday(year, quarter).replace(tzinfo=now_et.tzinfo)
-    roll_start = expiry - timedelta(days=8)
-    if now_et >= roll_start:
-        year, quarter = _next_quarter(year, quarter)
-    month_codes = {3: "H", 6: "M", 9: "U", 12: "Z"}
-    return f"NQ{month_codes[quarter]}{str(year)[-2:]}", roll_start.strftime("%Y-%m-%d")
+    symbol, roll_start = expected_quarterly_symbol("NQ=F", now=now_et)
+    return symbol.lstrip("/"), roll_start
 
 
 def _build_contract_roll_status(nq_source):

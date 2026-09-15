@@ -1,5 +1,7 @@
+import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import requests
 import streamlit as st
@@ -23,6 +25,39 @@ FUTURES_MONTH_CODES = {
     11: "X",
     12: "Z",
 }
+QUARTERLY_FUTURES_ROOTS = {
+    "NQ=F": "/NQ",
+    "ES=F": "/ES",
+    "YM=F": "/YM",
+    "RTY=F": "/RTY",
+}
+
+
+def _third_friday(year, month):
+    first = datetime(year, month, 1)
+    first_friday = first + timedelta(days=(4 - first.weekday()) % 7)
+    return first_friday + timedelta(days=14)
+
+
+def active_quarterly_contract(now=None, roll_days=8):
+    """Return the active quarterly contract and the date its roll window began."""
+    now = now or datetime.now(ZoneInfo("America/New_York"))
+    quarter_months = (3, 6, 9, 12)
+    year = now.year
+    month = next((value for value in quarter_months if value >= now.month), 3)
+    if month < now.month:
+        year += 1
+
+    roll_start = (_third_friday(year, month) - timedelta(days=roll_days)).date()
+    if now.date() >= roll_start:
+        index = quarter_months.index(month)
+        if index == len(quarter_months) - 1:
+            year += 1
+            month = quarter_months[0]
+        else:
+            month = quarter_months[index + 1]
+
+    return year, month, roll_start
 
 
 def set_quote_meta(symbol, source, timestamp_ms=None, session_state=None):
@@ -36,20 +71,25 @@ def set_quote_meta(symbol, source, timestamp_ms=None, session_state=None):
 
 
 def next_quarterly_contracts(count=3, now=None):
-    now = now or datetime.now(timezone.utc)
-    quarter_months = [3, 6, 9, 12]
-    contracts = []
-    year = now.year
-    month = now.month
+    quarter_months = (3, 6, 9, 12)
+    year, month, _roll_start = active_quarterly_contract(now=now)
+    contracts = [(year, month)]
     while len(contracts) < count:
-        for q_month in quarter_months:
-            if year == now.year and q_month < month:
-                continue
-            contracts.append((year, q_month))
-            if len(contracts) == count:
-                break
-        year += 1
+        index = quarter_months.index(month)
+        if index == len(quarter_months) - 1:
+            year += 1
+            month = quarter_months[0]
+        else:
+            month = quarter_months[index + 1]
+        contracts.append((year, month))
     return contracts
+
+
+def expected_quarterly_symbol(futures_symbol="NQ=F", now=None):
+    root = QUARTERLY_FUTURES_ROOTS.get(futures_symbol, "/NQ")
+    year, month, roll_start = active_quarterly_contract(now=now)
+    symbol = f"{root}{FUTURES_MONTH_CODES[month]}{str(year)[-2:]}"
+    return symbol, roll_start.isoformat()
 
 
 def map_futures_symbol(futures_symbol, secret_getter=get_secret):
@@ -79,17 +119,40 @@ def map_futures_symbol(futures_symbol, secret_getter=get_secret):
 def candidate_schwab_symbols(futures_symbol, secret_getter=get_secret, now=None):
     mapped = map_futures_symbol(futures_symbol, secret_getter=secret_getter)
     if any(ch.isdigit() for ch in mapped):
+        expected_root = QUARTERLY_FUTURES_ROOTS.get(futures_symbol)
+        match = re.fullmatch(r"(/[A-Z]+)([HMUZ])(\d{2}|\d{4})", mapped.upper())
+        if expected_root and match and match.group(1) == expected_root:
+            expected_year, expected_month, _roll_start = active_quarterly_contract(now=now)
+            configured_year = int(match.group(3))
+            if configured_year < 100:
+                configured_year += 2000
+            configured_month = next(
+                month for month in (3, 6, 9, 12) if FUTURES_MONTH_CODES[month] == match.group(2)
+            )
+            if (configured_year, configured_month) < (expected_year, expected_month):
+                expected_code = FUTURES_MONTH_CODES[expected_month]
+                expected_short = f"{expected_root}{expected_code}{str(expected_year)[-2:]}"
+                expected_long = f"{expected_root}{expected_code}{expected_year}"
+                return [expected_short, expected_long, mapped]
         return [mapped]
     candidates = [mapped]
     if not mapped.startswith("/"):
         return candidates
 
+    dated_candidates = []
     for year, month in next_quarterly_contracts(count=4, now=now):
         month_code = FUTURES_MONTH_CODES[month]
         yy = str(year)[-2:]
         yyyy = str(year)
-        candidates.append(f"{mapped}{month_code}{yy}")
-        candidates.append(f"{mapped}{month_code}{yyyy}")
+        dated_candidates.append(f"{mapped}{month_code}{yy}")
+        dated_candidates.append(f"{mapped}{month_code}{yyyy}")
+
+    # Prefer an explicit dated contract for quarterly index futures so the selected
+    # source proves which expiry is live. Preserve generic-first behavior elsewhere.
+    if futures_symbol in QUARTERLY_FUTURES_ROOTS:
+        candidates = dated_candidates + candidates
+    else:
+        candidates.extend(dated_candidates)
 
     seen = set()
     deduped = []
