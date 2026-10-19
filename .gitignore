@@ -14,3 +14,6 @@ env/
 .ropeproject/
 .vscode/
 .streamlit/secrets.toml
+
+# Local level accuracy log
+data/
