@@ -12,8 +12,12 @@ import streamlit as st
 import streamlit.components.v1 as components
 import yfinance as yf
 
+from nq_precision import gamma_math as gm
+from nq_precision import level_log
 from nq_precision.full_data import (
+    ALL_EXPIRATIONS,
     _get_secret,
+    build_combined_chain,
     calculate_sentiment_score,
     exchange_schwab_auth_code,
     generate_daily_bread,
@@ -2160,7 +2164,7 @@ def _freshness_class(status):
     s = str(status or "").lower()
     if s == "fresh":
         return "ok"
-    if s in {"stale_soft", "unknown"}:
+    if s in {"stale_soft", "unknown", "delayed", "session_closed"}:
         return "warn"
     return "bad"
 
@@ -3832,7 +3836,7 @@ def _render_market_overview_visuals(
                         y=strike_map["strike"].astype(float),
                         orientation="h",
                         marker=dict(color=colors),
-                        text=[f"{float(v)/1_000_000:.1f}M" for v in strike_map["GEX"]],
+                        text=[_fmt_dollars(v) for v in strike_map["GEX"]],
                         textposition="outside",
                     )
                 ]
@@ -3856,7 +3860,7 @@ def _render_market_overview_visuals(
                 annotation_text=f"QQQ Spot {float(qqq_spot):.2f}",
                 annotation_position="top left",
             )
-            fig_gex.update_xaxes(title_text="Net GEX (notional)")
+            fig_gex.update_xaxes(title_text="Net GEX ($ per 1% move)")
             fig_gex.update_yaxes(title_text="QQQ Strike", tickformat=".2f")
             _style_dashboard_figure(fig_gex, height=370, margin=dict(l=20, r=14, t=34, b=28))
             st.plotly_chart(fig_gex, use_container_width=True)
@@ -4010,6 +4014,144 @@ def _render_market_overview_visuals(
     )
 
 
+def _fmt_dollars(v):
+    try:
+        v = float(v)
+    except Exception:
+        return "n/a"
+    a = abs(v)
+    if a >= 1e9:
+        return f"{v / 1e9:.2f}B"
+    if a >= 1e6:
+        return f"{v / 1e6:.1f}M"
+    if a >= 1e3:
+        return f"{v / 1e3:.0f}K"
+    return f"{v:.0f}"
+
+
+def _profile_value_at(profile, x_key, y_key, x):
+    try:
+        xs = [float(v) for v in profile[x_key]]
+        ys = [float(v) for v in profile[y_key]]
+        if not xs or x < xs[0] or x > xs[-1]:
+            return None
+        import numpy as _np
+
+        return float(_np.interp(float(x), xs, ys))
+    except Exception:
+        return None
+
+
+def _render_gamma_profile_panel(data_0dte, data_all, nq_now, universe_note=""):
+    st.markdown(
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📈 Gamma Profile (repriced)</div></div><div class="terminal-body">',
+        unsafe_allow_html=True,
+    )
+    views = {}
+    if data_0dte:
+        views[f"Front expiry: {data_0dte.get('expiration_label', '0DTE')}"] = data_0dte
+    if data_all:
+        views[str(data_all.get("expiration_label", "All expirations"))] = data_all
+    if not views:
+        st.info("Gamma profile unavailable.")
+        st.markdown("</div></div>", unsafe_allow_html=True)
+        return
+
+    choice = st.radio("Profile view", list(views.keys()), horizontal=True, key="gamma_profile_view", label_visibility="collapsed")
+    data = views[choice]
+    prof = data.get("gamma_profile") or {}
+    nq_grid = [float(v) for v in prof.get("nq", [])]
+    if not nq_grid:
+        st.info("Gamma profile unavailable for this view.")
+        st.markdown("</div></div>", unsafe_allow_html=True)
+        return
+
+    gex_at_spot = _profile_value_at(prof, "nq", "gex_oi", float(nq_now))
+    regime = "n/a"
+    if gex_at_spot is not None:
+        regime = "Positive gamma (moves dampened)" if gex_at_spot > 0 else "Negative gamma (moves amplified)"
+    flip_nq = _safe_float(data.get("g_flip_nq"), None)
+    flip_txt = f"{flip_nq:,.2f}" if flip_nq is not None else "n/a"
+    if not data.get("g_flip_in_range", True):
+        flip_txt = "None within ±20%"
+    vol_flip = prof.get("vol_flip_nq")
+
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("Net GEX at spot", _fmt_dollars(data.get("total_gex", 0.0)), help="Dollar gamma per 1% move, open interest based.")
+    m2.metric("Regime at spot", regime.split(" (")[0], help=regime)
+    m3.metric("Gamma Flip (OI)", flip_txt)
+    m4.metric("Delta Neutral", f"{float(data.get('dn_nq', 0.0)):,.2f}" if data.get("dn_in_range", True) else "None in range")
+    m5.metric("Volume Flip", f"{float(vol_flip):,.2f}" if vol_flip is not None else "None in range",
+              help="Same math using today's volume instead of open interest. Shows intraday positioning that overnight OI cannot.")
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=nq_grid, y=[float(v) for v in prof.get("gex_oi", [])], mode="lines",
+                             name="Open interest", line=dict(color="#77ddb0", width=2.4)))
+    fig.add_trace(go.Scatter(x=nq_grid, y=[float(v) for v in prof.get("gex_vol", [])], mode="lines",
+                             name="Volume", line=dict(color="#9db7ff", width=1.6, dash="dash")))
+    fig.add_hline(y=0, line_width=1, line_color="#7e90ab", line_dash="dot")
+    fig.add_vline(x=float(nq_now), line_width=1, line_color="#38d7ff", line_dash="dash",
+                  annotation_text=f"NQ {float(nq_now):,.0f}", annotation_position="top left")
+    if flip_nq is not None and data.get("g_flip_in_range", True) and nq_grid[0] <= flip_nq <= nq_grid[-1]:
+        fig.add_vline(x=flip_nq, line_width=1.2, line_color="#ffd37f", line_dash="dot",
+                      annotation_text="Gamma Flip", annotation_position="top right")
+    fig.update_xaxes(title_text="NQ price")
+    fig.update_yaxes(title_text="Dealer GEX ($ per 1% move)")
+    fig.update_layout(legend=dict(orientation="h", y=1.08, x=0))
+    _style_dashboard_figure(fig, height=300, margin=dict(l=8, r=8, t=30, b=8))
+    st.plotly_chart(fig, use_container_width=True)
+
+    meta = data.get("data_meta", {}) or {}
+    st.caption(
+        f"{universe_note} Each contract's gamma is repriced with Black Scholes at every hypothetical NQ price "
+        f"(own IV, time to the ET settlement). Contracts counted: {int(meta.get('contracts_in_exposure', 0)):,}; "
+        f"IV imputed: {int(meta.get('iv_imputed_count', 0)):,}. Sign convention assumes dealers are long calls and "
+        f"short puts, which is a simplification, not observed positioning."
+    )
+    st.markdown("</div></div>", unsafe_allow_html=True)
+
+
+def _render_level_accuracy_panel(data_0dte, data_all, nq_now, ratio_meta):
+    log_path = _get_secret("LEVEL_LOG_PATH", "") or None
+    with st.expander("🎯 Level accuracy log", expanded=False):
+        log = level_log.read_log(log_path)
+        sessions = int(log["session_date"].nunique()) if not log.empty else 0
+        st.caption(
+            f"{len(log):,} saved levels across {sessions} sessions. One snapshot is saved automatically each "
+            "session after 09:45 ET. On Hugging Face, set LEVEL_LOG_PATH to /data/level_snapshots.csv with "
+            "persistent storage enabled, or the log is lost on restart."
+        )
+        b1, b2, b3 = st.columns(3)
+        ratio = float((ratio_meta or {}).get("ratio", 0.0) or 0.0)
+        if b1.button("Save snapshot now", use_container_width=True):
+            rows = level_log.snapshot_rows(data_0dte, "0DTE", nq_now, ratio, tag="manual")
+            rows += level_log.snapshot_rows(data_all, "ALL", nq_now, ratio, tag="manual")
+            n = level_log.append_rows(rows, log_path)
+            st.success(f"Saved {n} levels.")
+        days = b2.number_input("Score last N days", min_value=5, max_value=60, value=30, step=5)
+        if b3.button("Score levels", use_container_width=True) and not log.empty:
+            cutoff = (gm.today_et() - timedelta(days=int(days))).isoformat()
+            recent = log[log["session_date"].astype(str) >= cutoff]
+            bars = get_intraday_history("NQ=F", days=int(days), interval="5m")
+            scored = level_log.score_levels(recent, bars)
+            summary = level_log.summarize_scores(scored)
+            if summary.empty:
+                st.info("Not enough logged sessions with price data to score yet.")
+            else:
+                st.markdown(
+                    "**Hold rate** = held / (held + broke). A level is touched when NQ trades within 8 pts; "
+                    "it holds if price then moves 25 pts away before closing 15 pts through it (within 1 hour)."
+                )
+                st.dataframe(summary, hide_index=True, use_container_width=True)
+        if not log.empty:
+            st.download_button(
+                "Download log (CSV)",
+                data=log.to_csv(index=False).encode("utf-8"),
+                file_name="level_snapshots.csv",
+                mime="text/csv",
+            )
+
+
 def _render_clean_dashboard(
     nq_now,
     nq_day_change_pct,
@@ -4033,6 +4175,8 @@ def _render_clean_dashboard(
     playbook,
     breadth_internals,
     contract_roll,
+    data_all=None,
+    gamma_universe_note="",
 ):
     alert_rows = alert_center or []
     ratio_label = str((ratio_meta or {}).get("confidence_label", "Low"))
@@ -4192,6 +4336,9 @@ def _render_clean_dashboard(
             nq_data=nq_data,
             nq_day_change_pct=nq_day_change_pct,
         )
+
+        _render_gamma_profile_panel(data_0dte, data_all, nq_now, gamma_universe_note)
+        _render_level_accuracy_panel(data_0dte, data_all, nq_now, ratio_meta)
 
         c1, c2, c3 = st.columns([1.35, 1.0, 1.0], gap="small")
         with c1:
@@ -5360,6 +5507,16 @@ def run_full_app():
     with st.sidebar.expander("Layout", expanded=False):
         st.checkbox("🗜 Compact Mode", key="compact_mode")
 
+    gamma_universe = st.sidebar.selectbox(
+        "Gamma universe",
+        ["QQQ + NDX", "QQQ only"],
+        index=0,
+        help=(
+            "QQQ + NDX folds NDX and NDXP index options into the gamma math, scaled so each "
+            "contract counts by its dollar exposure. Most Nasdaq 100 option hedging that moves "
+            "NQ comes from index options, so this is the more complete picture."
+        ),
+    )
     manual_override = st.sidebar.checkbox("✏️ Manual NQ Price")
     auto_refresh = st.sidebar.checkbox("🔄 Auto-Refresh (60s)", value=True)
     if auto_refresh:
@@ -5446,6 +5603,17 @@ def run_full_app():
             st.error("Failed to fetch options")
             st.stop()
 
+        gamma_universe_note = "QQQ options only."
+        if gamma_universe == "QQQ + NDX":
+            df_ndx, ndx_chain_price = get_cboe_options("NDX")
+            df_raw, combine_info = build_combined_chain(df_raw, cboe_price, df_ndx, ndx_chain_price)
+            if combine_info.get("k"):
+                gamma_universe_note = (
+                    f"QQQ + NDX/NDXP options (NDX scaled by QQQ/NDX = {combine_info['k']:.5f})."
+                )
+            else:
+                gamma_universe_note = combine_info.get("note") or gamma_universe_note
+
         if qqq_price == 0:
             qqq_price = cboe_price
             qqq_source = "CBOE Spot"
@@ -5476,11 +5644,13 @@ def run_full_app():
         data_0dte = None
         data_weekly = None
         data_monthly = None
+        data_all = None
 
         if freeze_levels and cached_levels:
             data_0dte = cached_levels.get("data_0dte")
             data_weekly = cached_levels.get("data_weekly")
             data_monthly = cached_levels.get("data_monthly")
+            data_all = cached_levels.get("data_all")
             ratio = float(cached_levels.get("ratio", ratio) or ratio)
             ratio_meta = dict(ratio_meta or {})
             ratio_meta["ratio"] = ratio
@@ -5505,14 +5675,36 @@ def run_full_app():
                     df_raw, exp_monthly, qqq_price_levels, ratio, nq_now, options_ticker="QQQ"
                 )
 
+            # The all expirations view reprices every contract out to 45 DTE,
+            # so reuse it until the chain itself refreshes (same 120s TTL).
+            all_key = f"levels_all::{gamma_universe}"
+            all_cached = st.session_state.get(all_key) or {}
+            if all_cached and (time.time() - float(all_cached.get("ts", 0))) < 120 and abs(
+                float(all_cached.get("spot", 0)) - float(qqq_price_levels)
+            ) <= float(qqq_price_levels) * 0.001:
+                data_all = all_cached.get("data")
+            else:
+                data_all = process_expiration(
+                    df_raw, ALL_EXPIRATIONS, qqq_price_levels, ratio, nq_now, options_ticker="QQQ"
+                )
+                st.session_state[all_key] = {"ts": time.time(), "spot": float(qqq_price_levels), "data": data_all}
+
             if data_0dte and not freeze_levels:
                 st.session_state[levels_cache_key] = {
                     "data_0dte": data_0dte,
                     "data_weekly": data_weekly,
                     "data_monthly": data_monthly,
+                    "data_all": data_all,
                     "ratio": float(ratio),
-                    "saved_at": datetime.now().isoformat(),
+                    "saved_at": gm.now_et().isoformat(),
                 }
+                # One automatic snapshot per session for accuracy tracking.
+                try:
+                    level_log.maybe_auto_snapshot(data_0dte, "0DTE", nq_now, ratio, path=_get_secret("LEVEL_LOG_PATH", "") or None)
+                    if data_all:
+                        level_log.maybe_auto_snapshot(data_all, "ALL", nq_now, ratio, path=_get_secret("LEVEL_LOG_PATH", "") or None)
+                except Exception:
+                    pass
 
         market_data = get_market_overview_yahoo()
         event_risk = get_event_risk_snapshot(finnhub_key, hours_ahead=24)
@@ -5591,9 +5783,12 @@ def run_full_app():
         playbook=playbook,
         breadth_internals=breadth_internals,
         contract_roll=contract_roll,
+        data_all=data_all,
+        gamma_universe_note=gamma_universe_note,
     )
 
-    st.caption(f"Updated: {datetime.now().strftime('%H:%M:%S')} | CBOE • {nq_source}")
+    options_src = str(((data_0dte or {}).get("data_meta", {}) or {}).get("options_source", "Options"))
+    st.caption(f"Updated: {gm.now_et().strftime('%H:%M:%S')} ET | {options_src} • {nq_source}")
 
     if st.sidebar.button("🔄 Refresh Now", use_container_width=True):
         st.session_state.last_refresh = time.time()

@@ -23,6 +23,7 @@ from nq_precision.auth_schwab import (
     schwab_is_configured as _auth_schwab_is_configured,
 )
 from nq_precision.config import get_secret as _config_get_secret
+from nq_precision import gamma_math as gm
 from nq_precision.quotes import (
     candidate_schwab_symbols as _quotes_candidate_schwab_symbols,
     extract_quote_price as _quotes_extract_quote_price,
@@ -119,7 +120,7 @@ def _utc_iso_from_ms(timestamp_ms):
         return None
 
 
-def _set_dataset_meta(dataset_key, source, timestamp_ms=None, max_age_sec=180):
+def _set_dataset_meta(dataset_key, source, timestamp_ms=None, max_age_sec=180, expected_delay_sec=0):
     if timestamp_ms is None:
         timestamp_ms = int(time.time() * 1000)
     st.session_state[f"dataset_meta::{dataset_key}"] = {
@@ -127,6 +128,7 @@ def _set_dataset_meta(dataset_key, source, timestamp_ms=None, max_age_sec=180):
         "timestamp_ms": int(timestamp_ms),
         "asof_utc": _utc_iso_from_ms(timestamp_ms),
         "max_age_sec": int(max_age_sec),
+        "expected_delay_sec": int(expected_delay_sec or 0),
     }
 
 
@@ -142,7 +144,28 @@ def get_dataset_meta(dataset_key):
         "timestamp_ms": ts,
         "latency_s": age_sec,
         "max_age_sec": int(meta.get("max_age_sec", 180)),
+        "expected_delay_sec": int(meta.get("expected_delay_sec", 0) or 0),
     }
+
+
+def _options_session_open_et(now_et=None):
+    """Regular US equity options session (weekday 09:30 to 16:15 ET). Holidays are not modeled."""
+    now_et = now_et or gm.now_et()
+    if now_et.weekday() >= 5:
+        return False
+    return dt_time(9, 30) <= now_et.time() <= dt_time(16, 15)
+
+
+def _last_options_close_et(now_et=None):
+    now_et = now_et or gm.now_et()
+    d = now_et.date()
+    close_today = datetime.combine(d, dt_time(16, 0), tzinfo=gm.ET)
+    if now_et.weekday() < 5 and now_et >= close_today:
+        return close_today
+    d = d - timedelta(days=1)
+    while d.weekday() >= 5:
+        d = d - timedelta(days=1)
+    return datetime.combine(d, dt_time(16, 0), tzinfo=gm.ET)
 
 
 def get_dataset_freshness(dataset_key, max_age_sec=None):
@@ -158,7 +181,30 @@ def get_dataset_freshness(dataset_key, max_age_sec=None):
             "status": "unknown",
             "confidence_multiplier": 0.60,
         }
+
+    # Outside the options session the chain cannot change, so a snapshot taken
+    # at or after the last close is as current as it can be.
+    ts_ms = meta.get("timestamp_ms")
+    if str(dataset_key).startswith("options:") and ts_ms and not _options_session_open_et():
+        last_close_ms = int(_last_options_close_et().timestamp() * 1000)
+        if int(ts_ms) >= last_close_ms - (30 * 60 * 1000):
+            return {
+                **meta,
+                "status": "session_closed",
+                "confidence_multiplier": float(_get_secret("SESSION_CLOSED_CONFIDENCE_MULTIPLIER", 0.90)),
+            }
+
+    # A delayed feed (CBOE) is judged on age beyond its known delay, but is
+    # never reported as "fresh".
+    expected_delay = int(meta.get("expected_delay_sec", 0) or 0)
+    age = max(0, int(age) - expected_delay)
     if age <= target_max:
+        if expected_delay > 0:
+            return {
+                **meta,
+                "status": "delayed",
+                "confidence_multiplier": float(_get_secret("DELAYED_CONFIDENCE_MULTIPLIER", 0.85)),
+            }
         return {
             **meta,
             "status": "fresh",
@@ -339,9 +385,37 @@ def get_runtime_health():
     return checks
 
 
+CBOE_OPTIONS_DELAY_SEC = 15 * 60
+# Index options use a leading underscore on CBOE and a leading $ on Schwab.
+_CBOE_CHAIN_SYMBOLS = {"NDX": "_NDX", "SPX": "_SPX", "RUT": "_RUT", "VIX": "_VIX"}
+_SCHWAB_CHAIN_SYMBOLS = {"NDX": "$NDX", "SPX": "$SPX", "RUT": "$RUT", "VIX": "$VIX"}
+
+
+def _cboe_timestamp_ms(payload):
+    """CBOE's own as-of time for the chain (reported in ET), not our fetch time."""
+    candidates = []
+    if isinstance(payload, dict):
+        data = payload.get("data") or {}
+        candidates = [data.get("last_trade_time"), payload.get("timestamp"), data.get("timestamp")]
+    for raw in candidates:
+        if not raw:
+            continue
+        try:
+            ts = pd.Timestamp(str(raw))
+            if pd.isna(ts):
+                continue
+            if ts.tzinfo is None:
+                ts = ts.tz_localize(gm.ET)
+            return int(ts.timestamp() * 1000)
+        except Exception:
+            continue
+    return None
+
+
 def _fetch_cboe_options_raw(ticker="QQQ"):
     try:
-        url = f"https://cdn.cboe.com/api/global/delayed_quotes/options/{ticker}.json"
+        cboe_symbol = _CBOE_CHAIN_SYMBOLS.get(ticker.upper(), ticker.upper())
+        url = f"https://cdn.cboe.com/api/global/delayed_quotes/options/{cboe_symbol}.json"
         headers = {"User-Agent": "Mozilla/5.0"}
         response = requests.get(url, headers=headers, timeout=10)
         if response.status_code != 200:
@@ -350,32 +424,39 @@ def _fetch_cboe_options_raw(ticker="QQQ"):
         current_price = data["data"]["current_price"]
         options_raw = data["data"]["options"]
         df = pd.DataFrame(options_raw)
-        pattern = re.compile(r"^(.+)(\d{6})([PC])(\d+)$")
+        pattern = re.compile(r"^([A-Z]+?)(\d{6})([PC])(\d+)$")
 
         def parse_option(row):
-            match = pattern.search(row["option"])
+            match = pattern.search(str(row["option"]).replace(" ", ""))
             if match:
                 exp_str = match.group(2)
                 option_type = "call" if match.group(3) == "C" else "put"
                 strike = int(match.group(4)) / 1000
                 exp_date = datetime.strptime("20" + exp_str, "%Y%m%d")
                 return pd.Series(
-                    {"strike": strike, "type": option_type, "expiration": exp_date}
+                    {"strike": strike, "type": option_type, "expiration": exp_date, "root": match.group(1)}
                 )
-            return pd.Series({"strike": 0, "type": "unknown", "expiration": None})
+            return pd.Series({"strike": 0, "type": "unknown", "expiration": None, "root": ""})
 
         parsed = df.apply(parse_option, axis=1)
         df = pd.concat([df, parsed], axis=1)
         df = df[df["type"] != "unknown"].copy()
+        df["underlying"] = ticker.upper()
+        ts_ms = _cboe_timestamp_ms(data)
+        delay_sec = CBOE_OPTIONS_DELAY_SEC
+        if ts_ms is None:
+            # No as-of field: assume the documented ~15 minute delay.
+            ts_ms = int(time.time() * 1000) - (CBOE_OPTIONS_DELAY_SEC * 1000)
         _set_dataset_meta(
             f"options:{ticker.upper()}",
-            "CBOE",
-            timestamp_ms=int(time.time() * 1000),
+            "CBOE (delayed ~15m)",
+            timestamp_ms=ts_ms,
             max_age_sec=int(_get_secret("OPTIONS_MAX_STALE_SECONDS", 180)),
+            expected_delay_sec=delay_sec,
         )
         return df, current_price
     except Exception as e:
-        st.error(f"CBOE fetch failed: {e}")
+        st.error(f"CBOE fetch failed ({ticker}): {e}")
         return None, None
 
 
@@ -407,12 +488,15 @@ def _fetch_schwab_options_raw(ticker="QQQ"):
         return None, None
 
     params = {
-        "symbol": ticker.upper(),
+        "symbol": _SCHWAB_CHAIN_SYMBOLS.get(ticker.upper(), ticker.upper()),
         "contractType": "ALL",
         "strategy": "SINGLE",
         "includeQuotes": "TRUE",
         "range": "ALL",
-        "strikeCount": 200,
+        # NDX lists strikes 5 to 10 points apart, so it needs more strikes to
+        # cover the same percentage range as QQQ.
+        "strikeCount": 400 if ticker.upper() in _SCHWAB_CHAIN_SYMBOLS else 200,
+        "toDate": (gm.today_et() + timedelta(days=int(_get_secret("OPTIONS_MAX_DTE_FETCH", 60)))).isoformat(),
     }
     try:
         response = requests.get(
@@ -472,6 +556,11 @@ def _fetch_schwab_options_raw(ticker="QQQ"):
                         or contract.get("optionDeliverablesList")
                         or f"{ticker}_{exp_key}_{opt_type}_{strike}"
                     )
+                    root = str(contract.get("optionRoot") or "").strip().upper()
+                    if not root:
+                        root_match = re.match(r"^\$?([A-Z]+)", str(option_symbol).strip())
+                        root = root_match.group(1) if root_match else ticker.upper()
+                    settlement_raw = str(contract.get("settlementType") or "").strip().upper()
                     rows.append(
                         {
                             "option": str(option_symbol),
@@ -489,6 +578,9 @@ def _fetch_schwab_options_raw(ticker="QQQ"):
                             "gamma": _safe_num(contract.get("gamma"), 0.0),
                             "theta": _safe_num(contract.get("theta"), 0.0),
                             "vega": _safe_num(contract.get("vega"), 0.0),
+                            "root": root,
+                            "settlement": "AM" if settlement_raw in {"A", "AM"} else ("PM" if settlement_raw in {"P", "PM"} else ""),
+                            "underlying": ticker.upper(),
                             "source": "Schwab",
                         }
                     )
@@ -526,6 +618,43 @@ def _fetch_options_raw(ticker="QQQ"):
 
     # Fallback: CBOE delayed chain.
     return _fetch_cboe_options_raw(ticker)
+
+
+# QQQ trades near NDX / 41. Anything far outside this band means one of the
+# two spot prints is bad, so the NDX chain is skipped rather than mis-scaled.
+_QQQ_NDX_RATIO_BOUNDS = (0.015, 0.040)
+
+
+def build_combined_chain(df_qqq, qqq_spot, df_ndx, ndx_spot):
+    """Fold NDX / NDXP options into QQQ strike space and append them to QQQ.
+
+    Each NDX contract is rescaled by k = QQQ spot / NDX spot so its dollar
+    gamma and dollar delta are preserved exactly (see gamma_math.rescale_chain).
+    Returns (combined_df, info).
+    """
+    info = {"underlyings": ["QQQ"], "k": None, "note": ""}
+    if df_qqq is None or df_qqq.empty:
+        return df_qqq, info
+    base = df_qqq.copy()
+    if "underlying" not in base.columns:
+        base["underlying"] = "QQQ"
+    if df_ndx is None or df_ndx.empty:
+        info["note"] = "NDX chain unavailable; using QQQ only."
+        return base, info
+    try:
+        k = float(qqq_spot) / float(ndx_spot)
+    except Exception:
+        k = 0.0
+    lo, hi = _QQQ_NDX_RATIO_BOUNDS
+    if not (lo <= k <= hi):
+        info["note"] = f"QQQ/NDX spot ratio {k:.5f} out of bounds; using QQQ only."
+        return base, info
+    ndx = gm.rescale_chain(df_ndx, k, "NDX")
+    combined = pd.concat([base, ndx], ignore_index=True, sort=False)
+    combined["expiration"] = pd.to_datetime(combined["expiration"], errors="coerce")
+    combined = combined[combined["expiration"].notna()].copy()
+    info.update({"underlyings": ["QQQ", "NDX"], "k": k})
+    return combined, info
 
 
 @st.cache_data(ttl=120)
@@ -2954,9 +3083,26 @@ def get_nasdaq_heatmap_data(universe="Nasdaq 100", size_mode="Market Cap", timef
     return pd.DataFrame(rows)
 
 
+ALL_EXPIRATIONS = "ALL"
+ALL_EXPIRATIONS_MAX_DTE = 45
+
+
+def _expiration_is_live(exp, now_et=None):
+    """True until the expiration's 16:00 ET close (in Eastern time, not server time)."""
+    settle = gm.settlement_time_et(exp)
+    if settle is None:
+        return False
+    return (now_et or gm.now_et()) < settle
+
+
 def get_expirations_by_type(df):
-    today = datetime.now().date()
-    expirations = sorted(df["expiration"].dropna().unique())
+    now_et = gm.now_et()
+    today = now_et.date()
+    expirations = [
+        pd.Timestamp(e).to_pydatetime()
+        for e in sorted(df["expiration"].dropna().unique())
+        if _expiration_is_live(e, now_et)
+    ]
 
     dte_0 = None
     weekly = None
@@ -3469,7 +3615,7 @@ def _extract_earnings_whispers_calendar():
             rows.append(
                 {
                     "symbol": sym,
-                    "date": datetime.now().date().isoformat(),
+                    "date": gm.today_et().isoformat(),
                     "time": "Time TBA",
                     "eps_estimate": None,
                     "eps_actual": None,
@@ -3505,7 +3651,7 @@ def _extract_earnings_hub_calendar():
                 rows.append(
                     {
                         "symbol": sym,
-                        "date": datetime.now().date().isoformat(),
+                        "date": gm.today_et().isoformat(),
                         "time": "Time TBA",
                         "eps_estimate": None,
                         "eps_actual": None,
@@ -3733,15 +3879,34 @@ def get_earnings_detail(symbol, finnhub_key):
 
 @st.cache_data(ttl=90)
 def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_ticker="QQQ"):
-    try:
-        exp_date = target_exp.date() if hasattr(target_exp, "date") else target_exp
-        dte_days = max(0, int((exp_date - datetime.now().date()).days))
-    except Exception:
-        dte_days = 0
+    """Levels for one expiration, or for every expiration out to 45 DTE when
+    ``target_exp == ALL_EXPIRATIONS``.
 
-    df_exp = df_raw[df_raw["expiration"] == target_exp].copy()
-    df_exp = df_exp[df_exp["open_interest"] > 0].copy()
-    df_exp = df_exp[df_exp["iv"] > 0].copy()
+    Exposure math (Gamma Flip, Delta Neutral, net delta, GEX) always runs on
+    the complete chain for the selection. The strike window and liquidity
+    filters below only decide which strikes are eligible as walls / floors.
+    """
+    now_et = gm.now_et()
+    all_mode = isinstance(target_exp, str) and target_exp.upper() == ALL_EXPIRATIONS
+    if all_mode:
+        df_exp = df_raw[df_raw["expiration"].notna()].copy()
+        exp_dates = pd.to_datetime(df_exp["expiration"]).dt.date
+        df_exp = df_exp[[(d - now_et.date()).days <= ALL_EXPIRATIONS_MAX_DTE for d in exp_dates]].copy()
+        # Wall selection parameters use the weekly bucket for the aggregate view.
+        dte_days = 7
+    else:
+        df_exp = df_raw[df_raw["expiration"] == target_exp].copy()
+        dte_days = gm.dte_days(target_exp, now_et.date())
+
+    df_exp = df_exp[pd.to_numeric(df_exp["open_interest"], errors="coerce").fillna(0) > 0].copy()
+    if len(df_exp) == 0:
+        return None
+
+    rate = float(_get_secret("RISK_FREE_RATE", gm.DEFAULT_RATE))
+    div_q = float(_get_secret("UNDERLYING_DIVIDEND_YIELD", 0.006))
+    # Adds T (to the ET settlement time), imputes missing IV instead of
+    # dropping those rows, and recomputes gamma / delta at the live spot.
+    df_exp = gm.prepare_chain(df_exp, qqq_price, now=now_et, r=rate, q=div_q)
     if len(df_exp) == 0:
         return None
 
@@ -3749,29 +3914,61 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
     liq_vol_weight = 0.55 if dte_days == 0 else 0.45 if dte_days <= 7 else 0.35
     df_exp["liquidity"] = df_exp["open_interest"] + (liq_vol_weight * df_exp["volume"])
 
-    # Expected move first, then make strike window adaptive to current regime.
-    atm_strike = df_exp.iloc[(df_exp["strike"] - qqq_price).abs().argsort()[:1]]["strike"].values[0]
-    atm_opts = df_exp[(df_exp["strike"] >= qqq_price * 0.995) & (df_exp["strike"] <= qqq_price * 1.005)].copy()
+    # Expected move from the ATM straddle. In the aggregate view, use the
+    # expiration closest to one week out so the bands keep a fixed meaning.
+    em_frame = df_exp
+    if all_mode:
+        exp_series = pd.to_datetime(df_exp["expiration"])
+        uniq = sorted(exp_series.dropna().unique())
+        if uniq:
+            em_exp = min(uniq, key=lambda e: abs((pd.Timestamp(e).date() - now_et.date()).days - 7))
+            em_frame = df_exp[exp_series == em_exp]
+    atm_strike = em_frame.iloc[(em_frame["strike"] - qqq_price).abs().argsort()[:1]]["strike"].values[0]
+    atm_opts = em_frame[(em_frame["strike"] >= qqq_price * 0.995) & (em_frame["strike"] <= qqq_price * 1.005)].copy()
     if atm_opts.empty:
-        atm_opts = df_exp[df_exp["strike"] == atm_strike]
+        atm_opts = em_frame[em_frame["strike"] == atm_strike]
     atm_call = atm_opts[atm_opts["type"] == "call"]
     atm_put = atm_opts[atm_opts["type"] == "put"]
 
-    if len(atm_call) > 0 and len(atm_put) > 0:
+    straddle = 0.0
+    if len(atm_call) > 0 and len(atm_put) > 0 and {"bid", "ask"}.issubset(atm_opts.columns):
         call_mid = ((atm_call["bid"] + atm_call["ask"]) / 2).replace([float("inf"), -float("inf")], pd.NA).dropna().median()
         put_mid = ((atm_put["bid"] + atm_put["ask"]) / 2).replace([float("inf"), -float("inf")], pd.NA).dropna().median()
         call_mid = float(call_mid) if pd.notna(call_mid) else 0.0
         put_mid = float(put_mid) if pd.notna(put_mid) else 0.0
         straddle = call_mid + put_mid
-    else:
+    if straddle <= 0:
         straddle = qqq_price * 0.012
 
+    # ATM straddle is about 0.8 sigma, so 1.25x straddle is a 1 sigma move.
     nq_em_full = (straddle * 1.25 if straddle > 0 else qqq_price * 0.012) * ratio
     nq_em_050 = nq_em_full * 0.50
     nq_em_025 = nq_em_full * 0.25
 
     etf_em_full = abs(float(nq_em_full / ratio)) if ratio not in (None, 0) else qqq_price * 0.012
     em_pct = max(0.0025, float(etf_em_full / max(1.0, qqq_price)))
+
+    # Delta exposure on the full chain (BS deltas are already signed).
+    _, strike_delta, df_exp = calculate_delta_neutral(df_exp, qqq_price)
+    total_call_delta = df_exp[df_exp["type"] == "call"]["delta_exposure"].sum()
+    total_put_delta = df_exp[df_exp["type"] == "put"]["delta_exposure"].sum()
+    net_delta = total_call_delta + total_put_delta
+
+    # True Gamma Flip / Delta Neutral: reprice the whole chain across
+    # hypothetical spot prices and find where the total crosses zero.
+    flip_solution = gm.solve_level(df_exp, qqq_price, "gamma", r=rate, q=div_q)
+    dn_solution = gm.solve_level(df_exp, qqq_price, "delta", r=rate, q=div_q)
+    g_flip_strike = float(flip_solution["level"])
+    dn_strike = float(dn_solution["level"])
+    dn_nq = dn_strike * ratio
+
+    profile_grid = gm.build_spot_grid(qqq_price, pct=0.06, points=241)
+    profile_oi = gm.gamma_profile(df_exp, profile_grid, "open_interest", r=rate, q=div_q)
+    profile_vol = gm.gamma_profile(df_exp, profile_grid, "volume", r=rate, q=div_q)
+    vol_flip_strike = gm.nearest_zero_crossing(profile_grid, profile_vol, qqq_price)
+    total_gex = float(df_exp["GEX"].sum())
+    total_gex_vol = float(df_exp["GEX_VOL"].sum()) if "GEX_VOL" in df_exp.columns else 0.0
+
     base_window_pct = max(0.025, min(0.12, (em_pct * 3.2) + 0.006))
     if dte_days == 0:
         strike_window_pct = max(0.02, min(0.07, base_window_pct))
@@ -3783,6 +3980,7 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
         strike_window_pct = max(0.04, min(0.12, base_window_pct))
         liq_q = 0.30
 
+    # Wall / floor candidates only. Nothing below feeds the exposure totals.
     df = df_exp[
         (df_exp["strike"] > qqq_price * (1.0 - strike_window_pct))
         & (df_exp["strike"] < qqq_price * (1.0 + strike_window_pct))
@@ -3801,22 +3999,6 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
         df = df_exp.sort_values("liquidity", ascending=False).head(120).copy()
     if len(df) == 0:
         return None
-
-    dn_strike, strike_delta, df = calculate_delta_neutral(df, qqq_price)
-    dn_nq = dn_strike * ratio
-
-    total_call_delta = df[df["type"] == "call"]["delta_exposure"].sum()
-    total_put_delta = df[df["type"] == "put"]["delta_exposure"].sum()
-    net_delta = total_call_delta + total_put_delta
-
-    df["GEX"] = df.apply(
-        lambda x: x["open_interest"]
-        * x["gamma"]
-        * (qqq_price**2)
-        * 0.01
-        * (1 if x["type"] == "call" else -1),
-        axis=1,
-    )
 
     calls = df[df["type"] == "call"].copy()
     puts = df[df["type"] == "put"].copy()
@@ -4253,27 +4435,7 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
     floor_structure_compressed = (primary_floor_conf_sel - secondary_floor_conf_sel) < min_primary_gap
 
     gex_by_strike = df.groupby("strike", as_index=False)["GEX"].sum().sort_values("strike")
-    g_flip_strike = None
-    for i in range(1, len(gex_by_strike)):
-        prev_val = float(gex_by_strike.iloc[i - 1]["GEX"])
-        curr_val = float(gex_by_strike.iloc[i]["GEX"])
-        if prev_val == 0:
-            g_flip_strike = float(gex_by_strike.iloc[i - 1]["strike"])
-            break
-        if curr_val == 0:
-            g_flip_strike = float(gex_by_strike.iloc[i]["strike"])
-            break
-        if prev_val * curr_val < 0:
-            x0 = float(gex_by_strike.iloc[i - 1]["strike"])
-            x1 = float(gex_by_strike.iloc[i]["strike"])
-            if curr_val != prev_val:
-                g_flip_strike = x0 + (0 - prev_val) * (x1 - x0) / (curr_val - prev_val)
-            else:
-                g_flip_strike = x0
-            break
-    if g_flip_strike is None:
-        min_idx = gex_by_strike["GEX"].abs().idxmin()
-        g_flip_strike = float(gex_by_strike.loc[min_idx, "strike"])
+    # g_flip_strike comes from the repriced gamma profile computed above.
 
     # Confidence scoring for actionable levels based on nearby liquidity, gamma strength, and strike-structure score.
     structure_score_by_strike = {}
@@ -4473,12 +4635,35 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
         ("Lower 0.50σ", nq_now - nq_em_050, 5.0, "📊"),
     ]
 
+    underlyings = sorted(df_exp["underlying"].dropna().astype(str).unique().tolist()) if "underlying" in df_exp.columns else [str(options_ticker).upper()]
+    if all_mode:
+        expiration_label = f"All expirations to {ALL_EXPIRATIONS_MAX_DTE} DTE"
+    else:
+        exp_d = target_exp.date() if hasattr(target_exp, "date") else target_exp
+        expiration_label = f"{exp_d} ({dte_days} DTE)"
+
     return {
-        "df": df,
+        "df": df_exp,
+        "df_levels": df,
+        "expiration_label": expiration_label,
+        "underlyings": underlyings,
         "dn_strike": dn_strike,
         "dn_nq": dn_nq,
+        "dn_in_range": bool(dn_solution["in_range"]),
         "g_flip_strike": g_flip_strike,
         "g_flip_nq": g_flip_strike * ratio,
+        "g_flip_in_range": bool(flip_solution["in_range"]),
+        "g_flip_search_pct": flip_solution.get("search_pct"),
+        "total_gex": total_gex,
+        "total_gex_vol": total_gex_vol,
+        "gamma_profile": {
+            "strike": profile_grid,
+            "nq": profile_grid * ratio,
+            "gex_oi": profile_oi,
+            "gex_vol": profile_vol,
+            "vol_flip_strike": vol_flip_strike,
+            "vol_flip_nq": (vol_flip_strike * ratio) if vol_flip_strike is not None else None,
+        },
         "net_delta": net_delta,
         "target_resistance": target_resistance_nq,
         "target_support": target_support_nq,
@@ -4499,6 +4684,13 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
             "options_freshness": options_health.get("status", "unknown"),
             "confidence_multiplier": conf_mult,
             "wall_model": "zone_v4_gamma_structure_blend",
+            "flip_model": "bs_reprice_profile_v1",
+            "sign_convention": "dealers long calls, short puts (assumed)",
+            "risk_free_rate": rate,
+            "dividend_yield": div_q,
+            "contracts_in_exposure": int(len(df_exp)),
+            "contracts_in_wall_selection": int(len(df)),
+            "iv_imputed_count": int(df_exp["iv_imputed"].sum()) if "iv_imputed" in df_exp.columns else 0,
             "strike_window_pct": round(float(strike_window_pct), 4),
             "primary_side_cap_pct": round(float(side_cap_pct), 4),
             "min_primary_span_nq": round(float(min_span_nq), 2),
@@ -4516,11 +4708,11 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
 
 @st.cache_data(ttl=14400)
 def generate_daily_bread(data_0dte, data_weekly, nq_now, market_data, fg, events, news):
-    current_hour = datetime.now().hour
+    current_hour = gm.now_et().hour
     is_morning = current_hour < 12
 
     report = {}
-    report["timestamp"] = datetime.now().strftime("%A, %B %d, %Y • %I:%M %p EST")
+    report["timestamp"] = gm.now_et().strftime("%A, %B %d, %Y • %I:%M %p ET")
     report["session"] = "MORNING BRIEF" if is_morning else "MARKET CLOSE SUMMARY"
 
     if not data_0dte:
