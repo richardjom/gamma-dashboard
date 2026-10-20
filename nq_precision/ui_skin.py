@@ -218,7 +218,7 @@ div[data-testid="stMarkdownContainer"] .sk-act-sub {{ font-size: 11.5px !importa
 @media (max-width: 1100px) {{ .sk-kpi-grid {{ grid-template-columns: repeat(2, minmax(0,1fr)); }} }}
 @media (max-width: 640px) {{
   .sk-kpi-grid {{ grid-template-columns: 1fr; }}
-  .sk-table th:nth-child(5), .sk-table td:nth-child(5), .sk-table th:nth-child(6), .sk-table td:nth-child(6) {{ display: none; }}
+  .sk-table th:nth-child(5), .sk-table td:nth-child(5), .sk-table th:nth-child(6), .sk-table td:nth-child(6), .sk-table th:nth-child(7), .sk-table td:nth-child(7) {{ display: none; }}
   .sk-table th, .sk-table td {{ padding: 8px 9px !important; font-size: 12px !important; }}
   .sk-table td:first-child {{ white-space: normal; }}
 }}

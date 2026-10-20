@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import feedparser
 import finnhub
+import numpy as np
 import pandas as pd
 import requests
 import streamlit as st
@@ -620,6 +621,128 @@ def _fetch_options_raw(ticker="QQQ"):
     return _fetch_cboe_options_raw(ticker)
 
 
+# ---------------------------------------------------------------------------
+# Intraday flow estimate
+# ---------------------------------------------------------------------------
+
+def classify_trade_side(last, bid, ask, tick=None):
+    """+1 customer buy, -1 customer sell, 0 unknown, per row.
+
+    A last trade in the top 40% of the bid/ask spread counts as a buy, in the
+    bottom 40% as a sell. In the middle, CBOE's tick direction breaks the tie.
+    """
+    def _arr(x):
+        return pd.to_numeric(pd.Series(np.atleast_1d(np.asarray(x, dtype=object))), errors="coerce").fillna(0.0).to_numpy(dtype=float)
+
+    last, bid, ask = _arr(last), _arr(bid), _arr(ask)
+    n = max(len(last), len(bid), len(ask))
+    last, bid, ask = (np.broadcast_to(a, n).astype(float) if len(a) == 1 else a for a in (last, bid, ask))
+    spread = ask - bid
+    with np.errstate(divide="ignore", invalid="ignore"):
+        pos = np.where(spread > 0, (last - bid) / spread, np.nan)
+    side = np.where(pos >= 0.6, 1.0, np.where(pos <= 0.4, -1.0, 0.0))
+    side = np.where((last <= 0) | (spread <= 0), 0.0, side)
+    if tick is not None:
+        t = pd.Series(tick).astype(str).str.lower().to_numpy()
+        tick_side = np.where(np.char.find(t.astype(str), "up") >= 0, 1.0, np.where(np.char.find(t.astype(str), "down") >= 0, -1.0, 0.0))
+        side = np.where((side == 0) & (last > 0), tick_side, side)
+    return side
+
+
+@st.cache_resource
+def _flow_store():
+    """Process wide, shared across browser sessions."""
+    return {"date": None, "contracts": {}}
+
+
+def _flow_store_path():
+    folder = os.path.dirname(_get_secret("LEVEL_LOG_PATH", "") or "")
+    return os.path.join(folder, "flow", f"{gm.today_et().isoformat()}.json") if folder else None
+
+
+def update_flow(df, underlying, store=None, now_et=None, persist=True):
+    """Add ``flow_net``: today's estimated net customer contracts bought.
+
+    Each time the chain refreshes, the volume added since the previous refresh
+    is signed by where the last trade printed against the bid and ask. The
+    first time a contract is seen, its earlier volume is treated as unknown,
+    so the estimate is most complete when the page has been open since the
+    session started. State is kept per trading day and, when a storage path is
+    configured, saved so a restart does not lose it.
+    """
+    if df is None or df.empty or "option" not in df.columns:
+        return df
+    now_et = now_et or gm.now_et()
+    store = store if store is not None else _flow_store()
+    today = now_et.date().isoformat()
+    if store.get("date") != today:
+        store["date"] = today
+        store["contracts"] = {}
+        path = _flow_store_path() if persist else None
+        if path and os.path.exists(path):
+            try:
+                import json
+
+                with open(path) as fh:
+                    store["contracts"] = json.load(fh)
+            except Exception:
+                pass
+    contracts = store["contracts"]
+    out = df.copy()
+    last_col = "last" if "last" in out.columns else ("last_trade_price" if "last_trade_price" in out.columns else None)
+    sides = classify_trade_side(
+        out[last_col] if last_col else 0.0,
+        out.get("bid", 0.0),
+        out.get("ask", 0.0),
+        out["tick"] if "tick" in out.columns else None,
+    )
+    vols = pd.to_numeric(out.get("volume", 0.0), errors="coerce").fillna(0.0).to_numpy(dtype=float)
+    keys = (str(underlying).upper() + ":" + out["option"].astype(str)).to_numpy()
+    net_out = np.zeros(len(out))
+    tracked_out = np.zeros(len(out))
+    changed = False
+    for i, (k, v, sd) in enumerate(zip(keys, vols, sides)):
+        rec = contracts.get(k)
+        if rec is None:
+            contracts[k] = {"vol": float(v), "net": 0.0, "base": float(v)}
+            changed = True
+            continue
+        dv = float(v) - float(rec["vol"])
+        if dv < 0:
+            rec["vol"] = float(v)
+            rec["base"] = float(v)
+        elif dv > 0:
+            rec["net"] = float(rec["net"]) + dv * float(sd)
+            rec["vol"] = float(v)
+            changed = True
+        net_out[i] = float(rec["net"])
+        tracked_out[i] = max(0.0, float(v) - float(rec.get("base", v)))
+    out["flow_net"] = net_out
+    out["flow_tracked"] = tracked_out
+    if changed and persist:
+        path = _flow_store_path()
+        if path:
+            try:
+                import json
+
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w") as fh:
+                    json.dump(contracts, fh)
+            except Exception:
+                pass
+    return out
+
+
+def flow_coverage(df):
+    """Share of today's volume that the tracker saw arrive and classified (0 to 1)."""
+    if df is None or df.empty or "flow_tracked" not in df.columns:
+        return 0.0
+    total = float(pd.to_numeric(df.get("volume", 0.0), errors="coerce").fillna(0.0).sum())
+    if total <= 0:
+        return 0.0
+    return float(min(1.0, pd.to_numeric(df["flow_tracked"], errors="coerce").fillna(0.0).sum() / total))
+
+
 # QQQ trades near NDX / 41. Anything far outside this band means one of the
 # two spot prints is bad, so the NDX chain is skipped rather than mis-scaled.
 _QQQ_NDX_RATIO_BOUNDS = (0.015, 0.040)
@@ -735,9 +858,75 @@ def get_intraday_history(symbol="NQ=F", days=45, interval="5m"):
 
 
 @st.cache_data(ttl=10)
+def equity_session_state(now_et=None):
+    """QQQ trading state in ET: "regular" 09:30 to 16:00, "extended" 04:00 to
+    09:30 and 16:00 to 20:00, otherwise "closed". Holidays are not modeled."""
+    now_et = now_et or gm.now_et()
+    if now_et.weekday() >= 5:
+        return "closed"
+    t = now_et.time()
+    if dt_time(9, 30) <= t < dt_time(16, 0):
+        return "regular"
+    if dt_time(4, 0) <= t < dt_time(9, 30) or dt_time(16, 0) <= t < dt_time(20, 0):
+        return "extended"
+    return "closed"
+
+
+def nq_price_at(timestamp_ms, symbol="NQ=F"):
+    """NQ close of the last 5 minute bar at or before ``timestamp_ms``."""
+    if not timestamp_ms:
+        return None
+    try:
+        bars = get_intraday_history(symbol, days=5, interval="5m")
+        if bars is None or bars.empty:
+            return None
+        ts = pd.Timestamp(int(timestamp_ms), unit="ms", tz="UTC").tz_convert(gm.ET)
+        prior = bars[bars.index <= ts]
+        if prior.empty:
+            return None
+        return float(prior["Close"].iloc[-1])
+    except Exception:
+        return None
+
+
+def held_closed_ratio(nq_now, qqq_price, qqq_ts_ms, nq_at_fn=None):
+    """While QQQ is closed its last price is frozen but NQ keeps trading, so
+    NQ / QQQ would drift with every NQ tick. Hold the ratio at NQ's price when
+    QQQ last printed, and imply where QQQ "is" now from live NQ.
+
+    Returns {"ratio", "implied_qqq", "nq_at_print"} or None.
+    """
+    try:
+        qqq_price = float(qqq_price or 0.0)
+        nq_now = float(nq_now or 0.0)
+    except Exception:
+        return None
+    if qqq_price <= 0 or nq_now <= 0 or not qqq_ts_ms:
+        return None
+    nq_at = (nq_at_fn or nq_price_at)(qqq_ts_ms)
+    if not nq_at or nq_at <= 0:
+        return None
+    ratio = nq_at / qqq_price
+    # Sanity: NQ trades near 41x QQQ. Reject anything far off.
+    if not (30.0 <= ratio <= 55.0):
+        return None
+    return {"ratio": float(ratio), "implied_qqq": float(nq_now / ratio), "nq_at_print": float(nq_at)}
+
+
 def get_qqq_price_with_source(finnhub_key):
     # Prefer Schwab so NQ and QQQ can come from the same venue/timebase.
     quotes = _get_schwab_quotes(["QQQ"])
+    if quotes and equity_session_state() == "closed":
+        # QQQ is not trading, so its last Schwab print is the right price
+        # even though it is older than the realtime staleness limit.
+        for key in ("QQQ", "/QQQ"):
+            if key in quotes:
+                price = _extract_quote_price(quotes[key])
+                ts = _extract_quote_timestamp_ms(quotes[key])
+                recent = ts and (int(time.time() * 1000) - int(ts)) <= 4 * 24 * 3600 * 1000
+                if price and recent:
+                    _set_quote_meta("QQQ", "Schwab (last print)", ts)
+                    return float(price), "Schwab (last print)"
     if quotes:
         for key in ("QQQ", "/QQQ"):
             if key in quotes:
@@ -3878,7 +4067,7 @@ def get_earnings_detail(symbol, finnhub_key):
 
 
 @st.cache_data(ttl=90)
-def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_ticker="QQQ"):
+def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_ticker="QQQ", weight_mode="oi"):
     """Levels for one expiration, or for every expiration out to 45 DTE when
     ``target_exp == ALL_EXPIRATIONS``.
 
@@ -3898,7 +4087,18 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
         df_exp = df_raw[df_raw["expiration"] == target_exp].copy()
         dte_days = gm.dte_days(target_exp, now_et.date())
 
-    df_exp = df_exp[pd.to_numeric(df_exp["open_interest"], errors="coerce").fillna(0) > 0].copy()
+    flow_mode = weight_mode == "flow" and "flow_net" in df_exp.columns
+    oi_raw = pd.to_numeric(df_exp["open_interest"], errors="coerce").fillna(0)
+    if flow_mode:
+        # Keep contracts opened today (zero overnight OI but traded) too.
+        vol_raw = pd.to_numeric(df_exp.get("volume", 0), errors="coerce").fillna(0)
+        df_exp = df_exp[(oi_raw > 0) | (vol_raw > 0)].copy()
+        df_exp["oi_raw"] = pd.to_numeric(df_exp["open_interest"], errors="coerce").fillna(0)
+        df_exp["open_interest"] = gm.flow_adjusted_open_interest(df_exp)
+        df_exp = df_exp[df_exp["open_interest"] != 0].copy()
+    else:
+        df_exp = df_exp[oi_raw > 0].copy()
+        df_exp["oi_raw"] = pd.to_numeric(df_exp["open_interest"], errors="coerce").fillna(0)
     if len(df_exp) == 0:
         return None
 
@@ -3912,7 +4112,7 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
 
     df_exp["volume"] = df_exp["volume"].fillna(0)
     liq_vol_weight = 0.55 if dte_days == 0 else 0.45 if dte_days <= 7 else 0.35
-    df_exp["liquidity"] = df_exp["open_interest"] + (liq_vol_weight * df_exp["volume"])
+    df_exp["liquidity"] = df_exp["oi_raw"] + (liq_vol_weight * df_exp["volume"])
 
     # Expected move from the ATM straddle. In the aggregate view, use the
     # expiration closest to one week out so the bands keep a fixed meaning.
@@ -3967,6 +4167,11 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
     profile_vol = gm.gamma_profile(df_exp, profile_grid, "volume", r=rate, q=div_q)
     vol_flip_strike = gm.nearest_zero_crossing(profile_grid, profile_vol, qqq_price)
     total_gex = float(df_exp["GEX"].sum())
+    projections = []
+    if not all_mode and dte_days == 0 and equity_session_state(now_et) == "regular":
+        projections = gm.project_levels(df_exp, qqq_price, (30, 60), r=rate, q=div_q)
+        for pr in projections:
+            pr["flip_nq"] = (pr["flip"] * ratio) if pr.get("flip") is not None else None
     total_gex_vol = float(df_exp["GEX_VOL"].sum()) if "GEX_VOL" in df_exp.columns else 0.0
 
     base_window_pct = max(0.025, min(0.12, (em_pct * 3.2) + 0.006))
@@ -4647,6 +4852,9 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
         "df_levels": df,
         "expiration_label": expiration_label,
         "underlyings": underlyings,
+        "weight_mode": "flow" if flow_mode else "oi",
+        "flow_coverage": flow_coverage(df_exp) if flow_mode else None,
+        "projections": projections,
         "dn_strike": dn_strike,
         "dn_nq": dn_nq,
         "dn_in_range": bool(dn_solution["in_range"]),
@@ -4691,6 +4899,7 @@ def process_expiration(df_raw, target_exp, qqq_price, ratio, nq_now, options_tic
             "contracts_in_exposure": int(len(df_exp)),
             "contracts_in_wall_selection": int(len(df)),
             "iv_imputed_count": int(df_exp["iv_imputed"].sum()) if "iv_imputed" in df_exp.columns else 0,
+            "iv_smoothed_count": int(df_exp["iv_smoothed"].sum()) if "iv_smoothed" in df_exp.columns else 0,
             "strike_window_pct": round(float(strike_window_pct), 4),
             "primary_side_cap_pct": round(float(side_cap_pct), 4),
             "min_primary_span_nq": round(float(min_span_nq), 2),

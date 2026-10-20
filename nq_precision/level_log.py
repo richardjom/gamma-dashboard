@@ -216,3 +216,75 @@ def summarize_scores(scored: pd.DataFrame) -> pd.DataFrame:
     summary["hold_rate"] = (summary["held"] / resolved.where(resolved > 0)).round(3)
     summary["sessions"] = scored.groupby(["view", "level_name"])["session_date"].nunique()
     return summary.reset_index()[["view", "level_name", "sessions", "held", "broke", "unresolved", "untouched", "touch_rate", "hold_rate"]]
+
+
+# ---------------------------------------------------------------------------
+# Chain snapshots (for backtesting changes later)
+# ---------------------------------------------------------------------------
+
+CHAIN_COLUMNS = [
+    "underlying", "root", "expiration", "type", "strike", "open_interest", "volume",
+    "iv", "bid", "ask", "flow_net",
+]
+_written_slots: set = set()
+
+
+def chain_dir(path: str | None = None) -> str:
+    return os.path.join(os.path.dirname(log_path(path)) or ".", "chains")
+
+
+def maybe_write_chain_snapshot(df: pd.DataFrame, qqq_spot: float, nq_now: float, ratio: float,
+                               path: str | None = None, now: datetime | None = None,
+                               interval_min: int = 15, max_dte: int = 10, strike_pct: float = 0.10) -> str | None:
+    """Write a compact chain snapshot every ``interval_min`` minutes of the
+    cash session: expirations out to ``max_dte`` days and strikes within
+    ``strike_pct`` of spot, gzipped CSV under <log folder>/chains/<date>/.
+    NDX contracts are stored in their QQQ equivalent units, as the engine uses
+    them. Returns the file written, or None.
+    """
+    now = now or gm.now_et()
+    if now.weekday() >= 5 or not ("09:30" <= now.strftime("%H:%M") <= "16:00"):
+        return None
+    if df is None or df.empty or not qqq_spot:
+        return None
+    slot = now.replace(minute=(now.minute // interval_min) * interval_min, second=0, microsecond=0)
+    folder = os.path.join(chain_dir(path), slot.date().isoformat())
+    target = os.path.join(folder, f"{slot.strftime('%H%M')}.csv.gz")
+    if target in _written_slots or os.path.exists(target):
+        _written_slots.add(target)
+        return None
+    snap = df.copy()
+    exp = pd.to_datetime(snap["expiration"], errors="coerce")
+    days = (exp.dt.date - now.date()).apply(lambda d: d.days if pd.notna(d) else 999)
+    snap = snap[(days >= 0) & (days <= max_dte)]
+    strikes = pd.to_numeric(snap["strike"], errors="coerce")
+    snap = snap[(strikes >= qqq_spot * (1 - strike_pct)) & (strikes <= qqq_spot * (1 + strike_pct))]
+    if snap.empty:
+        return None
+    cols = [c for c in CHAIN_COLUMNS if c in snap.columns]
+    snap = snap[cols].copy()
+    snap["saved_at_et"] = now.isoformat(timespec="seconds")
+    snap["qqq_spot"] = round(float(qqq_spot), 4)
+    snap["nq"] = round(float(nq_now), 2)
+    snap["ratio"] = round(float(ratio), 6)
+    os.makedirs(folder, exist_ok=True)
+    snap.to_csv(target, index=False, compression="gzip")
+    _written_slots.add(target)
+    return target
+
+
+def hold_rates_by_level(scored: pd.DataFrame, view: str = "0DTE", min_sessions: int = 10) -> dict:
+    """{level_name: {"hold_rate", "sessions", "enough"}} for one view."""
+    summary = summarize_scores(scored)
+    out = {}
+    if summary is None or summary.empty:
+        return out
+    for _, row in summary[summary["view"] == view].iterrows():
+        sessions = int(row.get("sessions", 0) or 0)
+        hr = row.get("hold_rate")
+        out[str(row["level_name"])] = {
+            "hold_rate": None if pd.isna(hr) else float(hr),
+            "sessions": sessions,
+            "enough": sessions >= min_sessions,
+        }
+    return out
