@@ -4292,30 +4292,7 @@ def _render_clean_dashboard(
         _render_gamma_profile_panel(data_0dte, data_all, nq_now, gamma_universe_note)
         _render_level_accuracy_panel(data_0dte, data_all, nq_now, ratio_meta)
 
-        c1, c2, c3 = st.columns([1.35, 1.0, 1.0], gap="small")
-        with c1:
-            st.markdown(
-                """
-                <div class="command-mini-card">
-                    <p class="eyebrow">Export</p>
-                    <p class="headline">Copy dashboard levels</p>
-                    <p class="subcopy">Pull the current daily + weekly level string from the live dashboard without jumping to a second tool.</p>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            dashboard_output_string = _build_generated_levels_output_string(data_0dte, data_weekly)
-            if dashboard_output_string:
-                _render_copy_levels_widget(
-                    output_string=dashboard_output_string,
-                    widget_key="dashboard-levels",
-                    label="Paste this into Pine Script 'Price Levels'",
-                    caption="Generated from the current 0DTE and weekly live dashboard levels.",
-                    height=110,
-                )
-            else:
-                st.info("Level export string unavailable.")
-
+        c2, c3 = st.columns([1.0, 1.0], gap="small")
         with c2:
             st.markdown(
                 f"""
@@ -4398,23 +4375,8 @@ def _render_clean_dashboard(
         p1, p2 = st.columns([1.1, 0.9], gap="small")
         with p1:
             _render_trade_plan_panel(playbook, data_0dte, nq_now, event_risk)
-            _render_reference_levels_panel(data_0dte, reference_levels, opening_structure, nq_now, event_risk)
         with p2:
-            _render_level_quality_panel(data_0dte, data_weekly, nq_now, level_interactions_df=level_interactions_df)
             _render_open_playbook_panel(playbook, data_0dte, nq_now)
-
-        q1, q2 = st.columns([1.1, 0.9], gap="small")
-        with q1:
-            _render_opening_structure_panel(opening_structure)
-            _render_breadth_internals_panel(
-                breadth_internals,
-                nq_day_change_pct,
-                _safe_float((market_data.get("es", {}) or {}).get("change_pct"), 0.0),
-                market_data,
-            )
-        with q2:
-            _render_overview_event_strip(event_risk)
-            _render_contract_roll_panel(contract_roll)
 
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -5661,7 +5623,8 @@ def run_full_app():
         market_data = get_market_overview_yahoo()
         event_risk = get_event_risk_snapshot(finnhub_key, hours_ahead=24)
         opening_structure = get_futures_opening_structure("NQ=F")
-        reference_levels = get_futures_reference_levels("NQ=F", finnhub_key)
+        # The reference levels panel was removed, so skip its fetch.
+        reference_levels = None
         breadth_internals = get_futures_breadth_internals()
         fg = get_fear_greed_index()
 
