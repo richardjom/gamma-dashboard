@@ -47,7 +47,8 @@ class SessionAndRatioTests(unittest.TestCase):
                 mock.patch.object(fd, "_extract_quote_price", return_value=601.25), \
                 mock.patch.object(fd, "_extract_quote_timestamp_ms", return_value=last_print_ms), \
                 mock.patch.object(fd, "_set_quote_meta") as meta:
-            price, source = fd.get_qqq_price_with_source.__wrapped__("key") if hasattr(fd.get_qqq_price_with_source, "__wrapped__") else fd.get_qqq_price_with_source("key")
+            fd.get_qqq_price_with_source.clear()
+            price, source = fd.get_qqq_price_with_source("key")
         self.assertEqual(price, 601.25)
         self.assertEqual(source, "Schwab (last print)")
         meta.assert_called_with("QQQ", "Schwab (last print)", last_print_ms)
@@ -176,3 +177,37 @@ class SnapshotAndCalibrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReviewFixTests(unittest.TestCase):
+    def test_prepare_chain_handles_duplicate_index(self):
+        exp = datetime(2026, 10, 23)
+        chain = _synthetic_chain(600.0, [exp])
+        chain.index = [0] * len(chain)  # every row shares one label
+        chain.loc[:, "iv"] = chain["iv"].where(np.arange(len(chain)) % 7 != 0, 0.0)
+        out = gm.prepare_chain(chain, 600.0, now=NOW)
+        self.assertEqual(len(out), len(chain))
+        self.assertTrue((out["iv"] > 0).all())
+
+    def test_nq_price_at_uses_bars_that_closed_by_the_print(self):
+        idx = pd.date_range("2026-10-19 19:45", periods=4, freq="5min", tz=ET)
+        bars = pd.DataFrame({"Close": [1.0, 2.0, 3.0, 4.0]}, index=idx)
+        print_ms = int(datetime(2026, 10, 19, 19, 59, tzinfo=ET).timestamp() * 1000)
+        with mock.patch.object(fd, "get_intraday_history", return_value=bars):
+            # 19:55 bar ends at 20:00, after the 19:59 print, so 19:50's close is used.
+            self.assertEqual(fd.nq_price_at(print_ms), 2.0)
+
+    def test_qqq_quote_function_is_cached_and_session_state_is_not(self):
+        self.assertTrue(hasattr(fd.get_qqq_price_with_source, "clear"))
+        self.assertFalse(hasattr(fd.equity_session_state, "clear"))
+
+    def test_flow_store_has_lock(self):
+        import threading
+
+        store = {"date": None, "contracts": {}, "lock": threading.Lock()}
+        snap = pd.DataFrame({"option": ["X"], "type": ["call"], "volume": [10], "bid": [1.0], "ask": [1.1], "last": [1.1]})
+        fd.update_flow(snap, "QQQ", store=store, now_et=NOW, persist=False)
+        snap["volume"] = 20
+        out = fd.update_flow(snap, "QQQ", store=store, now_et=NOW, persist=False)
+        self.assertEqual(float(out["flow_net"].iloc[0]), 10.0)
+        self.assertFalse(store["lock"].locked())

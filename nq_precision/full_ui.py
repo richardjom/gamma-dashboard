@@ -4017,14 +4017,21 @@ def _render_nq_overview_chart(nq_data, data, nq_now):
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
+def _measured_hold_rates_cached(log_path, view="0DTE"):
+    """Hold rate per level type from the accuracy log, refreshed hourly.
+    Raises on failure so a bad fetch is not cached for an hour."""
+    log = level_log.read_log(log_path or None)
+    if log.empty:
+        return {}
+    bars = get_intraday_history("NQ=F", days=45, interval="5m")
+    if bars is None or bars.empty:
+        raise RuntimeError("NQ bars unavailable")
+    return level_log.hold_rates_by_level(level_log.score_levels(log, bars), view=view)
+
+
 def _measured_hold_rates(log_path, view="0DTE"):
-    """Hold rate per level type from the accuracy log, refreshed hourly."""
     try:
-        log = level_log.read_log(log_path or None)
-        if log.empty:
-            return {}
-        bars = get_intraday_history("NQ=F", days=45, interval="5m")
-        return level_log.hold_rates_by_level(level_log.score_levels(log, bars), view=view)
+        return _measured_hold_rates_cached(log_path, view)
     except Exception:
         return {}
 
@@ -5414,6 +5421,24 @@ def _render_nq_level_builder_panel(data_0dte=None, data_weekly=None):
         st.dataframe(df, use_container_width=True, hide_index=True)
 
 
+@st.fragment(run_every=1)
+def _auto_refresh_timer(interval_s):
+    """Countdown that ticks on its own and reruns the whole app when it hits 0.
+
+    Streamlit only reruns a script when the viewer interacts with it, so a
+    countdown computed in the main script never advances by itself. A
+    fragment with run_every reruns on a timer without redrawing the page.
+    """
+    interval_s = max(1, int(interval_s))
+    last = float(st.session_state.get("last_refresh", time.time()))
+    remaining = max(0, interval_s - int(time.time() - last))
+    if remaining == 0:
+        st.session_state.last_refresh = time.time()
+        st.rerun(scope="app")
+    st.markdown(f"**Next refresh in:** {remaining}s")
+    st.progress((interval_s - remaining) / interval_s)
+
+
 def run_full_app():
     st.set_page_config(
         page_title="NQ Gamma Map", layout="wide", initial_sidebar_state="auto"
@@ -5553,17 +5578,8 @@ def run_full_app():
     if auto_refresh:
         if "last_refresh" not in st.session_state:
             st.session_state.last_refresh = time.time()
-
-        time_since_refresh = time.time() - st.session_state.last_refresh
-        time_until_refresh = max(0, refresh_interval - int(time_since_refresh))
-
-        if time_until_refresh == 0:
-            st.session_state.last_refresh = time.time()
-            st.rerun()
-
-        st.sidebar.markdown(f"**Next refresh in:** {time_until_refresh}s")
-        placeholder = st.sidebar.empty()
-        placeholder.progress((refresh_interval - time_until_refresh) / refresh_interval)
+        with st.sidebar:
+            _auto_refresh_timer(refresh_interval)
 
     if not finnhub_key:
         st.warning("Enter your Finnhub API key in the sidebar to load data.")
