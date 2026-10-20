@@ -14,6 +14,7 @@ import yfinance as yf
 
 from nq_precision import gamma_math as gm
 from nq_precision import level_log
+from nq_precision import ui_skin as skin
 from nq_precision.full_data import (
     ALL_EXPIRATIONS,
     _get_secret,
@@ -2013,7 +2014,7 @@ def _build_event_surprise_engine(econ_df):
 
 def _render_regime_engine_panel(regime):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧠 Regime Engine</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">Regime Engine</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not regime:
@@ -2040,7 +2041,7 @@ def _render_regime_engine_panel(regime):
 
 def _render_dealer_forward_pressure_panel(payload):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧮 Dealer Forward Pressure</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">Dealer Forward Pressure</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not payload:
@@ -2082,7 +2083,7 @@ def _render_dealer_forward_pressure_panel(payload):
 
 def _render_microstructure_panel(payload):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🔬 Microstructure Panel</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">Microstructure Panel</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not payload:
@@ -2105,7 +2106,7 @@ def _render_microstructure_panel(payload):
 
 def _render_cross_asset_driver_matrix_panel(payload):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🌐 Cross-Asset Driver Matrix</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">Cross-Asset Driver Matrix</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not payload:
@@ -2130,7 +2131,7 @@ def _render_cross_asset_driver_matrix_panel(payload):
 
 def _render_event_surprise_panel(payload):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">⚡ Event Surprise Engine</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">Event Surprise Engine</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not payload:
@@ -2308,7 +2309,7 @@ def _render_data_health_strip(nq_source, qqq_source, ratio_meta, data_0dte, mark
 
 def _render_trade_plan_panel(playbook, data_0dte, nq_now, event_risk):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧭 Trade Plan (Session)</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">Trade Plan (Session)</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not playbook or not data_0dte:
@@ -2703,7 +2704,7 @@ def _build_trade_bias_engine(
 
 def _render_trade_bias_panel(payload):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧠 Trade Bias Engine</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">Trade Bias Engine</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not payload:
@@ -2728,7 +2729,7 @@ def _render_trade_bias_panel(payload):
 
 def _render_open_playbook_panel(playbook, data_0dte, nq_now):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📖 Open Playbook (If/Then)</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">Open Playbook (If/Then)</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not playbook or not data_0dte:
@@ -2835,7 +2836,7 @@ def _build_level_reaction_stats(data_0dte, intraday_hist):
 
 def _render_level_reaction_panel(stats_df):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🪃 Level Reaction Stats (Last ~20 Sessions)</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">Level Reaction Stats (Last ~20 Sessions)</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if stats_df is None or stats_df.empty:
@@ -2921,7 +2922,7 @@ def _build_alert_center(data_0dte, nq_now, event_risk, ratio_meta, nq_source, qq
 
 def _render_alert_center_panel(alerts):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🔔 Alert Center</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">Alert Center</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not alerts:
@@ -2961,7 +2962,7 @@ def _build_contract_roll_status(nq_source):
 
 def _render_contract_roll_panel(payload):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📅 Contract Rollover Watch</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">Contract Rollover Watch</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not payload:
@@ -2987,7 +2988,7 @@ def _render_morning_playbook(playbook, nq_source, options_freshness, econ_freshn
         st.info("Morning playbook unavailable.")
         return
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">☀️ Morning Playbook</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">Morning Playbook</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     c1, c2, c3 = st.columns([1.05, 1.2, 1.2])
@@ -3034,7 +3035,7 @@ def _render_morning_playbook(playbook, nq_source, options_freshness, econ_freshn
 
 def _render_level_quality_panel(data_0dte, data_weekly, nq_now, level_interactions_df=None):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🎯 Level Quality Engine</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">Level Quality Engine</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not data_0dte:
@@ -3152,7 +3153,7 @@ def _render_level_quality_panel(data_0dte, data_weekly, nq_now, level_interactio
 
 def _render_reference_levels_panel(data_0dte, reference_levels, opening_structure, nq_now, event_risk):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧷 Day-Trader Reference Levels</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">Day-Trader Reference Levels</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not data_0dte:
@@ -3292,7 +3293,7 @@ def _render_reference_levels_panel(data_0dte, reference_levels, opening_structur
 
 def _render_opening_structure_panel(opening):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">⏱ Opening Auction Context</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">Opening Auction Context</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not opening:
@@ -3350,7 +3351,7 @@ def _render_opening_structure_panel(opening):
 
 def _render_event_risk_panel(event_risk):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🚨 Event-Risk Engine</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">Event-Risk Engine</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not event_risk:
@@ -3402,7 +3403,7 @@ def _render_event_risk_panel(event_risk):
 
 def _render_breadth_internals_panel(breadth_data, nq_day_change_pct, es_change_pct, market_data):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📡 Breadth & Internals (Futures Context)</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">Breadth & Internals (Futures Context)</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not breadth_data:
@@ -3533,7 +3534,7 @@ def _render_breadth_internals_panel(breadth_data, nq_day_change_pct, es_change_p
 
 def _render_cot_dealer_panel(cot_payload):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🏦 COT Dealer/Intermediary Positioning (Weekly)</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">COT Dealer/Intermediary Positioning (Weekly)</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not cot_payload or not cot_payload.get("markets"):
@@ -3590,8 +3591,8 @@ def _style_dashboard_figure(fig, height=260, margin=None):
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         font=dict(
-            family="Space Grotesk, Trebuchet MS, sans-serif",
-            color="#dce8fb",
+            family="Inter, system-ui, sans-serif",
+            color=skin.TEXT,
             size=12,
         ),
         margin=margin or dict(l=14, r=14, t=38, b=14),
@@ -3663,134 +3664,8 @@ def _render_market_overview_visuals(
     event_cls = "neg" if lockout else "warn" if high_ct > 0 else "pos"
     bias_cls = "pos" if bias == "LONG" else "neg" if bias == "SHORT" else "warn"
 
-    kpis = [
-        ("Dist GF", f"{gf_distance:+.0f}", f"vs {gf_level:.2f}"),
-        ("Dist DN", f"{dn_distance:+.0f}", f"vs {dn_level:.2f}"),
-        ("Expected", f"+/-{expected_move:.0f}", "0DTE range"),
-        ("Wall Span", f"{abs(p_wall - p_floor):.0f}", f"{p_floor:.0f}-{p_wall:.0f}"),
-        ("Net Delta", f"{net_delta:,.0f}", "book pressure"),
-        ("Ratio Err", f"+/-{ratio_unc:.0f}", ratio_mode),
-    ]
-    kpi_html = []
-    for title, val, sub in kpis:
-        kpi_html.append(
-            '<div class="viz-kpi-card">'
-            f'<p class="k">{html.escape(title)}</p>'
-            f'<p class="v">{html.escape(str(val))}</p>'
-            f'<p class="s">{html.escape(str(sub))}</p>'
-            "</div>"
-        )
-
-    st.markdown(
-        f"""
-        <div class="viz-hero">
-            <div class="viz-hero-top">
-                <p class="viz-kicker">NQ Visual Command Center</p>
-                <p class="viz-big">{nq_now:,.2f}</p>
-                <div class="viz-chip-row">
-                    <span class="viz-chip {regime_cls}">{regime_txt}</span>
-                    <span class="viz-chip {bias_cls}">Bias {bias} ({bias_score:+d})</span>
-                    <span class="viz-chip {ratio_cls}">Ratio {ratio_lbl} {ratio_conf}%</span>
-                    <span class="viz-chip {event_cls}">Event {'LOCKOUT' if lockout else 'CLEAR'}</span>
-                    <span class="viz-chip">NQ {html.escape(str(nq_source))}</span>
-                    <span class="viz-chip">QQQ {html.escape(str(qqq_source))}</span>
-                </div>
-            </div>
-            <div class="viz-kpi-grid">
-                {''.join(kpi_html)}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    m1, m2, m3 = st.columns([1.20, 1.05, 1.75], gap="small")
-    with m1:
-        fig_meter = go.Figure()
-        fig_meter.add_trace(
-            go.Indicator(
-                mode="gauge+number",
-                value=float(bias_meter),
-                title={"text": "Bias Pressure"},
-                domain={"x": [0.0, 0.48], "y": [0.0, 1.0]},
-                gauge={
-                    "axis": {"range": [0, 100]},
-                    "bar": {"color": "#44e8b7"},
-                    "steps": [
-                        {"range": [0, 35], "color": "rgba(255,139,139,0.24)"},
-                        {"range": [35, 65], "color": "rgba(255,211,127,0.22)"},
-                        {"range": [65, 100], "color": "rgba(84,239,170,0.24)"},
-                    ],
-                },
-            )
-        )
-        fig_meter.add_trace(
-            go.Indicator(
-                mode="gauge+number",
-                value=float(sentiment_score),
-                title={"text": "Sentiment"},
-                domain={"x": [0.52, 1.0], "y": [0.0, 1.0]},
-                gauge={
-                    "axis": {"range": [0, 100]},
-                    "bar": {"color": "#38d7ff"},
-                    "steps": [
-                        {"range": [0, 35], "color": "rgba(255,139,139,0.24)"},
-                        {"range": [35, 65], "color": "rgba(255,211,127,0.22)"},
-                        {"range": [65, 100], "color": "rgba(84,239,170,0.24)"},
-                    ],
-                },
-            )
-        )
-        _style_dashboard_figure(fig_meter, height=248, margin=dict(l=8, r=8, t=38, b=4))
-        st.plotly_chart(fig_meter, use_container_width=True)
-
-    level_conf = data_0dte.get("level_confidence", {}) or {}
-    conf_counts = {"High": 0, "Medium": 0, "Low": 0}
-    for payload in level_conf.values():
-        lbl = str((payload or {}).get("label", "Low")).title()
-        if lbl in conf_counts:
-            conf_counts[lbl] += 1
-    if conf_counts["High"] + conf_counts["Medium"] + conf_counts["Low"] == 0:
-        conf_counts = {"High": 2, "Medium": 2, "Low": 2}
-
-    with m2:
-        fig_conf = go.Figure(
-            data=[
-                go.Pie(
-                    labels=list(conf_counts.keys()),
-                    values=list(conf_counts.values()),
-                    hole=0.62,
-                    marker=dict(colors=["#54efaa", "#ffd37f", "#ff8b8b"]),
-                    textinfo="percent",
-                    sort=False,
-                )
-            ]
-        )
-        fig_conf.update_layout(
-            annotations=[dict(text="Levels", showarrow=False, font=dict(size=12, color="#dce8fb"))]
-        )
-        _style_dashboard_figure(fig_conf, height=178, margin=dict(l=8, r=8, t=28, b=4))
-        st.plotly_chart(fig_conf, use_container_width=True)
-
-        other_events = max(0, total_events - high_ct - med_ct)
-        fig_event = go.Figure(
-            data=[
-                go.Pie(
-                    labels=["High", "Medium", "Other"],
-                    values=[max(1, high_ct), max(1, med_ct), max(1, other_events)],
-                    hole=0.62,
-                    marker=dict(colors=["#ff8b8b", "#ffd37f", "#38d7ff"]),
-                    textinfo="none",
-                    sort=False,
-                )
-            ]
-        )
-        fig_event.update_layout(
-            annotations=[dict(text=f"FG {fg_score}<br>{html.escape(fg_rating)}", showarrow=False, font=dict(size=11, color="#dce8fb"))]
-        )
-        _style_dashboard_figure(fig_event, height=178, margin=dict(l=8, r=8, t=14, b=2))
-        st.plotly_chart(fig_event, use_container_width=True)
-
+    st.markdown(skin.section_title_html("Dealer Positioning", "QQQ strike space · $ gamma per 1% move"), unsafe_allow_html=True)
+    m3, m4 = st.columns([1.55, 1.0], gap="medium")
     with m3:
         gex_df = (data_0dte or {}).get("df")
         qqq_spot = _safe_float(qqq_price, None)
@@ -3828,7 +3703,7 @@ def _render_market_overview_visuals(
                     .sort_values("strike")
                     .copy()
                 )
-            colors = ["#77ddb0" if float(v) >= 0 else "#f29595" for v in strike_map["GEX"]]
+            colors = [skin.GREEN if float(v) >= 0 else skin.RED for v in strike_map["GEX"]]
             fig_gex = go.Figure(
                 data=[
                     go.Bar(
@@ -3895,9 +3770,7 @@ def _render_market_overview_visuals(
             _style_dashboard_figure(fig_levels, height=370, margin=dict(l=28, r=12, t=34, b=28))
             st.plotly_chart(fig_levels, use_container_width=True)
 
-    has_tape = nq_data is not None and not nq_data.empty and "Close" in nq_data.columns
-    b1, b2 = st.columns([1.0, 2.0] if has_tape else [1.0, 1.0], gap="small")
-    with b1:
+    with m4:
         pulse = [
             ("NQ", float(nq_day_change_pct)),
             ("ES", float(_safe_float((market_data.get("es", {}) or {}).get("change_pct"), 0.0) or 0.0)),
@@ -3908,13 +3781,15 @@ def _render_market_overview_visuals(
             ("VIX", float(_safe_float((market_data.get("vix", {}) or {}).get("change_pct"), 0.0) or 0.0)),
         ]
         pulse_df = pd.DataFrame(pulse, columns=["Asset", "Change"])
-        pulse_colors = ["#54efaa" if v >= 0 else "#ff8b8b" for v in pulse_df["Change"]]
+        pulse_colors = [skin.GREEN if v >= 0 else skin.RED for v in pulse_df["Change"]]
         fig_pulse = go.Figure(
             data=[go.Bar(x=pulse_df["Asset"], y=pulse_df["Change"], marker=dict(color=pulse_colors))]
         )
         fig_pulse.add_hline(y=0, line_width=1, line_color="#7e90ab", line_dash="dot")
-        fig_pulse.update_yaxes(title_text="%")
-        _style_dashboard_figure(fig_pulse, height=220, margin=dict(l=14, r=8, t=30, b=24))
+        fig_pulse.update_yaxes(title_text="% change", ticksuffix="%")
+        fig_pulse.update_layout(title=dict(text="Cross Asset Pulse", font=dict(size=13, color="#E6ECF5"), x=0.02))
+        fig_pulse.update_traces(marker_line_width=0, width=0.55)
+        _style_dashboard_figure(fig_pulse, height=370, margin=dict(l=14, r=8, t=40, b=24))
         st.plotly_chart(fig_pulse, use_container_width=True)
 
         if reaction_stats_df is not None and not reaction_stats_df.empty:
@@ -3938,79 +3813,212 @@ def _render_market_overview_visuals(
             _style_dashboard_figure(fig_react, height=208, margin=dict(l=14, r=8, t=28, b=44))
             st.plotly_chart(fig_react, use_container_width=True)
 
-    with b2:
-        if has_tape:
-            tape_df = nq_data.copy()
-            close = tape_df["Close"].astype(float).tail(220)
-            fig_tape = go.Figure()
-            fig_tape.add_trace(
-                go.Scatter(
-                    x=close.index,
-                    y=close.values,
-                    mode="lines",
-                    line=dict(color="#57dfff", width=2),
-                    fill="tozeroy",
-                    fillcolor="rgba(56,215,255,0.12)",
-                    name="NQ",
-                )
-            )
-            fig_tape.add_hline(y=gf_level, line_color="#ff9b9b", line_dash="dot", annotation_text="GF")
-            fig_tape.add_hline(y=dn_level, line_color="#ffd37f", line_dash="dot", annotation_text="DN")
-            fig_tape.add_hline(y=p_wall, line_color="#9ee6c2", line_dash="dash", annotation_text="Wall")
-            fig_tape.add_hline(y=p_floor, line_color="#9ee6c2", line_dash="dash", annotation_text="Floor")
-            fig_tape.update_xaxes(title_text="")
-            fig_tape.update_yaxes(title_text="Price")
-            _style_dashboard_figure(fig_tape, height=432, margin=dict(l=16, r=12, t=28, b=18))
-            st.plotly_chart(fig_tape, use_container_width=True)
-        else:
-            fallback_rows = [
-                {"Metric": "Ratio Quality", "Value": float(ratio_conf)},
-                {"Metric": "Bias Score", "Value": float(max(0, min(100, bias_meter)))},
-                {"Metric": "Sentiment", "Value": float(max(0, min(100, sentiment_score)))},
-                {"Metric": "Fear & Greed", "Value": float(max(0, min(100, fg_score)))},
-            ]
-            fallback_df = pd.DataFrame(fallback_rows)
-            fig_fallback = go.Figure(
-                data=[
-                    go.Bar(
-                        x=fallback_df["Metric"],
-                        y=fallback_df["Value"],
-                        marker=dict(color=["#38d7ff", "#54efaa", "#ffd37f", "#ff8b8b"]),
-                        text=[f"{v:.0f}" for v in fallback_df["Value"]],
-                        textposition="outside",
-                    )
-                ]
-            )
-            fig_fallback.update_yaxes(title_text="Score", range=[0, 100])
-            _style_dashboard_figure(fig_fallback, height=300, margin=dict(l=14, r=10, t=32, b=28))
-            st.plotly_chart(fig_fallback, use_container_width=True)
-            st.caption("Intraday tape unavailable. Showing structural score snapshot.")
 
-    active_alerts = alert_center or []
-    if active_alerts:
-        sev_to_cls = {"HIGH": "high", "MED": "med", "LOW": "low"}
-        alert_rows = active_alerts[:4]
-        alert_cols = st.columns(len(alert_rows)) if alert_rows else []
-        for idx, row in enumerate(alert_rows):
-            sev = str(row.get("Severity", "LOW")).upper()
-            cls = sev_to_cls.get(sev, "low")
-            with alert_cols[idx]:
-                st.markdown(
-                    (
-                        f'<div class="viz-alert {cls}">'
-                        f'<p class="sev">{sev}</p>'
-                        f'<p class="txt">{html.escape(str(row.get("Alert", "Alert")))}</p>'
-                        f'<p class="sub">{html.escape(str(row.get("Detail", ""))[:88])}</p>'
-                        "</div>"
-                    ),
-                    unsafe_allow_html=True,
-                )
-    else:
-        st.caption("No active alerts. Next event: " + next_event_txt)
 
-    st.caption(
-        f"Next event: {next_event_txt} | Conviction: {bias_conviction} | "
-        f"High impact today: {high_ct} | Medium impact today: {med_ct}"
+def _render_dashboard_top(
+    nq_now,
+    nq_day_change_pct,
+    nq_source,
+    qqq_source,
+    nq_data,
+    data_0dte,
+    data_all,
+    event_risk,
+    ratio_meta,
+    trade_bias_engine,
+    alert_center,
+    playbook,
+    status_hook=None,
+):
+    """Top bar, KPI cards, NQ overview chart, activity list and key levels table."""
+    data = data_0dte or {}
+    meta = data.get("data_meta", {}) or {}
+    bias = str((trade_bias_engine or {}).get("bias", "NEUTRAL")).upper()
+    bias_score = int((trade_bias_engine or {}).get("score", 0) or 0)
+    lockout = bool((event_risk or {}).get("lockout_active"))
+    ratio_lbl = str((ratio_meta or {}).get("confidence_label", "Low"))
+    ratio_conf = int((ratio_meta or {}).get("confidence_score", 0) or 0)
+    opt_status = str(meta.get("options_freshness", "unknown"))
+    opt_color = {"fresh": skin.GREEN, "delayed": skin.AMBER, "session_closed": skin.AMBER}.get(opt_status, skin.RED)
+    alerts = alert_center or []
+
+    st.markdown(
+        skin.topbar_html(
+            title="NQ Gamma Map",
+            subtitle=f"{gm.now_et().strftime('%A, %b %d · %I:%M %p ET')} · {data.get('expiration_label', '')} · "
+            f"{'+'.join(data.get('underlyings', []) or ['QQQ'])}",
+            chips=[
+                (f"Options {opt_status.replace('_', ' ')}", opt_color),
+                (f"Ratio {ratio_lbl} {ratio_conf}%", skin.GREEN if ratio_lbl.lower() == "high" else skin.AMBER),
+                ("Event lockout" if lockout else "Events clear", skin.RED if lockout else skin.GREEN),
+            ],
+            alert_count=len(alerts),
+            primary=f"Bias {bias} {bias_score:+d}",
+        ),
+        unsafe_allow_html=True,
+    )
+    if status_hook:
+        status_hook()
+    if not data_0dte:
+        st.info("No 0DTE data available for dashboard view.")
+        return
+
+    gf = float(data.get("g_flip_nq", nq_now))
+    gf_dist = float(nq_now - gf)
+    total_gex = float(data.get("total_gex", 0.0) or 0.0)
+    em = float(data.get("nq_em_full", 0.0) or 0.0)
+    prof = data.get("gamma_profile") or {}
+
+    closes = None
+    realized = None
+    if nq_data is not None and not nq_data.empty and "Close" in nq_data.columns:
+        closes = nq_data["Close"].astype(float).tail(120).tolist()
+        if {"High", "Low"}.issubset(nq_data.columns):
+            rng = (nq_data["High"].astype(float).rolling(12, min_periods=1).max()
+                   - nq_data["Low"].astype(float).rolling(12, min_periods=1).min())
+            realized = rng.tail(120).tolist()
+
+    chg_color = skin.GREEN if nq_day_change_pct >= 0 else skin.RED
+    positive = total_gex >= 0
+    cards = [
+        skin.kpi_card_html("NQ Futures", f"{nq_now:,.2f}", f"{nq_day_change_pct:+.2f}% today", chg_color,
+                           str(nq_source).split()[0], "blue", closes, "nq"),
+        skin.kpi_card_html("Net Dealer Gamma", _fmt_dollars(total_gex), "Moves dampened" if positive else "Moves amplified",
+                           skin.GREEN if positive else skin.RED, "Positive" if positive else "Negative", "orange",
+                           list(prof.get("gex_oi", [])), "gex"),
+        skin.kpi_card_html("Gamma Flip", f"{gf:,.2f}" if data.get("g_flip_in_range", True) else "Out of range",
+                           f"NQ {abs(gf_dist):,.0f} pts {'above' if gf_dist > 0 else 'below'}",
+                           skin.GREEN if gf_dist > 0 else skin.RED, f"{gf_dist:+.0f} pts", "purple",
+                           list(prof.get("gex_vol", [])), "flip"),
+        skin.kpi_card_html("Expected Move (1σ)", f"±{em:,.0f} pts", f"{(em / nq_now * 100.0) if nq_now else 0:.2f}% of price",
+                           skin.GREEN, "Straddle", "green", realized, "em"),
+    ]
+    st.markdown(skin.kpi_grid_html(cards), unsafe_allow_html=True)
+
+    left, right = st.columns([2.15, 1.0], gap="medium")
+    with left:
+        _render_nq_overview_chart(nq_data, data, nq_now)
+    with right:
+        items = []
+        sev_style = {"HIGH": ("red", "!"), "MED": ("amber", "▲"), "LOW": ("blue", "i")}
+        for a in alerts[:4]:
+            color, icon = sev_style.get(str(a.get("Severity", "LOW")).upper(), ("blue", "i"))
+            items.append({"icon": icon, "color": color, "title": a.get("Alert", "Alert"), "sub": a.get("Detail", ""),
+                          "right": str(a.get("Severity", "")).title()})
+        for ev in ((event_risk or {}).get("next_events") or [])[: max(0, 5 - len(items))]:
+            imp = str(ev.get("impact", "low")).lower()
+            items.append({"icon": "◷", "color": "red" if imp == "high" else "amber" if imp == "medium" else "purple",
+                          "title": str(ev.get("event", "Event"))[:44], "sub": f"{imp.title()} impact · {_countdown_label(ev.get('seconds_to', 0))}",
+                          "right": str(ev.get("time_et", ""))})
+        for setup in ((playbook or {}).get("long_setups", []) or [])[: max(0, 5 - len(items))]:
+            items.append({"icon": "↑", "color": "green", "title": f"Long setup · {setup.get('level', 'Level')}",
+                          "sub": f"{float(setup.get('distance', 0.0)):+.0f} pts · score {int(setup.get('score', 0) or 0)}",
+                          "right": f"{float(setup.get('price', 0.0)):,.2f}"})
+        st.markdown(skin.activity_html("Alerts & Catalysts", items, f"{len(alerts)} active"), unsafe_allow_html=True)
+
+    _render_key_levels_table(data, nq_now)
+
+
+def _render_nq_overview_chart(nq_data, data, nq_now):
+    has_tape = nq_data is not None and not nq_data.empty and "Close" in nq_data.columns
+    levels = [
+        ("Wall", data.get("p_wall"), skin.RED),
+        ("Gamma Flip", data.get("g_flip_nq"), skin.AMBER),
+        ("Delta Neutral", data.get("dn_nq"), skin.PURPLE),
+        ("Floor", data.get("p_floor"), skin.GREEN),
+    ]
+    vwap_txt, range_txt = "n/a", "n/a"
+    fig = go.Figure()
+    if has_tape:
+        tape = nq_data.tail(220)
+        close = tape["Close"].astype(float)
+        if "Volume" in tape.columns and float(tape["Volume"].fillna(0).sum()) > 0:
+            typical = (tape["High"].astype(float) + tape["Low"].astype(float) + close) / 3.0 if {"High", "Low"}.issubset(tape.columns) else close
+            vol = tape["Volume"].astype(float).fillna(0.0)
+            vwap = (typical * vol).cumsum() / vol.cumsum().replace(0, float("nan"))
+            fig.add_trace(go.Scatter(x=vwap.index, y=vwap.values, mode="lines", name="VWAP",
+                                     line=dict(color=skin.PURPLE, width=1.6, shape="spline", smoothing=0.6), opacity=0.85))
+            if vwap.notna().any():
+                vwap_txt = f"{float(vwap.dropna().iloc[-1]):,.2f}"
+        fig.add_trace(go.Scatter(
+            x=close.index, y=close.values, mode="lines", name="NQ",
+            line=dict(color=skin.BLUE, width=2.4, shape="spline", smoothing=0.6),
+            fill="tozeroy",
+            fillgradient=dict(type="vertical", colorscale=[[0.0, "rgba(79,124,255,0.0)"], [1.0, "rgba(79,124,255,0.32)"]]),
+        ))
+        lo, hi = float(close.min()), float(close.max())
+        range_txt = f"{lo:,.0f} – {hi:,.0f}"
+        level_vals = [float(v) for _, v, _ in levels if v is not None]
+        near = [v for v in level_vals if lo - (hi - lo) * 0.6 <= v <= hi + (hi - lo) * 0.6]
+        y_lo, y_hi = min([lo] + near), max([hi] + near)
+        pad = max((y_hi - y_lo) * 0.08, 5.0)
+        fig.update_yaxes(range=[y_lo - pad, y_hi + pad])
+        for name, val, color in levels:
+            if val is None:
+                continue
+            fig.add_hline(y=float(val), line_width=1, line_dash="dot", line_color=color,
+                          annotation_text=name, annotation_position="right",
+                          annotation_font=dict(color=color, size=10))
+    stats = (
+        '<div class="sk-stats">'
+        f'<div class="sk-stat"><p class="k"><span class="dot" style="width:7px;height:7px;border-radius:50%;background:{skin.BLUE};display:inline-block"></span>Last</p><p class="v">{nq_now:,.2f}</p></div>'
+        f'<div class="sk-stat"><p class="k"><span style="width:7px;height:7px;border-radius:50%;background:{skin.PURPLE};display:inline-block"></span>VWAP</p><p class="v">{vwap_txt}</p></div>'
+        f'<div class="sk-stat"><p class="k">Session range</p><p class="v">{range_txt}</p></div>'
+        f'<div class="sk-stat"><p class="k">Wall / Floor</p><p class="v">{float(data.get("p_wall", 0)):,.0f} / {float(data.get("p_floor", 0)):,.0f}</p></div>'
+        "</div>"
+    )
+    with st.container(border=True, key="sk_overview"):
+        st.markdown(
+            '<div class="sk-panel">'
+            '<div class="sk-panel-head"><div><p class="sk-panel-title">NQ Overview</p>'
+            '<p class="sk-panel-sub">5 minute bars with dealer levels</p></div></div>'
+            f"{stats}</div>",
+            unsafe_allow_html=True,
+        )
+        if not has_tape:
+            st.caption("Intraday tape unavailable.")
+            return
+        fig.update_yaxes(tickformat=",.0f")
+        fig.update_layout(showlegend=False, height=292, margin=dict(l=6, r=82, t=4, b=6), hovermode="x unified")
+        st.plotly_chart(fig, use_container_width=True, key="nq_overview_chart")
+
+
+def _render_key_levels_table(data, nq_now):
+    conf = data.get("level_confidence", {}) or {}
+    rows = []
+    for name, value, *_ in data.get("results", []) or []:
+        try:
+            price = float(value)
+        except Exception:
+            continue
+        dist = price - float(nq_now)
+        side = "Resistance" if dist > 0 else "Support"
+        c = conf.get(name, {}) or {}
+        label = str(c.get("label", "Low")).title()
+        score = int(c.get("score", 0) or 0)
+        rows.append({
+            "price_sort": price,
+            "level": f"<strong>{html.escape(name)}</strong>",
+            "price": f"{price:,.2f}",
+            "dist": f'<span class="{"sk-neg" if dist > 0 else "sk-pos"}">{dist:+,.0f}</span>',
+            "side": skin.pill(side, skin.RED if dist > 0 else skin.GREEN),
+            "conf": skin.pill(label, {"High": skin.GREEN, "Medium": skin.AMBER}.get(label, skin.MUTED)),
+            "score": f'<span class="sk-muted">{score}</span>',
+        })
+    rows.sort(key=lambda r: -r["price_sort"])
+    # Mark where spot sits in the ladder.
+    spot_row = {"_class": "spot", "level": '<span style="color:#7FA2FF;font-weight:600">● NQ spot</span>',
+                "price": f"<strong>{nq_now:,.2f}</strong>", "dist": "", "side": "", "conf": "", "score": ""}
+    idx = next((i for i, r in enumerate(rows) if r["price_sort"] < nq_now), len(rows))
+    rows.insert(idx, spot_row)
+    st.markdown(skin.section_title_html("Key Levels", f"{len(rows) - 1} levels · {data.get('expiration_label', '')}"), unsafe_allow_html=True)
+    st.markdown(
+        skin.table_html(
+            [("level", "Level"), ("price", "#Price"), ("dist", "#Distance (pts)"), ("side", "Side"),
+             ("conf", "Confidence"), ("score", "#Score")],
+            rows,
+        ),
+        unsafe_allow_html=True,
     )
 
 
@@ -4044,7 +4052,7 @@ def _profile_value_at(profile, x_key, y_key, x):
 
 def _render_gamma_profile_panel(data_0dte, data_all, nq_now, universe_note=""):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📈 Gamma Profile (repriced)</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">Gamma Profile (repriced)</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     views = {}
@@ -4086,14 +4094,14 @@ def _render_gamma_profile_panel(data_0dte, data_all, nq_now, universe_note=""):
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=nq_grid, y=[float(v) for v in prof.get("gex_oi", [])], mode="lines",
-                             name="Open interest", line=dict(color="#77ddb0", width=2.4)))
+                             name="Open interest", line=dict(color=skin.BLUE, width=2.4, shape="spline")))
     fig.add_trace(go.Scatter(x=nq_grid, y=[float(v) for v in prof.get("gex_vol", [])], mode="lines",
-                             name="Volume", line=dict(color="#9db7ff", width=1.6, dash="dash")))
+                             name="Volume", line=dict(color=skin.PURPLE, width=1.6, dash="dash", shape="spline")))
     fig.add_hline(y=0, line_width=1, line_color="#7e90ab", line_dash="dot")
-    fig.add_vline(x=float(nq_now), line_width=1, line_color="#38d7ff", line_dash="dash",
+    fig.add_vline(x=float(nq_now), line_width=1, line_color=skin.CYAN, line_dash="dash",
                   annotation_text=f"NQ {float(nq_now):,.0f}", annotation_position="top left")
     if flip_nq is not None and data.get("g_flip_in_range", True) and nq_grid[0] <= flip_nq <= nq_grid[-1]:
-        fig.add_vline(x=flip_nq, line_width=1.2, line_color="#ffd37f", line_dash="dot",
+        fig.add_vline(x=flip_nq, line_width=1.2, line_color=skin.AMBER, line_dash="dot",
                       annotation_text="Gamma Flip", annotation_position="top right")
     fig.update_xaxes(title_text="NQ price")
     fig.update_yaxes(title_text="Dealer GEX ($ per 1% move)")
@@ -4113,7 +4121,7 @@ def _render_gamma_profile_panel(data_0dte, data_all, nq_now, universe_note=""):
 
 def _render_level_accuracy_panel(data_0dte, data_all, nq_now, ratio_meta):
     log_path = _get_secret("LEVEL_LOG_PATH", "") or None
-    with st.expander("🎯 Level accuracy log", expanded=False):
+    with st.expander("Level accuracy log", expanded=False):
         log = level_log.read_log(log_path)
         sessions = int(log["session_date"].nunique()) if not log.empty else 0
         st.caption(
@@ -4177,6 +4185,7 @@ def _render_clean_dashboard(
     contract_roll,
     data_all=None,
     gamma_universe_note="",
+    status_hook=None,
 ):
     alert_rows = alert_center or []
     ratio_label = str((ratio_meta or {}).get("confidence_label", "Low"))
@@ -4243,80 +4252,23 @@ def _render_clean_dashboard(
         )
 
     st.markdown('<div class="command-layout">', unsafe_allow_html=True)
-    rail_col, main_col = st.columns([0.55, 7.2], gap="small")
-
-    with rail_col:
-        st.markdown(
-            """
-            <div class="command-rail">
-                <div class="command-rail-logo">GAM</div>
-                <div class="command-rail-stack">
-                    <div class="command-rail-item active">NQ</div>
-                    <div class="command-rail-item">LVL</div>
-                    <div class="command-rail-item">GEX</div>
-                    <div class="command-rail-item">MAC</div>
-                    <div class="command-rail-item">RSK</div>
-                </div>
-                <div class="command-rail-label">Single View</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+    main_col = st.container()
 
     with main_col:
-        st.markdown(
-            f"""
-            <div class="command-main">
-                <div class="command-topbar">
-                    <div class="command-topbar-grid">
-                        <div>
-                            <p class="command-brand-kicker">Gamma Dashboard</p>
-                            <p class="command-brand-title">NQ Command Center</p>
-                            <p class="command-brand-sub">
-                                One-screen workflow for levels, tape, catalysts, and export. The old builder-only workflow is folded into this view.
-                            </p>
-                        </div>
-                        <div class="command-search">
-                            <span>Search level, ticker, catalyst, setup...</span>
-                            <span class="command-search-kbd">live</span>
-                        </div>
-                        <div class="command-meta">
-                            <div class="command-meta-chip">
-                                <p class="k">Bias</p>
-                                <p class="v">{html.escape(bias)} ({bias_score:+d})</p>
-                            </div>
-                            <div class="command-meta-chip">
-                                <p class="k">Clock</p>
-                                <p class="v">{datetime.now().strftime("%I:%M %p ET")}</p>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="command-status-row">
-                        <div class="command-status-card">
-                            <p class="k">NQ Feed</p>
-                            <p class="v">{html.escape(str(nq_source))}</p>
-                            <p class="s">{html.escape(get_quote_age_label("NQ=F"))}</p>
-                        </div>
-                        <div class="command-status-card">
-                            <p class="k">QQQ Feed</p>
-                            <p class="v">{html.escape(str(qqq_source))}</p>
-                            <p class="s">Spot {float(qqq_price):.2f}</p>
-                        </div>
-                        <div class="command-status-card">
-                            <p class="k">Ratio Quality</p>
-                            <p class="v {ratio_cls}">{html.escape(ratio_label.upper())} {ratio_conf}%</p>
-                            <p class="s">Mapping confidence for translated levels</p>
-                        </div>
-                        <div class="command-status-card">
-                            <p class="k">Event Guardrail</p>
-                            <p class="v {lock_cls}">{'LOCKOUT' if event_lock else 'CLEAR'}</p>
-                            <p class="s">{html.escape(next_event_text)}</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
+        _render_dashboard_top(
+            nq_now=nq_now,
+            nq_day_change_pct=nq_day_change_pct,
+            nq_source=nq_source,
+            qqq_source=qqq_source,
+            nq_data=nq_data,
+            data_0dte=data_0dte,
+            data_all=data_all,
+            event_risk=event_risk,
+            ratio_meta=ratio_meta,
+            trade_bias_engine=trade_bias_engine,
+            alert_center=alert_center,
+            playbook=playbook,
+            status_hook=status_hook,
         )
 
         _render_market_overview_visuals(
@@ -4469,7 +4421,7 @@ def _render_clean_dashboard(
 
 def _render_overview_reference_snapshot(data_0dte, nq_now):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">📍 Key References (Compact)</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">Key References (Compact)</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not data_0dte:
@@ -4502,7 +4454,7 @@ def _render_overview_reference_snapshot(data_0dte, nq_now):
 
 def _render_overview_event_strip(event_risk):
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">⏰ Event Risk (Next)</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">Event Risk (Next)</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     if not event_risk:
@@ -4551,7 +4503,7 @@ def _render_futures_indices_panel(market_data, nq_now, nq_day_change_pct, nq_sou
     if not market_data:
         return
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧭 Futures & Indices</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">Futures & Indices</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     c1, c2, c3, c4, c5 = st.columns(5)
@@ -4584,7 +4536,7 @@ def _render_futures_indices_panel(market_data, nq_now, nq_day_change_pct, nq_sou
 
 def _render_heatmap_panel():
     st.markdown(
-        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">🧩 Nasdaq Stocks Heat Map</div></div><div class="terminal-body">',
+        '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">Nasdaq Stocks Heat Map</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
     )
     st.markdown("**Heatmap Controls**")
@@ -4672,7 +4624,7 @@ def _render_heatmap_panel():
             textposition="middle center",
         )
         fig.update_layout(
-            template="plotly_dark" if st.session_state.theme == "dark" else "plotly_white",
+            template=skin.TEMPLATE_NAME,
             height=390,
             margin=dict(l=8, r=8, t=8, b=8),
             coloraxis_showscale=False,
@@ -4975,7 +4927,7 @@ def _render_initial_balance_report_panel(finnhub_key):
             title="IB Range By Session",
         )
         fig_range.update_layout(
-            template="plotly_dark" if st.session_state.theme == "dark" else "plotly_white",
+            template=skin.TEMPLATE_NAME,
             height=340,
             margin=dict(l=20, r=20, t=50, b=20),
             xaxis_title="Session",
@@ -4994,7 +4946,7 @@ def _render_initial_balance_report_panel(finnhub_key):
                 color_discrete_sequence=["#00D9FF"],
             )
             fig_t.update_layout(
-                template="plotly_dark" if st.session_state.theme == "dark" else "plotly_white",
+                template=skin.TEMPLATE_NAME,
                 height=340,
                 margin=dict(l=20, r=20, t=50, b=20),
                 xaxis_title="Minutes",
@@ -5026,7 +4978,7 @@ def _render_initial_balance_report_panel(finnhub_key):
                 },
             )
             fig_fb.update_layout(
-                template="plotly_dark" if st.session_state.theme == "dark" else "plotly_white",
+                template=skin.TEMPLATE_NAME,
                 height=340,
                 margin=dict(l=20, r=20, t=50, b=20),
                 showlegend=False,
@@ -5059,7 +5011,7 @@ def _render_initial_balance_report_panel(finnhub_key):
             color_continuous_scale="Blues",
         )
         fig_heat.update_layout(
-            template="plotly_dark" if st.session_state.theme == "dark" else "plotly_white",
+            template=skin.TEMPLATE_NAME,
             height=280,
             margin=dict(l=20, r=20, t=20, b=20),
             coloraxis_showscale=False,
@@ -5388,7 +5340,7 @@ def _render_nq_level_builder_panel(data_0dte=None, data_weekly=None):
 
 def run_full_app():
     st.set_page_config(
-        page_title="NQ Precision Map", layout="wide", initial_sidebar_state="expanded"
+        page_title="NQ Gamma Map", layout="wide", initial_sidebar_state="auto"
     )
 
     if "theme" not in st.session_state:
@@ -5445,6 +5397,8 @@ def run_full_app():
         border_color,
         compact_mode=st.session_state.compact_mode,
     )
+    st.markdown(skin.SKIN_CSS, unsafe_allow_html=True)
+    skin.register_plotly_template()
 
     default_key = ""
     try:
@@ -5452,7 +5406,8 @@ def run_full_app():
     except Exception:
         default_key = ""
 
-    st.sidebar.header("⚙️ Settings")
+    st.sidebar.markdown(skin.brand_html(), unsafe_allow_html=True)
+    st.sidebar.header("Settings")
     finnhub_key = st.sidebar.text_input(
         "Finnhub API Key", value=default_key, type="password"
     )
@@ -5500,12 +5455,9 @@ def run_full_app():
                     language="toml",
                 )
 
-    if st.sidebar.button("🎨 Toggle Theme"):
-        toggle_theme()
-        st.rerun()
 
     with st.sidebar.expander("Layout", expanded=False):
-        st.checkbox("🗜 Compact Mode", key="compact_mode")
+        st.checkbox("Compact mode", key="compact_mode")
 
     gamma_universe = st.sidebar.selectbox(
         "Gamma universe",
@@ -5517,8 +5469,8 @@ def run_full_app():
             "NQ comes from index options, so this is the more complete picture."
         ),
     )
-    manual_override = st.sidebar.checkbox("✏️ Manual NQ Price")
-    auto_refresh = st.sidebar.checkbox("🔄 Auto-Refresh (60s)", value=True)
+    manual_override = st.sidebar.checkbox("Manual NQ price")
+    auto_refresh = st.sidebar.checkbox("Auto refresh", value=True)
     if auto_refresh:
         refresh_interval = st.sidebar.slider("Refresh Interval (seconds)", 30, 300, 60)
 
@@ -5747,18 +5699,19 @@ def run_full_app():
     )
     contract_roll = _build_contract_roll_status(nq_source)
 
-    _render_runtime_mode_banner(feed_status)
-    if level_mapping_note:
-        st.warning(level_mapping_note)
-    with st.expander("Data Health & Feed Diagnostics", expanded=False):
-        _render_data_health_strip(
-            nq_source=nq_source,
-            qqq_source=qqq_source,
-            ratio_meta=ratio_meta,
-            data_0dte=data_0dte,
-            market_data=market_data,
-            finnhub_key=finnhub_key,
-        )
+    def _status_hook():
+        _render_runtime_mode_banner(feed_status)
+        if level_mapping_note:
+            st.warning(level_mapping_note)
+        with st.expander("Data Health & Feed Diagnostics", expanded=False):
+            _render_data_health_strip(
+                nq_source=nq_source,
+                qqq_source=qqq_source,
+                ratio_meta=ratio_meta,
+                data_0dte=data_0dte,
+                market_data=market_data,
+                finnhub_key=finnhub_key,
+            )
 
     _render_clean_dashboard(
         nq_now=nq_now,
@@ -5785,12 +5738,13 @@ def run_full_app():
         contract_roll=contract_roll,
         data_all=data_all,
         gamma_universe_note=gamma_universe_note,
+        status_hook=_status_hook,
     )
 
     options_src = str(((data_0dte or {}).get("data_meta", {}) or {}).get("options_source", "Options"))
     st.caption(f"Updated: {gm.now_et().strftime('%H:%M:%S')} ET | {options_src} • {nq_source}")
 
-    if st.sidebar.button("🔄 Refresh Now", use_container_width=True):
+    if st.sidebar.button("Refresh now", use_container_width=True):
         st.session_state.last_refresh = time.time()
         st.cache_data.clear()
         st.rerun()
