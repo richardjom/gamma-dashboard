@@ -3829,6 +3829,7 @@ def _render_dashboard_top(
     alert_center,
     playbook,
     status_hook=None,
+    data_weekly=None,
 ):
     """Top bar, KPI cards, NQ overview chart, activity list and key levels table."""
     data = data_0dte or {}
@@ -3916,7 +3917,7 @@ def _render_dashboard_top(
                           "right": f"{float(setup.get('price', 0.0)):,.2f}"})
         st.markdown(skin.activity_html("Alerts & Catalysts", items, f"{len(alerts)} active"), unsafe_allow_html=True)
 
-    _render_key_levels_table(data, nq_now)
+    _render_key_levels_table(data, nq_now, data_weekly=data_weekly)
 
 
 def _render_nq_overview_chart(nq_data, data, nq_now):
@@ -3983,7 +3984,7 @@ def _render_nq_overview_chart(nq_data, data, nq_now):
         st.plotly_chart(fig, use_container_width=True, key="nq_overview_chart")
 
 
-def _render_key_levels_table(data, nq_now):
+def _render_key_levels_table(data, nq_now, data_weekly=None):
     conf = data.get("level_confidence", {}) or {}
     rows = []
     for name, value, *_ in data.get("results", []) or []:
@@ -4011,7 +4012,13 @@ def _render_key_levels_table(data, nq_now):
                 "price": f"<strong>{nq_now:,.2f}</strong>", "dist": "", "side": "", "conf": "", "score": ""}
     idx = next((i for i, r in enumerate(rows) if r["price_sort"] < nq_now), len(rows))
     rows.insert(idx, spot_row)
-    st.markdown(skin.section_title_html("Key Levels", f"{len(rows) - 1} levels · {data.get('expiration_label', '')}"), unsafe_allow_html=True)
+    levels_string = _build_generated_levels_output_string(data, data_weekly)
+    head_l, head_r = st.columns([3.0, 1.0], vertical_alignment="bottom")
+    with head_l:
+        st.markdown(skin.section_title_html("Key Levels", f"{len(rows) - 1} levels · {data.get('expiration_label', '')}"), unsafe_allow_html=True)
+    with head_r:
+        if levels_string:
+            _render_copy_levels_button(levels_string, "key-levels")
     st.markdown(
         skin.table_html(
             [("level", "Level"), ("price", "#Price"), ("dist", "#Distance (pts)"), ("side", "Side"),
@@ -4020,6 +4027,12 @@ def _render_key_levels_table(data, nq_now):
         ),
         unsafe_allow_html=True,
     )
+    if levels_string:
+        with st.expander("TradingView levels string", expanded=False):
+            st.caption("0DTE and weekly levels in the order the Pine Script 'Price Levels' input expects.")
+            st.code(levels_string, language=None, wrap_lines=True)
+    else:
+        st.caption("TradingView levels string unavailable until both 0DTE and weekly levels load.")
 
 
 def _fmt_dollars(v):
@@ -4269,6 +4282,7 @@ def _render_clean_dashboard(
             alert_center=alert_center,
             playbook=playbook,
             status_hook=status_hook,
+            data_weekly=data_weekly,
         )
 
         _render_market_overview_visuals(
@@ -5127,6 +5141,34 @@ def _render_copy_levels_widget(output_string, widget_key, label, caption=None, h
         value=output_string,
         height=height,
         key=f"{safe_key}_levels_text",
+    )
+
+
+def _render_copy_levels_button(output_string, widget_key, label="Copy levels for TradingView"):
+    """Single styled button that copies the Pine Script levels string."""
+    copy_payload = html.escape(output_string)
+    safe_key = re.sub(r"[^a-zA-Z0-9_-]", "-", str(widget_key))
+    components.html(
+        f"""
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600&display=swap" rel="stylesheet">
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:10px;height:40px;font-family:Inter,system-ui,sans-serif;">
+            <span id="st-{safe_key}" style="font-size:12.5px;color:{skin.GREEN};font-weight:500;"></span>
+            <button id="btn-{safe_key}" style="background:{skin.BLUE};color:#fff;border:0;border-radius:9px;
+                padding:9px 14px;font:600 13px Inter,system-ui,sans-serif;cursor:pointer;white-space:nowrap;">{html.escape(label)}</button>
+            <textarea id="src-{safe_key}" style="position:absolute;left:-9999px;">{copy_payload}</textarea>
+        </div>
+        <script>
+            const btn = document.getElementById("btn-{safe_key}");
+            const status = document.getElementById("st-{safe_key}");
+            const src = document.getElementById("src-{safe_key}");
+            const done = () => {{ status.textContent = "Copied"; setTimeout(() => {{ status.textContent = ""; }}, 1600); }};
+            btn.addEventListener("click", async () => {{
+                try {{ await navigator.clipboard.writeText(src.value); done(); }}
+                catch (err) {{ src.select(); document.execCommand("copy"); done(); }}
+            }});
+        </script>
+        """,
+        height=44,
     )
 
 
