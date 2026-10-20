@@ -20,6 +20,9 @@ from nq_precision.full_data import (
     _get_secret,
     build_combined_chain,
     calculate_sentiment_score,
+    update_flow,
+    equity_session_state,
+    held_closed_ratio,
     exchange_schwab_auth_code,
     generate_daily_bread,
     get_cboe_options,
@@ -97,10 +100,11 @@ def _feed_runtime_status(nq_source, qqq_source, enforce_options_gate=True):
     if nq_age is not None and nq_age > hard_quote_age_sec:
         freeze = True
         reasons.append(f"NQ age {nq_age}s > {hard_quote_age_sec}s")
-    if qqq_age is not None and qqq_age > hard_quote_age_sec:
+    qqq_trading = equity_session_state() != "closed"
+    if qqq_trading and qqq_age is not None and qqq_age > hard_quote_age_sec:
         freeze = True
         reasons.append(f"QQQ age {qqq_age}s > {hard_quote_age_sec}s")
-    if sync_lag_s is not None and sync_lag_s > hard_sync_lag_sec:
+    if qqq_trading and sync_lag_s is not None and sync_lag_s > hard_sync_lag_sec:
         reasons.append(f"NQ/QQQ sync lag {sync_lag_s:.1f}s > {hard_sync_lag_sec}s")
     if enforce_options_gate and options_status == "stale_hard":
         freeze = True
@@ -2206,6 +2210,28 @@ def _render_runtime_mode_banner(feed_status):
         st.caption(details)
 
 
+def _qqq_health_item(qqq_source):
+    """QQQ feed status from the trading session and the quote's real age."""
+    state = equity_session_state()
+    age = get_quote_age_seconds("QQQ")
+    if state == "closed":
+        ts = _quote_timestamp_ms("QQQ")
+        last = (
+            datetime.fromtimestamp(ts / 1000, tz=gm.ET).strftime("%a %I:%M %p ET") if ts else "n/a"
+        )
+        return {"title": "QQQ Feed", "value": qqq_source, "sub": f"market closed • last print {last}", "status": "session_closed"}
+    if age is None:
+        status = "unknown"
+    elif age <= 60:
+        status = "fresh"
+    elif age <= 180:
+        status = "stale_soft"
+    else:
+        status = "stale_hard"
+    session = "extended hours" if state == "extended" else "regular session"
+    return {"title": "QQQ Feed", "value": qqq_source, "sub": f"age {get_quote_age_label('QQQ')} • {session}", "status": status}
+
+
 def _render_data_health_strip(nq_source, qqq_source, ratio_meta, data_0dte, market_data, finnhub_key):
     try:
         get_rss_news(finnhub_key)
@@ -2243,12 +2269,7 @@ def _render_data_health_strip(nq_source, qqq_source, ratio_meta, data_0dte, mark
             "sub": f"{options_health.get('source', 'unknown')} • age {options_health.get('latency_s', 'n/a')}s • x{conf_mult:.2f}",
             "status": options_health.get("status", "unknown"),
         },
-        {
-            "title": "QQQ Feed",
-            "value": qqq_source,
-            "sub": f"age {get_quote_age_label('QQQ')}",
-            "status": "fresh" if "schwab" in str(qqq_source).lower() else "stale_soft",
-        },
+        _qqq_health_item(qqq_source),
         {
             "title": "NQ↔QQQ Ratio",
             "value": f"{ratio_val:.4f}",
@@ -3829,6 +3850,7 @@ def _render_dashboard_top(
     alert_center,
     playbook,
     status_hook=None,
+    data_weekly=None,
 ):
     """Top bar, KPI cards, NQ overview chart, activity list and key levels table."""
     data = data_0dte or {}
@@ -3916,7 +3938,18 @@ def _render_dashboard_top(
                           "right": f"{float(setup.get('price', 0.0)):,.2f}"})
         st.markdown(skin.activity_html("Alerts & Catalysts", items, f"{len(alerts)} active"), unsafe_allow_html=True)
 
-    _render_key_levels_table(data, nq_now)
+    _render_key_levels_table(data, nq_now, data_weekly=data_weekly)
+
+
+def _fmt_hold_rate(rec):
+    """Measured hold rate cell. Needs 10 logged sessions before it shows a number."""
+    if not rec:
+        return '<span class="sk-muted" title="Not enough logged sessions yet">n/a</span>'
+    if not rec.get("enough") or rec.get("hold_rate") is None:
+        return f'<span class="sk-muted" title="Needs 10 sessions">{int(rec.get("sessions", 0))}/10 days</span>'
+    hr = float(rec["hold_rate"])
+    color = skin.GREEN if hr >= 0.6 else skin.AMBER if hr >= 0.45 else skin.RED
+    return f'<span style="color:{color};font-weight:600">{hr:.0%}</span> <span class="sk-muted">({int(rec["sessions"])}d)</span>'
 
 
 def _render_nq_overview_chart(nq_data, data, nq_now):
@@ -3983,8 +4016,22 @@ def _render_nq_overview_chart(nq_data, data, nq_now):
         st.plotly_chart(fig, use_container_width=True, key="nq_overview_chart")
 
 
-def _render_key_levels_table(data, nq_now):
+@st.cache_data(ttl=3600, show_spinner=False)
+def _measured_hold_rates(log_path, view="0DTE"):
+    """Hold rate per level type from the accuracy log, refreshed hourly."""
+    try:
+        log = level_log.read_log(log_path or None)
+        if log.empty:
+            return {}
+        bars = get_intraday_history("NQ=F", days=45, interval="5m")
+        return level_log.hold_rates_by_level(level_log.score_levels(log, bars), view=view)
+    except Exception:
+        return {}
+
+
+def _render_key_levels_table(data, nq_now, data_weekly=None):
     conf = data.get("level_confidence", {}) or {}
+    measured = _measured_hold_rates(_get_secret("LEVEL_LOG_PATH", "") or "", "0DTE")
     rows = []
     for name, value, *_ in data.get("results", []) or []:
         try:
@@ -4004,22 +4051,35 @@ def _render_key_levels_table(data, nq_now):
             "side": skin.pill(side, skin.RED if dist > 0 else skin.GREEN),
             "conf": skin.pill(label, {"High": skin.GREEN, "Medium": skin.AMBER}.get(label, skin.MUTED)),
             "score": f'<span class="sk-muted">{score}</span>',
+            "held": _fmt_hold_rate(measured.get(name)),
         })
     rows.sort(key=lambda r: -r["price_sort"])
     # Mark where spot sits in the ladder.
     spot_row = {"_class": "spot", "level": '<span style="color:#7FA2FF;font-weight:600">● NQ spot</span>',
-                "price": f"<strong>{nq_now:,.2f}</strong>", "dist": "", "side": "", "conf": "", "score": ""}
+                "price": f"<strong>{nq_now:,.2f}</strong>", "dist": "", "side": "", "conf": "", "score": "", "held": ""}
     idx = next((i for i, r in enumerate(rows) if r["price_sort"] < nq_now), len(rows))
     rows.insert(idx, spot_row)
-    st.markdown(skin.section_title_html("Key Levels", f"{len(rows) - 1} levels · {data.get('expiration_label', '')}"), unsafe_allow_html=True)
+    levels_string = _build_generated_levels_output_string(data, data_weekly)
+    head_l, head_r = st.columns([3.0, 1.0], vertical_alignment="bottom")
+    with head_l:
+        st.markdown(skin.section_title_html("Key Levels", f"{len(rows) - 1} levels · {data.get('expiration_label', '')}"), unsafe_allow_html=True)
+    with head_r:
+        if levels_string:
+            _render_copy_levels_button(levels_string, "key-levels")
     st.markdown(
         skin.table_html(
             [("level", "Level"), ("price", "#Price"), ("dist", "#Distance (pts)"), ("side", "Side"),
-             ("conf", "Confidence"), ("score", "#Score")],
+             ("conf", "Confidence"), ("score", "#Score"), ("held", "#Held")],
             rows,
         ),
         unsafe_allow_html=True,
     )
+    if levels_string:
+        with st.expander("TradingView levels string", expanded=False):
+            st.caption("0DTE and weekly levels in the order the Pine Script 'Price Levels' input expects.")
+            st.code(levels_string, language=None, wrap_lines=True)
+    else:
+        st.caption("TradingView levels string unavailable until both 0DTE and weekly levels load.")
 
 
 def _fmt_dollars(v):
@@ -4050,7 +4110,7 @@ def _profile_value_at(profile, x_key, y_key, x):
         return None
 
 
-def _render_gamma_profile_panel(data_0dte, data_all, nq_now, universe_note=""):
+def _render_gamma_profile_panel(data_0dte, data_all, nq_now, universe_note="", data_flow=None):
     st.markdown(
         '<div class="terminal-shell"><div class="terminal-header"><div class="terminal-title">Gamma Profile (repriced)</div></div><div class="terminal-body">',
         unsafe_allow_html=True,
@@ -4058,6 +4118,8 @@ def _render_gamma_profile_panel(data_0dte, data_all, nq_now, universe_note=""):
     views = {}
     if data_0dte:
         views[f"Front expiry: {data_0dte.get('expiration_label', '0DTE')}"] = data_0dte
+    if data_flow:
+        views["Front expiry + today's flow (estimate)"] = data_flow
     if data_all:
         views[str(data_all.get("expiration_label", "All expirations"))] = data_all
     if not views:
@@ -4087,10 +4149,31 @@ def _render_gamma_profile_panel(data_0dte, data_all, nq_now, universe_note=""):
     m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("Net GEX at spot", _fmt_dollars(data.get("total_gex", 0.0)), help="Dollar gamma per 1% move, open interest based.")
     m2.metric("Regime at spot", regime.split(" (")[0], help=regime)
-    m3.metric("Gamma Flip (OI)", flip_txt)
+    m3.metric("Gamma Flip (OI + flow)" if data.get("weight_mode") == "flow" else "Gamma Flip (OI)", flip_txt)
     m4.metric("Delta Neutral", f"{float(data.get('dn_nq', 0.0)):,.2f}" if data.get("dn_in_range", True) else "None in range")
     m5.metric("Volume Flip", f"{float(vol_flip):,.2f}" if vol_flip is not None else "None in range",
               help="Same math using today's volume instead of open interest. Shows intraday positioning that overnight OI cannot.")
+
+    projections = data.get("projections") or []
+    if projections:
+        parts = []
+        for pr in projections:
+            flip_txt_p = f"{pr['flip_nq']:,.2f}" if pr.get("flip_nq") is not None and pr.get("in_range") else "out of range"
+            parts.append(f"<b>{pr['minutes']}m</b>: flip {flip_txt_p}, net GEX at spot {_fmt_dollars(pr.get('gex_at_spot', 0.0))}")
+        st.markdown(
+            '<div class="sk-panel" style="padding:10px 14px;margin:2px 0 10px 0;font-size:13px">'
+            '<span class="sk-muted">Projected if nothing new trades, as time decay reshapes 0DTE gamma: </span>'
+            + " · ".join(parts) + "</div>",
+            unsafe_allow_html=True,
+        )
+    if data.get("weight_mode") == "flow":
+        cov = float(data.get("flow_coverage") or 0.0)
+        st.caption(
+            f"Flow view adds today's estimated customer buys and sells to overnight open interest. "
+            f"It has classified {cov:.0%} of today's volume so far; trades are signed by where they printed "
+            f"against the bid and ask, so treat it as an estimate. It is most complete when the page has been "
+            f"open since the morning."
+        )
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=nq_grid, y=[float(v) for v in prof.get("gex_oi", [])], mode="lines",
@@ -4113,7 +4196,8 @@ def _render_gamma_profile_panel(data_0dte, data_all, nq_now, universe_note=""):
     st.caption(
         f"{universe_note} Each contract's gamma is repriced with Black Scholes at every hypothetical NQ price "
         f"(own IV, time to the ET settlement). Contracts counted: {int(meta.get('contracts_in_exposure', 0)):,}; "
-        f"IV imputed: {int(meta.get('iv_imputed_count', 0)):,}. Sign convention assumes dealers are long calls and "
+        f"IV filled in: {int(meta.get('iv_imputed_count', 0)):,}; IV outliers replaced by the fitted smile: "
+        f"{int(meta.get('iv_smoothed_count', 0)):,}. Sign convention assumes dealers are long calls and "
         f"short puts, which is a simplification, not observed positioning."
     )
     st.markdown("</div></div>", unsafe_allow_html=True)
@@ -4186,6 +4270,7 @@ def _render_clean_dashboard(
     data_all=None,
     gamma_universe_note="",
     status_hook=None,
+    data_flow=None,
 ):
     alert_rows = alert_center or []
     ratio_label = str((ratio_meta or {}).get("confidence_label", "Low"))
@@ -4269,6 +4354,7 @@ def _render_clean_dashboard(
             alert_center=alert_center,
             playbook=playbook,
             status_hook=status_hook,
+            data_weekly=data_weekly,
         )
 
         _render_market_overview_visuals(
@@ -4289,7 +4375,7 @@ def _render_clean_dashboard(
             nq_day_change_pct=nq_day_change_pct,
         )
 
-        _render_gamma_profile_panel(data_0dte, data_all, nq_now, gamma_universe_note)
+        _render_gamma_profile_panel(data_0dte, data_all, nq_now, gamma_universe_note, data_flow=data_flow)
         _render_level_accuracy_panel(data_0dte, data_all, nq_now, ratio_meta)
 
         c2, c3 = st.columns([1.0, 1.0], gap="small")
@@ -5130,6 +5216,34 @@ def _render_copy_levels_widget(output_string, widget_key, label, caption=None, h
     )
 
 
+def _render_copy_levels_button(output_string, widget_key, label="Copy levels for TradingView"):
+    """Single styled button that copies the Pine Script levels string."""
+    copy_payload = html.escape(output_string)
+    safe_key = re.sub(r"[^a-zA-Z0-9_-]", "-", str(widget_key))
+    components.html(
+        f"""
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600&display=swap" rel="stylesheet">
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:10px;height:40px;font-family:Inter,system-ui,sans-serif;">
+            <span id="st-{safe_key}" style="font-size:12.5px;color:{skin.GREEN};font-weight:500;"></span>
+            <button id="btn-{safe_key}" style="background:{skin.BLUE};color:#fff;border:0;border-radius:9px;
+                padding:9px 14px;font:600 13px Inter,system-ui,sans-serif;cursor:pointer;white-space:nowrap;">{html.escape(label)}</button>
+            <textarea id="src-{safe_key}" style="position:absolute;left:-9999px;">{copy_payload}</textarea>
+        </div>
+        <script>
+            const btn = document.getElementById("btn-{safe_key}");
+            const status = document.getElementById("st-{safe_key}");
+            const src = document.getElementById("src-{safe_key}");
+            const done = () => {{ status.textContent = "Copied"; setTimeout(() => {{ status.textContent = ""; }}, 1600); }};
+            btn.addEventListener("click", async () => {{
+                try {{ await navigator.clipboard.writeText(src.value); done(); }}
+                catch (err) {{ src.select(); document.execCommand("copy"); done(); }}
+            }});
+        </script>
+        """,
+        height=44,
+    )
+
+
 def _build_generated_levels_output_string(data_0dte=None, data_weekly=None):
     daily = _extract_builder_seed(data_0dte, "d")
     weekly = _extract_builder_seed(data_weekly, "w")
@@ -5516,10 +5630,15 @@ def run_full_app():
         if df_raw is None:
             st.error("Failed to fetch options")
             st.stop()
+        # Classify volume that arrived since the last refresh as customer
+        # buys or sells (estimate of today's positioning).
+        df_raw = update_flow(df_raw, "QQQ")
 
         gamma_universe_note = "QQQ options only."
         if gamma_universe == "QQQ + NDX":
             df_ndx, ndx_chain_price = get_cboe_options("NDX")
+            if df_ndx is not None:
+                df_ndx = update_flow(df_ndx, "NDX")
             df_raw, combine_info = build_combined_chain(df_raw, cboe_price, df_ndx, ndx_chain_price)
             if combine_info.get("k"):
                 gamma_universe_note = (
@@ -5545,6 +5664,20 @@ def run_full_app():
             cboe_price=cboe_price,
             ratio_meta=ratio_meta,
         )
+        if equity_session_state() == "closed":
+            hold = held_closed_ratio(nq_now, qqq_price, _quote_timestamp_ms("QQQ"))
+            if hold:
+                ratio = hold["ratio"]
+                qqq_price_levels = hold["implied_qqq"]
+                ratio_meta = dict(ratio_meta or {})
+                ratio_meta.update(
+                    {
+                        "ratio": ratio,
+                        "ratio_levels_anchor": ratio,
+                        "ratio_mode": f"Closed hold (NQ {hold['nq_at_print']:,.2f} at QQQ's last print)",
+                        "qqq_levels_anchor": qqq_price_levels,
+                    }
+                )
         feed_status = _feed_runtime_status(
             nq_source=nq_source,
             qqq_source=qqq_source,
@@ -5559,6 +5692,7 @@ def run_full_app():
         data_weekly = None
         data_monthly = None
         data_all = None
+        data_flow = None
 
         if freeze_levels and cached_levels:
             data_0dte = cached_levels.get("data_0dte")
@@ -5578,6 +5712,13 @@ def run_full_app():
                 data_0dte = process_expiration(
                     df_raw, exp_0dte, qqq_price_levels, ratio, nq_now, options_ticker="QQQ"
                 )
+
+            if exp_0dte and "flow_tracked" in df_raw.columns:
+                exp_mask = df_raw["expiration"] == exp_0dte
+                if float(pd.to_numeric(df_raw.loc[exp_mask, "flow_tracked"], errors="coerce").fillna(0).sum()) > 0:
+                    data_flow = process_expiration(
+                        df_raw, exp_0dte, qqq_price_levels, ratio, nq_now, options_ticker="QQQ", weight_mode="flow"
+                    )
 
             if exp_weekly and exp_weekly != exp_0dte:
                 data_weekly = process_expiration(
@@ -5617,8 +5758,17 @@ def run_full_app():
                     level_log.maybe_auto_snapshot(data_0dte, "0DTE", nq_now, ratio, path=_get_secret("LEVEL_LOG_PATH", "") or None)
                     if data_all:
                         level_log.maybe_auto_snapshot(data_all, "ALL", nq_now, ratio, path=_get_secret("LEVEL_LOG_PATH", "") or None)
+                    if data_flow:
+                        level_log.maybe_auto_snapshot(data_flow, "0DTE_FLOW", nq_now, ratio, path=_get_secret("LEVEL_LOG_PATH", "") or None)
                 except Exception:
                     pass
+            # Compact chain snapshots so level changes can be backtested later.
+            try:
+                level_log.maybe_write_chain_snapshot(
+                    df_raw, qqq_price_levels, nq_now, ratio, path=_get_secret("LEVEL_LOG_PATH", "") or None
+                )
+            except Exception:
+                pass
 
         market_data = get_market_overview_yahoo()
         event_risk = get_event_risk_snapshot(finnhub_key, hours_ahead=24)
@@ -5702,6 +5852,7 @@ def run_full_app():
         data_all=data_all,
         gamma_universe_note=gamma_universe_note,
         status_hook=_status_hook,
+        data_flow=data_flow,
     )
 
     options_src = str(((data_0dte or {}).get("data_meta", {}) or {}).get("options_source", "Options"))

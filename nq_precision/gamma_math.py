@@ -234,6 +234,91 @@ def fill_missing_iv(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def smooth_iv(df: pd.DataFrame, spot: float, max_abs_z: float = 3.5, min_points: int = 6) -> pd.DataFrame:
+    """Fit a smooth volatility smile per expiration (and underlying) and use it
+    to replace junk IVs.
+
+    The smile is fitted in normalized moneyness z = ln(K/S) / (atm_iv * sqrt(T))
+    with a quadratic, using out of the money contracts (calls above spot, puts
+    below) that have a bid, since those quotes carry the cleanest IV. Two passes
+    drop fit points more than 3.5 robust standard deviations off. A contract's
+    IV is then replaced by the fitted value when it is missing or sits further
+    than max(30% of the fit, 4 robust sd) from the curve. Contracts outside the
+    fitted z range are left alone. Adds ``iv_raw`` and ``iv_smoothed``.
+    """
+    out = df.copy()
+    if out.empty or "T" not in out.columns:
+        out["iv_smoothed"] = False
+        return out
+    iv = pd.to_numeric(out.get("iv", np.nan), errors="coerce")
+    iv = iv.where((iv > 0.01) & (iv < 5.0), np.nan)
+    out["iv"] = iv
+    out["iv_raw"] = iv
+    out["iv_smoothed"] = False
+    has_bid = pd.to_numeric(out["bid"], errors="coerce").fillna(0) > 0 if "bid" in out.columns else pd.Series(True, index=out.index)
+    keys = [out["expiration"].astype(str)]
+    if "underlying" in out.columns:
+        keys.append(out["underlying"].astype(str))
+    for _, idx in out.groupby(keys).groups.items():
+        g = out.loc[idx]
+        T = float(np.nanmedian(g["T"].to_numpy(dtype=float)))
+        if not np.isfinite(T) or T <= 0:
+            continue
+        valid = g[g["iv"].notna()]
+        if valid.empty:
+            continue
+        near = valid.iloc[(valid["strike"] - spot).abs().argsort()[:4]]
+        atm_iv = float(near["iv"].median())
+        if not np.isfinite(atm_iv) or atm_iv <= 0:
+            continue
+        z = np.log(g["strike"].to_numpy(dtype=float) / float(spot)) / (atm_iv * np.sqrt(T))
+        calls = is_call_mask(g)
+        otm = np.where(calls, g["strike"].to_numpy() >= spot, g["strike"].to_numpy() < spot)
+        fit_mask = otm & g["iv"].notna().to_numpy() & (np.abs(z) <= max_abs_z) & has_bid.loc[idx].to_numpy()
+        if fit_mask.sum() < min_points:
+            continue
+        zf, vf = z[fit_mask], g["iv"].to_numpy(dtype=float)[fit_mask]
+        keep = np.ones(len(zf), dtype=bool)
+        coefs, sd = None, None
+        for _ in range(3):
+            if keep.sum() < min_points:
+                break
+            coefs = np.polyfit(zf[keep], vf[keep], 2)
+            resid = vf - np.polyval(coefs, zf)
+            mad = np.median(np.abs(resid[keep] - np.median(resid[keep])))
+            sd = max(1.4826 * mad, 0.005)
+            new_keep = np.abs(resid) <= 3.5 * sd
+            if (new_keep == keep).all():
+                break
+            keep = new_keep
+        if coefs is None:
+            continue
+        lo, hi = float(zf[keep].min()), float(zf[keep].max())
+        fitted = np.clip(np.polyval(coefs, z), 0.03, 5.0)
+        in_range = (z >= lo) & (z <= hi)
+        cur = g["iv"].to_numpy(dtype=float)
+        bad = in_range & (np.isnan(cur) | (np.abs(cur - fitted) > np.maximum(0.30 * fitted, 4.0 * sd)))
+        if bad.any():
+            out.loc[idx[bad], "iv"] = fitted[bad]
+            out.loc[idx[bad], "iv_smoothed"] = True
+    return out
+
+
+def flow_adjusted_open_interest(df: pd.DataFrame, flow_col: str = "flow_net") -> pd.Series:
+    """Open interest re-weighted for today's estimated customer flow.
+
+    Under the dealers long calls / short puts convention, a call contributes
+    +gamma * weight and a put -gamma * weight. When customers buy calls,
+    dealers sell them, so the call weight drops by the net customer buys; when
+    customers buy puts, dealers are shorter puts, so the put weight rises.
+    Weights can go negative (dealers net short those calls).
+    """
+    oi = pd.to_numeric(df.get("open_interest", 0.0), errors="coerce").fillna(0.0)
+    flow = pd.to_numeric(df[flow_col], errors="coerce").fillna(0.0) if flow_col in df.columns else 0.0
+    calls = pd.Series(is_call_mask(df), index=df.index)
+    return pd.Series(np.where(calls, oi - flow, oi + flow), index=df.index)
+
+
 def prepare_chain(df: pd.DataFrame, spot: float, now: datetime | None = None,
                   r: float = DEFAULT_RATE, q: float = DEFAULT_DIVIDEND_YIELD) -> pd.DataFrame:
     """Add T, imputed IV, gamma at current spot and dollar GEX columns.
@@ -254,7 +339,10 @@ def prepare_chain(df: pd.DataFrame, spot: float, now: datetime | None = None,
     if out.empty:
         out["GEX"] = []
         return out
+    out = smooth_iv(out, spot)
+    smoothed = out["iv_smoothed"].copy()
     out = fill_missing_iv(out)
+    out["iv_smoothed"] = smoothed
     if "gamma" in out.columns:
         out["gamma_feed"] = pd.to_numeric(out["gamma"], errors="coerce").fillna(0.0)
     if "delta" in out.columns:
@@ -290,7 +378,7 @@ def rescale_chain(df: pd.DataFrame, k: float, label: str) -> pd.DataFrame:
     for col in ("strike", "bid", "ask", "last", "mark"):
         if col in out.columns:
             out[col] = pd.to_numeric(out[col], errors="coerce").fillna(0.0) * k
-    for col in ("open_interest", "volume"):
+    for col in ("open_interest", "volume", "flow_net", "flow_tracked"):
         if col in out.columns:
             out[col] = pd.to_numeric(out[col], errors="coerce").fillna(0.0) / k
     if "gamma" in out.columns:
@@ -319,7 +407,7 @@ def _profile(df: pd.DataFrame, grid: np.ndarray, kind: str, weight_col: str,
     sig = df["iv"].to_numpy(dtype=float)
     w = pd.to_numeric(df[weight_col], errors="coerce").fillna(0.0).to_numpy(dtype=float)
     calls = is_call_mask(df)
-    keep = (w > 0) & (T > 0) & (sig > 0) & (K > 0)
+    keep = (w != 0) & (T > 0) & (sig > 0) & (K > 0)
     K, T, sig, w, calls = K[keep], T[keep], sig[keep], w[keep], calls[keep]
     S = grid[None, :]
     for start in range(0, len(K), chunk):
@@ -388,3 +476,29 @@ def solve_level(df, spot, kind: str, weight_col="open_interest", pcts=(0.08, 0.2
         return {"level": float(spot), "in_range": False, "search_pct": None, "grid": np.array([]), "values": np.array([])}
     idx = int(np.argmin(np.abs(last_vals)))
     return {"level": float(last_grid[idx]), "in_range": False, "search_pct": pcts[-1], "grid": last_grid, "values": last_vals}
+
+
+def project_levels(df: pd.DataFrame, spot: float, minutes_ahead=(30, 60), weight_col="open_interest",
+                   r: float = DEFAULT_RATE, q: float = DEFAULT_DIVIDEND_YIELD) -> list[dict]:
+    """Where the gamma flip and net gamma at spot will be if nothing trades.
+
+    Only time moves: every contract's time to expiry is shortened, contracts
+    that expire in the window drop out, and the profile is repriced.
+    """
+    out = []
+    if df is None or len(df) == 0 or "T" not in df.columns:
+        return out
+    for m in minutes_ahead:
+        shifted = df.copy()
+        shifted["T"] = shifted["T"] - float(m) / MINUTES_PER_YEAR
+        shifted = shifted[shifted["T"] > 0].copy()
+        floor = MIN_MINUTES_TO_EXPIRY / MINUTES_PER_YEAR
+        shifted["T"] = shifted["T"].clip(lower=floor)
+        if shifted.empty:
+            out.append({"minutes": int(m), "flip": None, "in_range": False, "gex_at_spot": 0.0, "contracts": 0})
+            continue
+        sol = solve_level(shifted, spot, "gamma", weight_col=weight_col, r=r, q=q)
+        gex_spot = float(gamma_profile(shifted, np.array([float(spot)]), weight_col, r, q)[0])
+        out.append({"minutes": int(m), "flip": float(sol["level"]), "in_range": bool(sol["in_range"]),
+                    "gex_at_spot": gex_spot, "contracts": int(len(shifted))})
+    return out
