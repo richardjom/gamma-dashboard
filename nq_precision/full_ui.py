@@ -4017,14 +4017,21 @@ def _render_nq_overview_chart(nq_data, data, nq_now):
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
+def _measured_hold_rates_cached(log_path, view="0DTE"):
+    """Hold rate per level type from the accuracy log, refreshed hourly.
+    Raises on failure so a bad fetch is not cached for an hour."""
+    log = level_log.read_log(log_path or None)
+    if log.empty:
+        return {}
+    bars = get_intraday_history("NQ=F", days=45, interval="5m")
+    if bars is None or bars.empty:
+        raise RuntimeError("NQ bars unavailable")
+    return level_log.hold_rates_by_level(level_log.score_levels(log, bars), view=view)
+
+
 def _measured_hold_rates(log_path, view="0DTE"):
-    """Hold rate per level type from the accuracy log, refreshed hourly."""
     try:
-        log = level_log.read_log(log_path or None)
-        if log.empty:
-            return {}
-        bars = get_intraday_history("NQ=F", days=45, interval="5m")
-        return level_log.hold_rates_by_level(level_log.score_levels(log, bars), view=view)
+        return _measured_hold_rates_cached(log_path, view)
     except Exception:
         return {}
 
