@@ -204,11 +204,14 @@ def fill_missing_iv(df: pd.DataFrame) -> pd.DataFrame:
     if out.empty:
         out["iv_imputed"] = False
         return out
+    orig_index = out.index
+    out = out.reset_index(drop=True)
     iv = pd.to_numeric(out.get("iv", 0.0), errors="coerce").fillna(0.0)
     iv = iv.where((iv > 0.01) & (iv < 5.0), np.nan)
     out["iv"] = iv
     out["iv_imputed"] = iv.isna()
     if not out["iv_imputed"].any():
+        out.index = orig_index
         return out
 
     def _interp(group, key_cols):
@@ -231,6 +234,7 @@ def fill_missing_iv(df: pd.DataFrame) -> pd.DataFrame:
             out.loc[idx, "iv"] = _interp(sub, None)
     median_iv = float(out["iv"].median()) if out["iv"].notna().any() else 0.20
     out["iv"] = out["iv"].fillna(median_iv)
+    out.index = orig_index
     return out
 
 
@@ -250,6 +254,9 @@ def smooth_iv(df: pd.DataFrame, spot: float, max_abs_z: float = 3.5, min_points:
     if out.empty or "T" not in out.columns:
         out["iv_smoothed"] = False
         return out
+    # Positional work below needs unique row labels; restore the caller's index at the end.
+    orig_index = out.index
+    out = out.reset_index(drop=True)
     iv = pd.to_numeric(out.get("iv", np.nan), errors="coerce")
     iv = iv.where((iv > 0.01) & (iv < 5.0), np.nan)
     out["iv"] = iv
@@ -301,6 +308,7 @@ def smooth_iv(df: pd.DataFrame, spot: float, max_abs_z: float = 3.5, min_points:
         if bad.any():
             out.loc[idx[bad], "iv"] = fitted[bad]
             out.loc[idx[bad], "iv_smoothed"] = True
+    out.index = orig_index
     return out
 
 

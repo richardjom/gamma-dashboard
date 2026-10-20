@@ -651,8 +651,10 @@ def classify_trade_side(last, bid, ask, tick=None):
 
 @st.cache_resource
 def _flow_store():
-    """Process wide, shared across browser sessions."""
-    return {"date": None, "contracts": {}}
+    """Process wide, shared across browser sessions; guard with its lock."""
+    import threading
+
+    return {"date": None, "contracts": {}, "lock": threading.Lock()}
 
 
 def _flow_store_path():
@@ -674,6 +676,14 @@ def update_flow(df, underlying, store=None, now_et=None, persist=True):
         return df
     now_et = now_et or gm.now_et()
     store = store if store is not None else _flow_store()
+    lock = store.get("lock")
+    if lock is not None:
+        with lock:
+            return _update_flow_locked(df, underlying, store, now_et, persist)
+    return _update_flow_locked(df, underlying, store, now_et, persist)
+
+
+def _update_flow_locked(df, underlying, store, now_et, persist):
     today = now_et.date().isoformat()
     if store.get("date") != today:
         store["date"] = today
@@ -857,7 +867,6 @@ def get_intraday_history(symbol="NQ=F", days=45, interval="5m"):
         return pd.DataFrame()
 
 
-@st.cache_data(ttl=10)
 def equity_session_state(now_et=None):
     """QQQ trading state in ET: "regular" 09:30 to 16:00, "extended" 04:00 to
     09:30 and 16:00 to 20:00, otherwise "closed". Holidays are not modeled."""
@@ -881,7 +890,9 @@ def nq_price_at(timestamp_ms, symbol="NQ=F"):
         if bars is None or bars.empty:
             return None
         ts = pd.Timestamp(int(timestamp_ms), unit="ms", tz="UTC").tz_convert(gm.ET)
-        prior = bars[bars.index <= ts]
+        # Bars are labeled by their start time, so a bar has fully closed by
+        # the print only if it ends (start + 5 minutes) at or before it.
+        prior = bars[bars.index <= ts - pd.Timedelta(minutes=5)]
         if prior.empty:
             return None
         return float(prior["Close"].iloc[-1])
@@ -913,6 +924,7 @@ def held_closed_ratio(nq_now, qqq_price, qqq_ts_ms, nq_at_fn=None):
     return {"ratio": float(ratio), "implied_qqq": float(nq_now / ratio), "nq_at_print": float(nq_at)}
 
 
+@st.cache_data(ttl=10)
 def get_qqq_price_with_source(finnhub_key):
     # Prefer Schwab so NQ and QQQ can come from the same venue/timebase.
     quotes = _get_schwab_quotes(["QQQ"])
@@ -923,7 +935,7 @@ def get_qqq_price_with_source(finnhub_key):
             if key in quotes:
                 price = _extract_quote_price(quotes[key])
                 ts = _extract_quote_timestamp_ms(quotes[key])
-                recent = ts and (int(time.time() * 1000) - int(ts)) <= 4 * 24 * 3600 * 1000
+                recent = ts and (int(time.time() * 1000) - int(ts)) <= 5 * 24 * 3600 * 1000
                 if price and recent:
                     _set_quote_meta("QQQ", "Schwab (last print)", ts)
                     return float(price), "Schwab (last print)"
